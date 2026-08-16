@@ -1,0 +1,287 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/mistweaverco/syncsh/internal/app"
+	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/mistweaverco/syncsh/internal/importers"
+	"github.com/mistweaverco/syncsh/internal/search"
+	"github.com/mistweaverco/syncsh/internal/shell"
+	"github.com/mistweaverco/syncsh/internal/stats"
+	"github.com/mistweaverco/syncsh/internal/tui"
+	"github.com/spf13/cobra"
+)
+
+type searchOptions struct {
+	Query       string
+	Cwd         string
+	Host        string
+	Shell       string
+	Session     string
+	Exit        int
+	ExitSet     bool
+	Limit       int
+	Exact       bool
+	Interactive bool
+}
+
+func openApp() (*app.App, error) {
+	a, err := app.Open()
+	if err != nil {
+		return nil, err
+	}
+	if err := a.EnsureLocalDevice(); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
+	return a, nil
+}
+
+func runTUI(cmd *cobra.Command, _ []string) error {
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	store := history.NewStore(a.DB)
+	entries, err := store.List(history.Filter{Limit: 5000, Unique: true})
+	if err != nil {
+		return err
+	}
+	return tui.RunOpts(entries, tui.Options{
+		Delete: func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+	}, cmd.OutOrStdout())
+}
+
+func runSearch(cmd *cobra.Command, opts searchOptions) error {
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	f := history.Filter{
+		Host:    opts.Host,
+		Shell:   opts.Shell,
+		Session: opts.Session,
+		Limit:   5000,
+		Unique:  opts.Interactive,
+	}
+	if !opts.Interactive {
+		f.Cwd = opts.Cwd
+	}
+	if opts.Exact {
+		f.Query = opts.Query
+	}
+	if opts.ExitSet {
+		v := opts.Exit
+		f.Exit = &v
+	}
+	store := history.NewStore(a.DB)
+	entries, err := store.List(f)
+	if err != nil {
+		return err
+	}
+	if opts.Interactive {
+		cwd := opts.Cwd
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		return tui.RunOpts(entries, tui.Options{
+			Query:  opts.Query,
+			Cwd:    cwd,
+			Widget: true,
+			Delete: func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+		}, cmd.OutOrStdout())
+	}
+	results := search.Rank(opts.Query, entries, opts.Exact)
+	n := opts.Limit
+	if n <= 0 || n > len(results) {
+		n = len(results)
+	}
+	for _, r := range results[:n] {
+		fmt.Fprintln(cmd.OutOrStdout(), r.Entry.Command)
+	}
+	return nil
+}
+
+func runStats(cmd *cobra.Command, _ []string) error {
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	st, err := history.NewStore(a.DB).Stats()
+	if err != nil {
+		return err
+	}
+	stats.Write(cmd.OutOrStdout(), st)
+	return nil
+}
+
+func runSuggest(cmd *cobra.Command, prefix, _ string) error {
+	if prefix == "" {
+		return nil
+	}
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	s, err := history.NewStore(a.DB).SuggestPrefix(prefix)
+	if err != nil {
+		return err
+	}
+	if s != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), s)
+	}
+	return nil
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	bin, err := os.Executable()
+	if err != nil {
+		bin = "syncsh"
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	out, err := shell.Integration(args[0], bin, shell.Options{
+		SuggestEnabled: cfg.Suggest.IsEnabled(),
+		SuggestAccept:  cfg.Suggest.AcceptKeys(),
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.OutOrStdout(), out)
+	return nil
+}
+
+func runHistoryStart(cmd *cobra.Command, _ []string) error {
+	command, _ := cmd.Flags().GetString("command")
+	cwd, _ := cmd.Flags().GetString("cwd")
+	session, _ := cmd.Flags().GetString("session")
+	sh, _ := cmd.Flags().GetString("shell")
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	id, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	host, _ := os.Hostname()
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	e := history.Entry{
+		ID:        id.String(),
+		Command:   command,
+		StartTS:   time.Now().UTC(),
+		Cwd:       cwd,
+		SessionID: session,
+		Hostname:  host,
+		DeviceID:  a.Config.DeviceID,
+		Shell:     sh,
+	}
+	if _, err := history.NewStore(a.DB).Insert(e); err != nil {
+		return err
+	}
+	if err := a.EnqueueHistoryCreated(e); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), e.ID)
+	return nil
+}
+
+func runHistoryEnd(cmd *cobra.Command, _ []string) error {
+	id, _ := cmd.Flags().GetString("id")
+	exit, _ := cmd.Flags().GetInt("exit")
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	return history.NewStore(a.DB).Complete(id, time.Now().UTC(), exit)
+}
+
+func runImportHistfile(cmd *cobra.Command, args []string) error {
+	path := ""
+	if len(args) > 0 {
+		path = args[0]
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		path = filepath.Join(home, ".zsh_history")
+	}
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	recs, err := importers.ReadHistfile(path, "auto")
+	if err != nil {
+		return err
+	}
+	kind := importers.DetectKind(path, "")
+	entries := importers.ToEntries(recs, a.Config.DeviceID, kind)
+	return importEntries(cmd, a, entries)
+}
+
+func runImportAtuin(cmd *cobra.Command, args []string) error {
+	path := ""
+	if len(args) > 0 {
+		path = args[0]
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		path = filepath.Join(home, ".local", "share", "atuin", "history.db")
+	}
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	entries, err := importers.ImportAtuin(path, a.Config.DeviceID)
+	if err != nil {
+		return err
+	}
+	return importEntries(cmd, a, entries)
+}
+
+func importEntries(cmd *cobra.Command, a *app.App, entries []history.Entry) error {
+	store := history.NewStore(a.DB)
+	var inserted int
+	for _, e := range entries {
+		if e.ID == "" {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			e.ID = id.String()
+		}
+		ok, err := store.Insert(e)
+		if err != nil {
+			return err
+		}
+		if ok {
+			inserted++
+			if err := a.EnqueueHistoryCreated(e); err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "imported %d new of %d records\n", inserted, len(entries))
+	return nil
+}

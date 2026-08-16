@@ -1,0 +1,13 @@
+/.direnv/
+/syncsh
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+coverage.html
+.idea/
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
