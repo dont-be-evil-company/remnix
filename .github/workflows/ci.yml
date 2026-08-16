@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Test
+        run: |
+          touch CHANGELOG.md && \
+            echo "# Changelog" > CHANGELOG.md
+          touch internal/changelog/changelog.md && \
+            echo "# Changelog" > internal/changelog/changelog.md && \
+          go test ./...
+      - name: Binary size
+        run: |
+          CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/remnix ./cmd/remnix
+          ls -lh /tmp/remnix
+          stat -c 'remnix binary size: %s bytes' /tmp/remnix
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest

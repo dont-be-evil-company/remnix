@@ -1,0 +1,553 @@
+package tui
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/search"
+)
+
+type Options struct {
+	Query          string
+	Cwd            string
+	DeviceID       string
+	SessionID      string
+	Widget         bool
+	OverlayPercent int
+	ResultFile     string
+	Delete         func(history.Entry) error
+	Theme          Theme
+}
+
+type model struct {
+	input            textinput.Model
+	all              []history.Entry
+	visible          []history.Entry
+	cursor           int
+	cwd              string
+	deviceID         string
+	sessionID        string
+	cwdOnly          bool
+	selected         string
+	print            bool
+	run              bool
+	quitting         bool
+	width            int
+	height           int
+	overlay          bool
+	overlayPercent   int
+	overlayY         int
+	overlayH         int
+	overlayCursorRow int
+	overlayOut       io.Writer
+	delete           func(history.Entry) error
+	status           string
+	theme            Theme
+}
+
+func applyThemeInput(ti *textinput.Model, th Theme) {
+	st := ti.Styles()
+	st.Focused.Prompt = lipgloss.NewStyle()
+	st.Focused.Placeholder = th.Muted.Italic(true)
+	st.Focused.Text = th.Text
+	ti.SetStyles(st)
+}
+
+func New(entries []history.Entry, opts Options) model {
+	th := opts.Theme.OrDefault()
+	ti := textinput.New()
+	ti.Placeholder = "type to search"
+	ti.Prompt = ""
+	ti.SetValue(opts.Query)
+	ti.Focus()
+	applyThemeInput(&ti, th)
+	m := model{
+		input:          ti,
+		all:            entries,
+		cwd:            opts.Cwd,
+		deviceID:       opts.DeviceID,
+		sessionID:      opts.SessionID,
+		width:          80,
+		height:         24,
+		overlayPercent: opts.OverlayPercent,
+		delete:         opts.Delete,
+		theme:          th,
+	}
+	m.refresh()
+	return m
+}
+
+func (m *model) EnableOverlay(st OverlayState) {
+	m.overlay = true
+	m.overlayOut = st.Out
+	m.overlayCursorRow = st.CursorRow
+	if st.TermCols > 0 {
+		m.width = st.TermCols
+	}
+	if st.TermRows > 0 {
+		m.height = st.TermRows
+	}
+	m.overlayH = st.RectH
+	if m.overlayH < 1 || m.overlayH > m.height {
+		m.overlayH = overlayRows(m.height, m.overlayPercent)
+	}
+	m.overlayY = st.RectY
+	if m.overlayY < 0 || m.overlayY+m.overlayH > m.height {
+		m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
+	}
+	m.input.SetWidth(max(8, m.width-14))
+}
+
+func Filter(entries []history.Entry, query, cwd string, cwdOnly bool) []history.Entry {
+	return FilterWith(entries, query, search.Context{Cwd: cwd}, cwdOnly)
+}
+
+func FilterWith(entries []history.Entry, query string, ctx search.Context, cwdOnly bool) []history.Entry {
+	src := entries
+	if cwdOnly && ctx.Cwd != "" {
+		src = make([]history.Entry, 0, len(entries))
+		for _, e := range entries {
+			if e.Cwd == ctx.Cwd {
+				src = append(src, e)
+			}
+		}
+	}
+	ranked := search.RankWith(query, src, false, ctx)
+	out := make([]history.Entry, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.Entry
+	}
+	return out
+}
+
+func (m *model) refresh() {
+	m.refilter()
+	m.cursor = len(m.visible) - 1
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
+func (m *model) refilter() {
+	ranked := FilterWith(m.all, m.input.Value(), search.Context{Cwd: m.cwd, DeviceID: m.deviceID, SessionID: m.sessionID}, m.cwdOnly)
+	m.visible = reverseEntries(ranked)
+}
+
+func (m *model) clampCursor() {
+	if len(m.visible) == 0 {
+		m.cursor = 0
+		return
+	}
+	if m.cursor >= len(m.visible) {
+		m.cursor = len(m.visible) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
+func (m *model) deleteSelected() {
+	if len(m.visible) == 0 || m.cursor >= len(m.visible) {
+		return
+	}
+	e := m.visible[m.cursor]
+	if m.delete != nil {
+		if err := m.delete(e); err != nil {
+			m.status = err.Error()
+			return
+		}
+	}
+	m.status = ""
+	kept := make([]history.Entry, 0, len(m.all))
+	for _, x := range m.all {
+		if x.Command != e.Command {
+			kept = append(kept, x)
+		}
+	}
+	m.all = kept
+	m.refilter()
+	m.clampCursor()
+}
+
+func reverseEntries(in []history.Entry) []history.Entry {
+	out := make([]history.Entry, len(in))
+	for i, e := range in {
+		out[len(in)-1-i] = e
+	}
+	return out
+}
+
+func (m model) Init() tea.Cmd {
+	return m.input.Focus()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = max(1, msg.Width)
+		if m.overlay {
+			m.height = max(1, msg.Height)
+			m.overlayH = overlayRows(m.height, m.overlayPercent)
+			m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
+		} else {
+			m.height = max(1, msg.Height)
+		}
+		m.input.SetWidth(max(8, m.width-14))
+		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		return m, nil
+	case tea.KeyReleaseMsg:
+		return m, nil
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			m.quitting = true
+			m.print = false
+			m.selected = ""
+			return m, tea.Quit
+		case "enter":
+			m.accept(true)
+			return m, tea.Quit
+		case "ctrl+o":
+			m.accept(false)
+			return m, tea.Quit
+		case "up", "ctrl+p":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+			return m, nil
+		case "down", "ctrl+n":
+			if m.cursor+1 < len(m.visible) {
+				m.cursor++
+			}
+			return m, nil
+		case "tab":
+			m.cwdOnly = !m.cwdOnly
+			m.refresh()
+			return m, nil
+		case "ctrl+d":
+			m.deleteSelected()
+			return m, nil
+		}
+	}
+	prev := m.input.Value()
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != prev {
+		m.refresh()
+	}
+	return m, cmd
+}
+
+func (m *model) accept(run bool) {
+	if len(m.visible) > 0 && m.cursor < len(m.visible) {
+		m.selected = m.visible[m.cursor].Command
+		m.print = true
+		m.run = run
+	}
+	m.quitting = true
+}
+
+func (m model) View() tea.View {
+	if m.quitting || m.print {
+		return tea.NewView("")
+	}
+	w := max(1, m.width)
+	h := max(1, m.height)
+	if m.overlay {
+		h = max(1, m.overlayH)
+	}
+	// Leave one column so a full-width line plus '\n' does not wrap
+	// (terminals advance to the next row after the last column).
+	inner := max(1, w-1)
+
+	header := clampLine(m.renderHeader(inner), inner)
+	help := clampLine(m.renderHelp(), inner)
+	input := clampLine(m.renderInput(), inner)
+	rule := m.theme.Rule.Render(strings.Repeat("─", inner))
+
+	chrome := lipgloss.Height(header) + 1 + lipgloss.Height(help) + lipgloss.Height(input)
+	listH := h - chrome
+	if listH < 0 {
+		listH = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteByte('\n')
+	b.WriteString(rule)
+	b.WriteByte('\n')
+	if listH > 0 {
+		b.WriteString(m.renderList(inner, listH))
+	}
+	b.WriteString(help)
+	b.WriteByte('\n')
+	b.WriteString(input)
+
+	v := tea.NewView(b.String())
+	// Overlay is Atuin Viewport::Fixed: we CUP the popup ourselves.
+	// Fullscreen (no overlay) uses the alt-screen, like Viewport::Fullscreen.
+	v.AltScreen = !m.overlay
+	if m.overlay {
+		drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+	}
+	return v
+}
+
+func clampLine(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	return ansi.Truncate(s, w, "...")
+}
+
+func (m model) renderHeader(w int) string {
+	scope := "all directories"
+	if m.cwdOnly {
+		scope = "this directory"
+		if m.cwd != "" {
+			scope += "  " + m.cwd
+		}
+	}
+	left := m.theme.Title.Render("remnix") + "  " + m.theme.Muted.Render(scope)
+	right := m.theme.Muted.Render(fmt.Sprintf("%s unique", formatCount(len(m.visible))))
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+func (m model) renderHelp() string {
+	key := func(k, label string) string {
+		return m.theme.HelpKey.Render(k) + m.theme.Help.Render(" "+label)
+	}
+	if m.status != "" {
+		return m.theme.Failed.Render(m.status)
+	}
+	return key("enter", "run") + m.theme.Help.Render("  ·  ") +
+		key("ctrl+o", "edit") + m.theme.Help.Render("  ·  ") +
+		key("tab", "cwd") + m.theme.Help.Render("  ·  ") +
+		key("ctrl+d", "delete") + m.theme.Help.Render("  ·  ") +
+		key(m.theme.Move(), "move") + m.theme.Help.Render("  ·  ") +
+		key("esc", "cancel")
+}
+
+func (m model) renderInput() string {
+	badge := "[ ALL ]"
+	if m.cwdOnly {
+		badge = "[ DIR ]"
+	}
+	return m.theme.Badge.Render(badge) + " " + m.input.View()
+}
+
+func (m model) renderList(w, listH int) string {
+	if len(m.visible) == 0 {
+		pad := max(0, listH-1)
+		return strings.Repeat("\n", pad) + m.theme.Muted.Render("  no matches") + "\n"
+	}
+	start, end := m.listWindow(listH)
+	now := time.Now()
+	var b strings.Builder
+	for i := 0; i < listH-(end-start); i++ {
+		b.WriteByte('\n')
+	}
+	for i := start; i < end; i++ {
+		b.WriteString(clampLine(m.renderRow(m.visible[i], i == m.cursor, w, now), w))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func (m model) listWindow(listH int) (start, end int) {
+	n := len(m.visible)
+	if n == 0 {
+		return 0, 0
+	}
+	if listH >= n {
+		return 0, n
+	}
+	end = m.cursor + 1
+	start = end - listH
+	if start < 0 {
+		start = 0
+		end = listH
+	}
+	if end > n {
+		end = n
+		start = n - listH
+	}
+	return start, end
+}
+
+func (m model) renderRow(e history.Entry, selected bool, w int, now time.Time) string {
+	durStyle := m.theme.Duration
+	if failed(e) {
+		durStyle = m.theme.Failed
+	}
+	marker := " "
+	if selected {
+		marker = m.theme.Accent.Render(m.theme.Cursor())
+	}
+	dur := alignRight(durStyle.Render(formatDuration(e.DurationMs)), durCol)
+	rel := alignRight(m.theme.Time.Render(formatRelative(e.StartTS, now)), relCol)
+	prefix := alignRight(marker, markCol) + " " + dur + "  " + rel + "  "
+	remain := w - lipgloss.Width(prefix)
+	if remain < 8 {
+		remain = 8
+	}
+	cmdText := strings.ReplaceAll(strings.ReplaceAll(e.Command, "\r", ""), "\n", " ")
+	cmd := ansi.Truncate(HighlightCommandTheme(m.theme, cmdText), remain, "...")
+	if selected {
+		cmd = lipgloss.NewStyle().Bold(true).Render(cmd)
+	}
+	return prefix + cmd
+}
+
+const (
+	markCol = 1
+	durCol  = 6
+	relCol  = 8
+)
+
+func alignRight(s string, n int) string {
+	w := lipgloss.Width(s)
+	if w > n {
+		return ansi.Truncate(s, n, "")
+	}
+	if w < n {
+		return strings.Repeat(" ", n-w) + s
+	}
+	return s
+}
+
+func formatCount(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if n < 1000 {
+		return s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func (m model) SelectedCommand() (string, bool) {
+	if !m.print || m.selected == "" {
+		return "", false
+	}
+	return m.selected, true
+}
+
+func (m model) RunSelected() bool {
+	return m.print && m.run
+}
+
+// AcceptPrefix is printed before the selected command in widget mode so the
+// shell integration can execute it (Atuin's __atuin_accept__: protocol).
+const AcceptPrefix = "__remnix_accept__:"
+
+// ContinuePrefix means the shell should insert the command and reopen the
+// suggest overlay with fresh completions for that prefix.
+const ContinuePrefix = "__remnix_continue__:"
+
+// FormatSelection is the widget RPC payload: accept-prefix when Enter should
+// run the command. No trailing newline (NUL fields keep it).
+func FormatSelection(cmd string, run bool) string {
+	if run {
+		return AcceptPrefix + cmd
+	}
+	return cmd
+}
+
+func WriteSelection(out io.Writer, cmd string, run bool) {
+	fmt.Fprintln(out, FormatSelection(cmd, run))
+}
+
+func writeSelectionTo(out io.Writer, resultFile, cmd string, run bool) error {
+	if resultFile == "" {
+		WriteSelection(out, cmd, run)
+		return nil
+	}
+	f, err := os.OpenFile(resultFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	WriteSelection(f, cmd, run)
+	return nil
+}
+
+func Run(entries []history.Entry, query string, out io.Writer) error {
+	return RunOpts(entries, Options{Query: query}, out)
+}
+
+func RunOpts(entries []history.Entry, opts Options, out io.Writer) error {
+	m := New(entries, opts)
+	var (
+		p        *tea.Program
+		cleanup  func()
+		err      error
+		progOpts []tea.ProgramOption
+	)
+	if opts.Widget {
+		p, cleanup, err = widgetProgram(&m, func(termRows int) int {
+			return overlayRows(termRows, opts.OverlayPercent)
+		})
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+	} else {
+		p = tea.NewProgram(m, progOpts...)
+	}
+	final, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if got, ok := final.(model); ok {
+		if cmd, ok := got.SelectedCommand(); ok {
+			return writeWidgetSelection(out, opts, cmd, got.RunSelected())
+		}
+	} else if got, ok := final.(*model); ok {
+		if cmd, ok := got.SelectedCommand(); ok {
+			return writeWidgetSelection(out, opts, cmd, got.RunSelected())
+		}
+	}
+	return nil
+}
+
+// writeWidgetSelection matches Atuin: TUI on stdout, selected command on
+// stderr so the shell fd-swap can capture it. --result-file is for nushell.
+func writeWidgetSelection(out io.Writer, opts Options, cmd string, run bool) error {
+	if opts.ResultFile != "" {
+		return writeSelectionTo(out, opts.ResultFile, cmd, opts.Widget && run)
+	}
+	if opts.Widget {
+		return writeSelectionTo(os.Stderr, "", cmd, run)
+	}
+	return writeSelectionTo(out, "", cmd, run)
+}
+
+func OpenTTY() (in *os.File, out *os.File, closeFn func(), err error) {
+	return openTTY()
+}

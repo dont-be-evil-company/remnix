@@ -1,0 +1,105 @@
+---
+name: Deploy Website
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  deploy-web:
+    name: Deploy website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve previous release tag
+        id: prev_tag
+        run: |
+          set -euo pipefail
+          CURRENT="${GITHUB_REF_NAME}"
+          PREV="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -vxF "${CURRENT}" | head -n1 || true)"
+          echo "previous=${PREV}" >> "${GITHUB_OUTPUT}"
+          echo "Current tag: ${CURRENT}"
+          echo "Previous tag: ${PREV:-<none>}"
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        if: steps.prev_tag.outputs.previous != ''
+        with:
+          base: ${{ steps.prev_tag.outputs.previous }}
+          ref: ${{ github.sha }}
+          filters: |
+            web:
+              - '.github/workflows/web.yaml'
+              - 'web/**'
+              - 'config.schema.json'
+              - 'logo.png'
+
+      - name: Decide whether to deploy
+        id: should_deploy
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" \
+             || -z "${{ steps.prev_tag.outputs.previous }}" \
+             || "${{ steps.changes.outputs.web }}" == "true" ]]; then
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            echo "Deploying website"
+          else
+            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+            echo "Skipping deploy (no web/schema changes since ${{ steps.prev_tag.outputs.previous }})"
+          fi
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Copy synced assets to website
+        run: |
+          cp config.schema.json web/static/config.schema.json
+          cp logo.png web/static/logo.png
+          cp logo.png web/static/favicon.png
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Install dependencies
+        working-directory: web
+        run: pnpm install
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Build website
+        working-directory: web
+        run: pnpm build
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/build
+
+      - if: steps.should_deploy.outputs.deploy == 'true'
+        name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

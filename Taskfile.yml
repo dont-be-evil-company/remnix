@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+---
+version: '3'
+
+tasks:
+  default:
+    desc: Lists all available tasks
+    cmds:
+      - task --list
+    silent: true
+  clean:deps:
+    desc: Clean dependencies
+    cmds:
+      - go mod tidy
+    silent: true
+  up:deps:
+    desc: Updates dependencies
+    cmds:
+      - go-mod-upgrade
+    silent: true
+  generate:changelog:
+    desc: Generates embedded changelog from CHANGELOG.md
+    cmds:
+      - pnpm install
+      - pnpm run changelog
+    silent: true
+  build:
+    desc: Builds the binary
+    cmds:
+      - task: generate:changelog
+      - make build
+    silent: true
+  install:
+    desc: Installs the remnix to $HOME/.local/bin/remnix
+    cmds:
+      - mv ./bin/remnix $HOME/.local/bin/remnix
+      - mv ./bin/remnix-attach $HOME/.local/bin/remnix-attach
+    silent: true
+  fmt:
+    desc: Formats all files
+    cmds:
+      - go fmt ./...
+    silent: true
+  lint:
+    desc: Runs vet on all files
+    cmds:
+      - go vet ./...
+    silent: true
+  test:
+    desc: Runs tests
+    cmds:
+      - go test ./...
+    silent: true
+  ci:
+    desc: Runs golangci-lint
+    cmds:
+      - golangci-lint run ./...
+    silent: true

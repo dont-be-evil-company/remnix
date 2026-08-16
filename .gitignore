@@ -1,0 +1,19 @@
+/.direnv/
+/remnix
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+coverage.html
+.idea/
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Auto generated files
+CHANGELOG.md
+/internal/changelog/changelog.md
+/node_modules

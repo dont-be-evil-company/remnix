@@ -1,0 +1,305 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  generate-changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Set up env
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Install dependencies
+        run: pnpm install
+      - name: Generate changelog
+        run: pnpm run changelog
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: internal/changelog/changelog.md
+          if-no-files-found: error
+
+  build-linux:
+    needs:
+      - generate-changelog
+    name: Build for Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up env
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+          path: internal/changelog
+      - name: Build for Linux amd64
+        env:
+          TARGET_PLATFORM: linux
+        run: ./scripts/build.sh
+      - name: Build for Linux arm64
+        env:
+          TARGET_PLATFORM: linux-arm64
+        run: ./scripts/build.sh
+      - name: Verify Linux binary
+        run: ./dist/remnix-linux-amd64 --version
+      - name: Upload Linux amd64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remnix-linux-amd64
+          path: dist/remnix-linux-amd64
+          if-no-files-found: error
+      - name: Upload Linux arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remnix-linux-arm64
+          path: dist/remnix-linux-arm64
+          if-no-files-found: error
+
+  build-macos:
+    needs:
+      - generate-changelog
+    name: Build for macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up env
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+          path: internal/changelog
+      - name: Build for macOS
+        env:
+          TARGET_PLATFORM: macos
+        run: ./scripts/build.sh
+      - name: Install the Apple certificate, provisioning profile, and API key
+        id: keychain
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.APPLE_BUILD_PROVISION_PROFILE_BASE64 }}
+          AUTH_KEY_BASE64: ${{ secrets.APPLE_AUTH_KEY_BASE64 }}
+        run: ./scripts/ci-import-apple-certs.sh
+      - name: Sign the amd64 binary
+        env:
+          CODESIGNING_IDENTITY: ${{ secrets.APPLE_CODESIGNING_IDENTITY }}
+          CODESIGNING_PREFIX: ${{ secrets.APPLE_CODESIGNING_PREFIX }}
+        run: |
+          export CODESIGNING_IDENTITY=$(base64 --decode <<< "$CODESIGNING_IDENTITY")
+          export CODESIGNING_PREFIX=$(base64 --decode <<< "$CODESIGNING_PREFIX")
+          codesign --sign "$CODESIGNING_IDENTITY" \
+            --prefix "$CODESIGNING_PREFIX" \
+            --options runtime dist/remnix-darwin-amd64
+      - name: Sign the arm64 binary
+        env:
+          CODESIGNING_IDENTITY: ${{ secrets.APPLE_CODESIGNING_IDENTITY }}
+          CODESIGNING_PREFIX: ${{ secrets.APPLE_CODESIGNING_PREFIX }}
+        run: |
+          export CODESIGNING_IDENTITY=$(base64 --decode <<< "$CODESIGNING_IDENTITY")
+          export CODESIGNING_PREFIX=$(base64 --decode <<< "$CODESIGNING_PREFIX")
+          codesign --sign "$CODESIGNING_IDENTITY" \
+            --prefix "$CODESIGNING_PREFIX" \
+            --options runtime dist/remnix-darwin-arm64
+      - name: Zip the amd64 binary for notarization
+        run: zip -r dist/remnix-darwin-amd64.zip dist/remnix-darwin-amd64
+      - name: Zip the arm64 binary for notarization
+        run: zip -r dist/remnix-darwin-arm64.zip dist/remnix-darwin-arm64
+      - name: Upload the amd64 binary for notarization
+        env:
+          KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_ISSUER }}
+        run: |
+          export KEY_ID=$(base64 --decode <<< "$KEY_ID")
+          export ISSUER=$(base64 --decode <<< "$ISSUER")
+          xcrun notarytool submit dist/remnix-darwin-amd64.zip \
+            --key "${{ steps.keychain.outputs.auth_key_path }}" \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER" \
+            --wait
+      - name: Upload the arm64 binary for notarization
+        env:
+          KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_ISSUER }}
+        run: |
+          export KEY_ID=$(base64 --decode <<< "$KEY_ID")
+          export ISSUER=$(base64 --decode <<< "$ISSUER")
+          xcrun notarytool submit dist/remnix-darwin-arm64.zip \
+            --key "${{ steps.keychain.outputs.auth_key_path }}" \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER" \
+            --wait
+      - name: Verify macOS binaries
+        run: |
+          ./dist/remnix-darwin-amd64 --version
+          ./dist/remnix-darwin-arm64 --version
+      - name: Upload macOS amd64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remnix-darwin-amd64
+          path: dist/remnix-darwin-amd64
+          if-no-files-found: error
+      - name: Upload macOS arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remnix-darwin-arm64
+          path: dist/remnix-darwin-arm64
+          if-no-files-found: error
+
+  build-windows:
+    needs:
+      - generate-changelog
+    name: Build for Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up env
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}".TrimStart('v')
+          "VERSION=$version" >> $env:GITHUB_ENV
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+          path: internal/changelog
+      - name: Build for Windows
+        shell: bash
+        env:
+          TARGET_PLATFORM: windows
+        run: ./scripts/build.sh
+      - name: Verify Windows binary
+        shell: pwsh
+        run: .\dist\remnix-windows-amd64.exe --version
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remnix-windows-amd64-exe
+          path: dist/remnix-windows-amd64.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - build-linux
+      - build-macos
+      - build-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up env
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Download Linux amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: remnix-linux-amd64
+          path: dist
+      - name: Download Linux arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: remnix-linux-arm64
+          path: dist
+      - name: Download macOS amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: remnix-darwin-amd64
+          path: dist
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: remnix-darwin-arm64
+          path: dist
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: remnix-windows-amd64-exe
+          path: dist
+      - name: Publish release with all artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/release.sh
+
+  deploy-aur:
+    name: Deploy to AUR
+    needs: publish-release
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm pacman-contrib git openssh
+      - uses: actions/checkout@v6
+      - name: Download changelog artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+          path: internal/changelog
+      - name: Update Version in PKGBUILD
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          sed -i "s/pkgver=.*/pkgver=$VERSION/" ./scripts/PKGBUILD
+      - name: Extract recent changes from changelog
+        env:
+          SOURCE_FILE: internal/changelog/changelog.md
+        run: |
+          {
+            echo "RECENT_CHANGES<<EOF"
+            echo ""
+            echo ""
+            ./scripts/extract-latest-changes-from-changelog.sh
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        with:
+          pkgname: remnix-bin
+          pkgbuild: ./scripts/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "v${{ env.VERSION }}${{ env.RECENT_CHANGES }}"
+          updpkgsums: true

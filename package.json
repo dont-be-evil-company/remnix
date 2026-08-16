@@ -1,0 +1,11 @@
+{
+  "name": "remnix",
+  "private": true,
+  "scripts": {
+    "changelog": "./scripts/generate-changelog.sh"
+  },
+  "devDependencies": {
+    "conventional-changelog": "7.2.0"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

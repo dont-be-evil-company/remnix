@@ -1,0 +1,244 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://remnix.app/config.schema.json",
+  "title": "remnix user configuration",
+  "description": "Portable remnix settings in config.yaml. Machine-local identity and secrets live in local.yaml and rclone.conf, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 2,
+      "description": "Config format version. remnix writes 2."
+    },
+    "disable_auto_migrate": {
+      "type": "boolean",
+      "description": "Skip automatic local database migrations on open."
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Encrypted history synchronization.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master switch. When omitted, sync is on if any endpoint is enabled."
+        },
+        "interval": {
+          "$ref": "#/definitions/duration",
+          "description": "How often the daemon syncs. Default 1m."
+        },
+        "gc_interval": {
+          "$ref": "#/definitions/duration",
+          "description": "How often the daemon runs garbage collection. Default 1h."
+        },
+        "rclone_engine": {
+          "type": "string",
+          "enum": ["embedded", "external"],
+          "description": "Use the bundled rclone library or an external rclone binary. Default embedded."
+        },
+        "endpoints": {
+          "type": "array",
+          "description": "Sync remotes. All enabled endpoints are mirrors of the same encrypted repository.",
+          "items": { "$ref": "#/definitions/endpoint" }
+        },
+        "callbacks": {
+          "type": "array",
+          "description": "Commands run after a successful sync. Do not put secrets here.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "suggest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Inline history completion (ghost text) and the suggestion menu.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Ghost-text suggestions. Default true."
+        },
+        "menu": {
+          "type": "boolean",
+          "description": "LSP-style picker (zsh POSTDISPLAY, or overlay TUI with pty_proxy)."
+        },
+        "menu_max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Suggestion rows shown at once (typed row stays pinned). Default 8, capped at 32."
+        },
+        "completions": {
+          "type": "boolean",
+          "description": "Merge shell completions into the picker."
+        },
+        "icons": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Legacy icon aliases. Prefer ui.icons.",
+          "properties": {
+            "typed": { "type": "string" },
+            "history": { "type": "string" },
+            "completion": { "type": "string" }
+          }
+        },
+        "accept": {
+          "type": "array",
+          "description": "Keys that accept the ghost suffix when the cursor is at the end of the line. Default [Right].",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "pty_proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Wrap the interactive shell so Ctrl+R / suggest overlay the live prompt.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Unix: exec remnix-attach so overlay TUIs can snapshot the screen."
+        },
+        "height": {
+          "$ref": "#/definitions/overlayPercent",
+          "description": "Ctrl+R overlay height as a percent of the terminal. Omit, 0, or 100 is fullscreen."
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Colors and icons. Empty values use Catppuccin-like defaults.",
+      "properties": {
+        "colors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accent": { "$ref": "#/definitions/color" },
+            "title": { "$ref": "#/definitions/color" },
+            "muted": { "$ref": "#/definitions/color" },
+            "rule": { "$ref": "#/definitions/color" },
+            "badge": { "$ref": "#/definitions/color" },
+            "duration": { "$ref": "#/definitions/color" },
+            "failed": { "$ref": "#/definitions/color" },
+            "time": { "$ref": "#/definitions/color" },
+            "text": { "$ref": "#/definitions/color" },
+            "syntax": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "command": { "$ref": "#/definitions/color" },
+                "keyword": { "$ref": "#/definitions/color" },
+                "flag": { "$ref": "#/definitions/color" },
+                "string": { "$ref": "#/definitions/color" },
+                "comment": { "$ref": "#/definitions/color" },
+                "operator": { "$ref": "#/definitions/color" },
+                "variable": { "$ref": "#/definitions/color" },
+                "path": { "$ref": "#/definitions/color" },
+                "number": { "$ref": "#/definitions/color" },
+                "argument": { "$ref": "#/definitions/color" }
+              }
+            }
+          }
+        },
+        "icons": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cursor": { "type": "string" },
+            "suggestion_typed": { "type": "string" },
+            "suggestion_history": { "type": "string" },
+            "suggestion_completion": { "type": "string" },
+            "separator": { "type": "string" },
+            "move_up_down": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "color": {
+      "type": "string",
+      "description": "Hex color (#RGB or #RRGGBB) or default to use the built-in theme color.",
+      "pattern": "^([Dd][Ee][Ff][Aa][Uu][Ll][Tt]|#[0-9A-Fa-f]{3}|#[0-9A-Fa-f]{6})$"
+    },
+    "duration": {
+      "type": "string",
+      "description": "Go duration (for example 30s, 1m, 1h30m).",
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|μs|ms|s|m|h))+$"
+    },
+    "overlayPercent": {
+      "description": "Terminal-height fraction: 40, 40%, 0.5 (meaning 50%), or 100 for fullscreen.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0, "maximum": 100 },
+        { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?%?$" }
+      ]
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable endpoint id. Must be unique."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["rclone", "directory", "rsync", "scp"],
+          "description": "Transport. rclone is the default for new setups."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name. Falls back to id when omitted."
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "rclone_remote": {
+          "type": "string",
+          "description": "Section name in the machine-local rclone.conf (not a secret)."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Wizard provider id.",
+          "enum": [
+            "s3",
+            "gcs",
+            "dropbox",
+            "azure-files",
+            "icloud-drive",
+            "onedrive",
+            "google-drive",
+            "webdav",
+            "smb",
+            "custom"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "Repository path. $HOME, ${VAR}, and ~/ are expanded when used, not when saved."
+        },
+        "remote": {
+          "type": "string",
+          "description": "rsync remote spec (user@host:path) when type is rsync."
+        },
+        "host": {
+          "type": "string",
+          "description": "Hostname when type is scp."
+        },
+        "user": {
+          "type": "string",
+          "description": "SSH user when type is scp."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "SSH port when type is scp."
+        }
+      }
+    }
+  }
+}
