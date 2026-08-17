@@ -60,13 +60,17 @@ syncsh-search() {
   if [[ -n "$selected" ]]; then
     LBUFFER="$selected"
     RBUFFER=""
+    unset POSTDISPLAY
   fi
   zle reset-prompt
-  (( run )) && zle accept-line
+  # Use the builtin. Nested "zle accept-line" runs the suggest wrapper with
+  # WIDGET still set to syncsh-search, so orig lookup is empty → "No such widget".
+  (( run )) && zle .accept-line
 }
 
 zle -N syncsh-search
 bindkey '^R' syncsh-search
+bindkey -M viins '^R' syncsh-search
 
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec __syncsh_preexec
@@ -87,7 +91,6 @@ func zshSuggest(bin string, accept []string) string {
 typeset -ga __syncsh_suggest_accept
 __syncsh_suggest_accept=(%s)
 typeset -gA __syncsh_suggest_fallback
-typeset -gA __syncsh_suggest_orig
 typeset -g __syncsh_suggest_last=""
 # zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes
 typeset -g __syncsh_suggest_hl=fg=238
@@ -145,17 +148,11 @@ __syncsh_suggest_redraw() {
   __syncsh_suggest_update
 }
 
-__syncsh_suggest_clear_then_orig() {
-  emulate -L zsh
-  __syncsh_suggest_clear
-  zle -- "${__syncsh_suggest_orig[$WIDGET]}"
-}
-
 __syncsh_suggest_bind_clear() {
   emulate -L zsh
   local w orig
   for w in accept-line accept-and-hold accept-line-and-down-history accept-and-infer-next-history; do
-    [[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_orig ]] && continue
+    [[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_$w ]] && continue
     orig="__syncsh_suggest_orig_$w"
     case "${widgets[$w]:-}" in
       user:*)
@@ -169,8 +166,14 @@ __syncsh_suggest_bind_clear() {
         continue
         ;;
     esac
-    __syncsh_suggest_orig[$w]="$orig"
-    zle -N "$w" __syncsh_suggest_clear_then_orig
+    # One wrapper per widget. A shared wrapper keyed on $WIDGET breaks when
+    # another widget (syncsh-search) invokes accept-line: $WIDGET stays the caller.
+    eval "__syncsh_suggest_clear_then_$w() {
+      emulate -L zsh
+      __syncsh_suggest_clear
+      zle $orig
+    }"
+    zle -N "$w" "__syncsh_suggest_clear_then_$w"
   done
 }
 

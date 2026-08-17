@@ -27,8 +27,11 @@ func TestCtrlRBindings(t *testing.T) {
 	if !strings.Contains(zsh, "bindkey '^R'") {
 		t.Fatal("zsh missing bindkey ^R")
 	}
-	if !strings.Contains(zsh, "zle accept-line") || !strings.Contains(zsh, "__syncsh_accept__:") {
+	if !strings.Contains(zsh, "zle .accept-line") || !strings.Contains(zsh, "__syncsh_accept__:") {
 		t.Fatal("zsh should run the selected command")
+	}
+	if strings.Contains(zsh, "(( run )) && zle accept-line") {
+		t.Fatal("nested zle accept-line hits the suggest wrapper with empty WIDGET")
 	}
 	bashHook, _ := Integration("bash", "syncsh", opts)
 	if !strings.Contains(bashHook, `\C-r`) {
@@ -67,7 +70,7 @@ func TestZshInlineSuggest(t *testing.T) {
 		"__syncsh_suggest_hl",
 		"fg=238",
 		`BUFFER="$BUFFER$POSTDISPLAY"`,
-		"__syncsh_suggest_clear_then_orig",
+		"__syncsh_suggest_clear_then_$w",
 		"__syncsh_suggest_bind_clear",
 		"zle .$w",
 		"memo=syncsh-suggest",
@@ -85,6 +88,9 @@ func TestZshInlineSuggest(t *testing.T) {
 	if strings.Contains(on, `zle -A ".$w"`) {
 		t.Fatal("builtin accept-line must be wrapped with zle .accept-line, not zle -A")
 	}
+	if strings.Contains(on, "__syncsh_suggest_orig[$WIDGET]") || strings.Contains(on, "__syncsh_suggest_clear_then_orig") {
+		t.Fatal("accept-line wrapper must not look up orig via $WIDGET")
+	}
 	if strings.Contains(on, "]10;?") || strings.Contains(on, "suggest_pick_hl") {
 		t.Fatal("init must not query the terminal for colors")
 	}
@@ -92,7 +98,7 @@ func TestZshInlineSuggest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(off, "POSTDISPLAY") || strings.Contains(off, "suggest --prefix") {
+	if strings.Contains(off, "suggest --prefix") || strings.Contains(off, "syncsh-suggest-accept") {
 		t.Fatal("disabled suggest should not emit inline suggestion hooks")
 	}
 }
