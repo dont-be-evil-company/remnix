@@ -67,6 +67,10 @@ func TestZshInlineSuggest(t *testing.T) {
 		"__syncsh_suggest_hl",
 		"fg=238",
 		`BUFFER="$BUFFER$POSTDISPLAY"`,
+		"__syncsh_suggest_clear_then_orig",
+		"__syncsh_suggest_bind_clear",
+		"zle .$w",
+		"memo=syncsh-suggest",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
@@ -74,6 +78,12 @@ func TestZshInlineSuggest(t *testing.T) {
 	}
 	if strings.Contains(on, `suggest --prefix "$LBUFFER"`) {
 		t.Fatal("ghost text must match BUFFER; LBUFFER overlaps when the cursor is not at EOL")
+	}
+	if !strings.Contains(on, "__syncsh_suggest_clear") || strings.Count(on, `BUFFER="$BUFFER$POSTDISPLAY"`) != 1 {
+		t.Fatal("Enter must drop ghost text; only the accept widget may merge POSTDISPLAY")
+	}
+	if strings.Contains(on, `zle -A ".$w"`) {
+		t.Fatal("builtin accept-line must be wrapped with zle .accept-line, not zle -A")
 	}
 	if strings.Contains(on, "]10;?") || strings.Contains(on, "suggest_pick_hl") {
 		t.Fatal("init must not query the terminal for colors")

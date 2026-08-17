@@ -87,17 +87,27 @@ func zshSuggest(bin string, accept []string) string {
 typeset -ga __syncsh_suggest_accept
 __syncsh_suggest_accept=(%s)
 typeset -gA __syncsh_suggest_fallback
+typeset -gA __syncsh_suggest_orig
 typeset -g __syncsh_suggest_last=""
 # zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes
 typeset -g __syncsh_suggest_hl=fg=238
 zle_highlight=(${zle_highlight:#suffix:*})
 zle_highlight+=(suffix:${__syncsh_suggest_hl})
 
+# Color POSTDISPLAY with both suffix (zle_highlight) and region_highlight.
+# suffix alone is ignored by some zsh/theme combos and the ghost goes white.
+# Enter still drops POSTDISPLAY before accept-line, so the region does not
+# get committed as part of the command.
 __syncsh_suggest_highlight() {
   region_highlight=(${region_highlight:#*memo=syncsh-suggest*})
   if [[ -n ${POSTDISPLAY:-} ]]; then
     region_highlight+=("${#BUFFER} $(( $#BUFFER + $#POSTDISPLAY )) ${__syncsh_suggest_hl} memo=syncsh-suggest")
   fi
+}
+
+__syncsh_suggest_clear() {
+  unset POSTDISPLAY
+  __syncsh_suggest_highlight
 }
 
 __syncsh_suggest_update() {
@@ -126,7 +136,42 @@ __syncsh_suggest_update() {
 }
 
 __syncsh_suggest_redraw() {
+  case $WIDGET in
+    accept-line|accept-and-hold|accept-line-and-down-history|accept-and-infer-next-history)
+      __syncsh_suggest_clear
+      return
+      ;;
+  esac
   __syncsh_suggest_update
+}
+
+__syncsh_suggest_clear_then_orig() {
+  emulate -L zsh
+  __syncsh_suggest_clear
+  zle -- "${__syncsh_suggest_orig[$WIDGET]}"
+}
+
+__syncsh_suggest_bind_clear() {
+  emulate -L zsh
+  local w orig
+  for w in accept-line accept-and-hold accept-line-and-down-history accept-and-infer-next-history; do
+    [[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_orig ]] && continue
+    orig="__syncsh_suggest_orig_$w"
+    case "${widgets[$w]:-}" in
+      user:*)
+        zle -A "$w" "$orig"
+        ;;
+      builtin|'')
+        eval "$orig() { zle .$w }"
+        zle -N "$orig"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    __syncsh_suggest_orig[$w]="$orig"
+    zle -N "$w" __syncsh_suggest_clear_then_orig
+  done
 }
 
 syncsh-suggest-accept() {
@@ -196,6 +241,7 @@ __syncsh_suggest_bind() {
 }
 
 __syncsh_suggest_bind
+__syncsh_suggest_bind_clear
 
 if autoload -Uz add-zle-hook-widget 2>/dev/null && add-zle-hook-widget line-pre-redraw __syncsh_suggest_redraw 2>/dev/null; then
   :
