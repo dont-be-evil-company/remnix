@@ -33,11 +33,10 @@ Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`.
 Go 1.25+ is required. The `piv` build tag enables YubiKey PIV support.
 
 ```sh
-make build
-mv bin/syncsh "$HOME/.local/bin/syncsh"
+task build
 ```
 
-`make test` runs the unit tests. `make ci` also runs `golangci-lint`.
+`task test` runs the unit tests. `task ci` also runs `golangci-lint`.
 
 ## First device: setup
 

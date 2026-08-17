@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+tasks:
+  default:
+    desc: Lists all available tasks
+    cmds:
+      - task --list
+    silent: true
+  build:
+    desc: Builds the binary
+    cmds:
+      - make build
+    silent: true
+  install:
+    desc: Installs the syncsh to $HOME/.local/bin/syncsh
+    cmds:
+      - mv ./bin/syncsh $HOME/.local/bin/syncsh
+    silent: true
+  fmt:
+    desc: Formats all files
+    cmds:
+      - go fmt ./...
+    silent: true
+  test:
+    desc: Runs tests
+    cmds:
+      - go test ./...
+    silent: true
+  ci:
+    desc: Runs golangci-lint
+    cmds:
+      - golangci-lint run ./...
+    silent: true
