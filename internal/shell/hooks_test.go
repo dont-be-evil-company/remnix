@@ -60,16 +60,20 @@ func TestZshInlineSuggest(t *testing.T) {
 	for _, want := range []string{
 		"POSTDISPLAY",
 		"syncsh-suggest-accept",
-		"suggest --prefix",
+		`suggest --prefix "$BUFFER"`,
 		"'Right'",
 		"'Tab'",
 		"bindkey $'\\t'",
 		"__syncsh_suggest_hl",
 		"fg=238",
+		`BUFFER="$BUFFER$POSTDISPLAY"`,
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
 		}
+	}
+	if strings.Contains(on, `suggest --prefix "$LBUFFER"`) {
+		t.Fatal("ghost text must match BUFFER; LBUFFER overlaps when the cursor is not at EOL")
 	}
 	if strings.Contains(on, "]10;?") || strings.Contains(on, "suggest_pick_hl") {
 		t.Fatal("init must not query the terminal for colors")

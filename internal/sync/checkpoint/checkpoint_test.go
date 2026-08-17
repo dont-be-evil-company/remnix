@@ -1,10 +1,12 @@
 package checkpoint
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/mistweaverco/syncsh/internal/cborx"
 	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
 	"github.com/mistweaverco/syncsh/internal/history"
 	"github.com/mistweaverco/syncsh/internal/sync/merge"
@@ -116,8 +118,141 @@ func TestSnapshotStaysCompact(t *testing.T) {
 	}
 }
 
-func TestDecodeFileRejectsJSON(t *testing.T) {
-	if _, _, err := DecodeFile([]byte(`{"nonce":"YQ==","ciphertext":"Yg=="}`)); err == nil {
-		t.Fatal("expected error for JSON wrapper")
+func TestDecodeFileAcceptsJSON(t *testing.T) {
+	smk, err := envelope.GenerateSMK()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []history.Entry{{
+		ID:      "1",
+		Command: "ls",
+		StartTS: time.Unix(1, 0).UTC(),
+	}}
+	nonce, ct, err := PackSnapshot(entries, smk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := json.Marshal(jsonSnapshotFile{Nonce: nonce, Ciphertext: ct})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, c2, err := DecodeFile(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := UnpackSnapshot(smk, n2, c2)
+	if err != nil || len(got) != 1 || got[0].Command != "ls" {
+		t.Fatalf("json wrapper: %+v %v", got, err)
+	}
+	n3, c3, err := DecodeFile([]byte(`{"nonce":"YQ==","ciphertext":"Yg=="}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(n3) != "a" || string(c3) != "b" {
+		t.Fatalf("base64 json: nonce=%q ct=%q", n3, c3)
+	}
+}
+
+func TestDecodeFileRejectsGarbage(t *testing.T) {
+	if _, _, err := DecodeFile([]byte(`{}`)); err == nil {
+		t.Fatal("expected error for empty json object")
+	}
+	if _, _, err := DecodeFile([]byte("not-a-snapshot")); err == nil {
+		t.Fatal("expected error for random bytes")
+	}
+}
+
+func TestUnpackJSONEntries(t *testing.T) {
+	smk, err := envelope.GenerateSMK()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []history.Entry{{
+		ID:      "1",
+		Command: "ls",
+		StartTS: time.Unix(1, 0).UTC(),
+	}}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce, err := envelope.RandomNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := envelope.Seal(smk, nonce, raw, []byte("syncsh-checkpoint"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := UnpackSnapshot(smk, nonce, ct)
+	if err != nil || len(got) != 1 || got[0].Command != "ls" {
+		t.Fatalf("json entries: %+v %v", got, err)
+	}
+	gz, err := gzipBest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err = envelope.Seal(smk, nonce, gz, []byte("syncsh-checkpoint"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = UnpackSnapshot(smk, nonce, ct)
+	if err != nil || len(got) != 1 || got[0].Command != "ls" {
+		t.Fatalf("gzip json entries: %+v %v", got, err)
+	}
+}
+
+func TestUnpackV1CBOREntries(t *testing.T) {
+	smk, err := envelope.GenerateSMK()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []history.Entry{{
+		ID:      "1",
+		Command: "ls",
+		StartTS: time.Unix(1, 0).UTC(),
+	}}
+	raw, err := cborx.Marshal(snapshotV1{Version: 1, Entries: entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce, err := envelope.RandomNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := envelope.Seal(smk, nonce, raw, []byte("syncsh-checkpoint"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := UnpackSnapshot(smk, nonce, ct)
+	if err != nil || len(got) != 1 || got[0].Command != "ls" {
+		t.Fatalf("v1 cbor: %+v %v", got, err)
+	}
+	gz, err := gzipBest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err = envelope.Seal(smk, nonce, gz, []byte("syncsh-checkpoint"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := json.Marshal(jsonSnapshotFile{Nonce: nonce, Ciphertext: ct})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, c2, err := DecodeFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = UnpackSnapshot(smk, n2, c2)
+	if err != nil || len(got) != 1 || got[0].Command != "ls" {
+		t.Fatalf("v1 gzip json wrap: %+v %v", got, err)
+	}
+}
+
+func TestEncodeFileStaysBinary(t *testing.T) {
+	file := EncodeFile([]byte("n"), []byte("c"))
+	if string(file[:4]) != snapshotMagic {
+		t.Fatalf("EncodeFile should write %s, got %q", snapshotMagic, file[:4])
 	}
 }

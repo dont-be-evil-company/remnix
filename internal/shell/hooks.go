@@ -93,29 +93,36 @@ typeset -g __syncsh_suggest_hl=fg=238
 zle_highlight=(${zle_highlight:#suffix:*})
 zle_highlight+=(suffix:${__syncsh_suggest_hl})
 
-__syncsh_suggest_update() {
-  emulate -L zsh
-  if [[ -z $LBUFFER ]]; then
-    unset POSTDISPLAY
-    __syncsh_suggest_last=""
-    region_highlight=(${region_highlight:#*memo=syncsh-suggest*})
-    return
-  fi
-  if [[ ${__syncsh_suggest_last} == "$LBUFFER" ]]; then
-    return
-  fi
-  __syncsh_suggest_last="$LBUFFER"
-  local s
-  s="$(%s suggest --prefix "$LBUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
-  if [[ -n $s && $s == "$LBUFFER"* && $s != "$LBUFFER" ]]; then
-    POSTDISPLAY="${s#"$LBUFFER"}"
-  else
-    unset POSTDISPLAY
-  fi
+__syncsh_suggest_highlight() {
   region_highlight=(${region_highlight:#*memo=syncsh-suggest*})
   if [[ -n ${POSTDISPLAY:-} ]]; then
     region_highlight+=("${#BUFFER} $(( $#BUFFER + $#POSTDISPLAY )) ${__syncsh_suggest_hl} memo=syncsh-suggest")
   fi
+}
+
+__syncsh_suggest_update() {
+  emulate -L zsh
+  # POSTDISPLAY is appended after BUFFER, not the cursor. Matching on
+  # LBUFFER makes the ghost overlap RBUFFER as soon as the cursor moves left.
+  if [[ -z $BUFFER ]]; then
+    unset POSTDISPLAY
+    __syncsh_suggest_last=""
+    __syncsh_suggest_highlight
+    return
+  fi
+  if [[ ${__syncsh_suggest_last} == "$BUFFER" ]]; then
+    __syncsh_suggest_highlight
+    return
+  fi
+  __syncsh_suggest_last="$BUFFER"
+  local s
+  s="$(%s suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
+  if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
+    POSTDISPLAY="${s#"$BUFFER"}"
+  else
+    unset POSTDISPLAY
+  fi
+  __syncsh_suggest_highlight
 }
 
 __syncsh_suggest_redraw() {
@@ -130,9 +137,10 @@ syncsh-suggest-accept() {
       zle "$fb"
       return
     fi
-    LBUFFER+="$POSTDISPLAY"
+    BUFFER="$BUFFER$POSTDISPLAY"
     unset POSTDISPLAY
-    __syncsh_suggest_last="$LBUFFER"
+    CURSOR=$#BUFFER
+    __syncsh_suggest_last="$BUFFER"
     zle redisplay
     return
   fi

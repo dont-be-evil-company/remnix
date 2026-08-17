@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -25,6 +26,14 @@ type snapshot struct {
 	Devices  []string     `cbor:"4,keyasint"`
 	Shells   []string     `cbor:"5,keyasint"`
 	Rows     []compactRow `cbor:"6,keyasint"`
+}
+
+// snapshotV1 is the pre-compact layout: intern tables were not used and
+// field 2 was a slice of history.Entry maps. Powerbook still writes this
+// inside a JSON nonce/ciphertext wrapper.
+type snapshotV1 struct {
+	Version int             `cbor:"1,keyasint"`
+	Entries []history.Entry `cbor:"2,keyasint"`
 }
 
 type compactRow struct {
@@ -202,18 +211,66 @@ func UnpackSnapshot(smk, nonce, ct []byte) ([]history.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	pt, err = gunzip(pt)
+	return decodeSnapshotPayload(pt)
+}
+
+func decodeSnapshotPayload(pt []byte) ([]history.Entry, error) {
+	body := pt
+	if unzipped, err := gunzip(pt); err == nil {
+		body = unzipped
+	}
+	if len(body) > 0 && (body[0] == '{' || body[0] == '[') {
+		return decodeJSONSnapshot(body)
+	}
+	return decodeCBORSnapshot(body)
+}
+
+func decodeCBORSnapshot(body []byte) ([]history.Entry, error) {
+	var s snapshot
+	err := cborx.Unmarshal(body, &s)
+	if err == nil && s.Version == snapshotVersion {
+		return s.entries()
+	}
+	var v1 snapshotV1
+	if err1 := cborx.Unmarshal(body, &v1); err1 == nil && (v1.Version == 1 || len(v1.Entries) > 0) {
+		return v1.Entries, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	var s snapshot
-	if err := cborx.Unmarshal(pt, &s); err != nil {
+	return nil, fmt.Errorf("unsupported snapshot version %d", s.Version)
+}
+
+func decodeJSONSnapshot(body []byte) ([]history.Entry, error) {
+	if len(body) > 0 && body[0] == '[' {
+		var entries []history.Entry
+		if err := json.Unmarshal(body, &entries); err != nil {
+			return nil, err
+		}
+		return entries, nil
+	}
+	var wrap struct {
+		Version int             `json:"version"`
+		Entries []history.Entry `json:"entries"`
+		Rows    []history.Entry `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &wrap); err != nil {
 		return nil, err
 	}
-	if s.Version != snapshotVersion {
-		return nil, fmt.Errorf("unsupported snapshot version %d", s.Version)
+	switch {
+	case len(wrap.Entries) > 0:
+		return wrap.Entries, nil
+	case len(wrap.Rows) > 0:
+		return wrap.Rows, nil
 	}
-	return s.entries()
+	var s snapshot
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, err
+	}
+	if s.Version == snapshotVersion || len(s.Rows) > 0 {
+		return s.entries()
+	}
+	return nil, fmt.Errorf("json snapshot empty")
 }
 
 func EncodeFile(nonce, ct []byte) []byte {
@@ -226,9 +283,24 @@ func EncodeFile(nonce, ct []byte) []byte {
 	return buf
 }
 
+type jsonSnapshotFile struct {
+	Nonce      []byte `json:"nonce"`
+	Ciphertext []byte `json:"ciphertext"`
+}
+
 func DecodeFile(b []byte) (nonce, ct []byte, err error) {
-	if len(b) < 6 || string(b[:4]) != snapshotMagic {
-		return nil, nil, fmt.Errorf("not a syncsh snapshot")
+	if len(b) >= 4 && string(b[:4]) == snapshotMagic {
+		return decodeBinaryFile(b)
+	}
+	if nonce, ct, err = decodeJSONFile(b); err == nil {
+		return nonce, ct, nil
+	}
+	return nil, nil, fmt.Errorf("not a syncsh snapshot")
+}
+
+func decodeBinaryFile(b []byte) (nonce, ct []byte, err error) {
+	if len(b) < 6 {
+		return nil, nil, fmt.Errorf("truncated snapshot file")
 	}
 	if b[4] != snapshotFileV1 {
 		return nil, nil, fmt.Errorf("unsupported snapshot file version %d", b[4])
@@ -238,4 +310,15 @@ func DecodeFile(b []byte) (nonce, ct []byte, err error) {
 		return nil, nil, fmt.Errorf("truncated snapshot file")
 	}
 	return b[6 : 6+nlen], b[6+nlen:], nil
+}
+
+func decodeJSONFile(b []byte) (nonce, ct []byte, err error) {
+	var wrap jsonSnapshotFile
+	if err := json.Unmarshal(b, &wrap); err != nil {
+		return nil, nil, err
+	}
+	if len(wrap.Nonce) == 0 || len(wrap.Ciphertext) == 0 {
+		return nil, nil, fmt.Errorf("json snapshot missing nonce or ciphertext")
+	}
+	return wrap.Nonce, wrap.Ciphertext, nil
 }
