@@ -35,7 +35,7 @@ syncs in the background after you unlock once
 Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in
 user configuration (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
 
-## Install
+## Build
 
 Go 1.25+ is required. The `piv` build tag enables YubiKey `PIV` support.
 
