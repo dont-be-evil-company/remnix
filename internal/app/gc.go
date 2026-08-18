@@ -13,7 +13,7 @@ func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) 
 	if err != nil {
 		return gc.Plan{}, err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	tr, err := a.Transport()
 	if err != nil {
 		return gc.Plan{}, err
@@ -42,7 +42,7 @@ func (a *App) MaybeCheckpoint(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	eng, err := a.Engine(nil, nil, []fido2.Device{})
 	if err != nil {
 		return err

@@ -1,17 +1,16 @@
 package syncer
 
 import (
-	"encoding/json"
-	"fmt"
-	"time"
-
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"time"
+
 	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
 	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"io"
-
 	"golang.org/x/crypto/hkdf"
 )
 

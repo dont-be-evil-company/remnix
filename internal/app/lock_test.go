@@ -12,7 +12,7 @@ func TestAcquireLockExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l1.Release()
+	defer func() { _ = l1.Release() }()
 
 	if _, err := AcquireLock(); err == nil {
 		t.Fatal("expected second lock to fail")
@@ -24,5 +24,7 @@ func TestAcquireLockExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l2.Release()
+	if err := l2.Release(); err != nil {
+		t.Fatal(err)
+	}
 }

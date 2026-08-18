@@ -29,7 +29,7 @@ func TestApplyOrderConverges(t *testing.T) {
 
 	apply := func(order []event.Event) int {
 		tx := mk(t)
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		for _, ev := range order {
 			if err := Apply(tx, ev); err != nil {
 				t.Fatal(err)

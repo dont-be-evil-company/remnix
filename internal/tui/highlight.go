@@ -120,7 +120,7 @@ func isAssignment(word string) bool {
 		return false
 	}
 	for _, r := range word[:eq] {
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
 			return false
 		}
 	}
@@ -186,9 +186,10 @@ func readDollar(runes []rune, i int) (string, int) {
 		j := i + 2
 		depth := 1
 		for j < len(runes) && depth > 0 {
-			if runes[j] == '(' {
+			switch runes[j] {
+			case '(':
 				depth++
-			} else if runes[j] == ')' {
+			case ')':
 				depth--
 			}
 			j++

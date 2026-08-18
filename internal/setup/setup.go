@@ -151,7 +151,7 @@ func enrollHardware(want bool) ([]fido2.Device, []piv.Token, error) {
 	}
 	tokens, err := enrollYubiKeys()
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w\n\nFIDO-only Security Keys have no PIV applet. Plug the key in over USB and check hidraw access (lsusb). Do not install pcscd for that device; use FIDO2 hmac-secret instead.", err)
+		return nil, nil, fmt.Errorf("%w\n\nFIDO-only Security Keys have no PIV applet. Plug the key in over USB and check hidraw access (lsusb). Do not install pcscd for that device; use FIDO2 hmac-secret instead", err)
 	}
 	return nil, tokens, nil
 }

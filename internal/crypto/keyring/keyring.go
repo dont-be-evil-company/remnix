@@ -128,7 +128,7 @@ func annotate(err error) error {
 		strings.Contains(s, "no such") ||
 		strings.Contains(s, "dbus") ||
 		strings.Contains(s, "unsupported") {
-		return fmt.Errorf("%w\n\nOS keyring is unavailable. Unlock GNOME Keyring, KWallet, KeePassXC, macOS Keychain, or Windows Credential Manager. The Sync Master Key is not written to a file.", err)
+		return fmt.Errorf("%w\n\nOS keyring is unavailable. Unlock GNOME Keyring, KWallet, KeePassXC, macOS Keychain, or Windows Credential Manager. The Sync Master Key is not written to a file", err)
 	}
 	return err
 }

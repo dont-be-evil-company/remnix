@@ -2,9 +2,7 @@ package piv
 
 import (
 	"crypto"
-	"crypto/ecdh"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -62,15 +60,11 @@ func WrapSMK(pub crypto.PublicKey, smk []byte) (params, wrapped []byte, err erro
 }
 
 func wrapECDH(pub *ecdsa.PublicKey, smk []byte) ([]byte, []byte, error) {
-	curve, err := ecdhCurve(pub.Curve)
+	peer, err := pub.ECDH()
 	if err != nil {
 		return nil, nil, err
 	}
-	eph, err := curve.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	peer, err := ecdsaToECDH(pub)
+	eph, err := peer.Curve().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,26 +100,6 @@ func deriveWrapKey(secret []byte) ([]byte, error) {
 		return nil, err
 	}
 	return key, nil
-}
-
-func ecdhCurve(c elliptic.Curve) (ecdh.Curve, error) {
-	switch c {
-	case elliptic.P256():
-		return ecdh.P256(), nil
-	case elliptic.P384():
-		return ecdh.P384(), nil
-	default:
-		return nil, fmt.Errorf("unsupported curve")
-	}
-}
-
-func ecdsaToECDH(pub *ecdsa.PublicKey) (*ecdh.PublicKey, error) {
-	curve, err := ecdhCurve(pub.Curve)
-	if err != nil {
-		return nil, err
-	}
-	b := elliptic.Marshal(pub.Curve, pub.X, pub.Y)
-	return curve.NewPublicKey(b)
 }
 
 type FakeToken struct {

@@ -102,7 +102,7 @@ func (a *App) Sync(ctx context.Context, secret []byte, tokens []piv.Token, fido 
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }()
 	eng, err := a.Engine(secret, tokens, fido)
 	if err != nil {
 		return err

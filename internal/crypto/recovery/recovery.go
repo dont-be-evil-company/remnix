@@ -2,14 +2,14 @@ package recovery
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"strings"
 
-	"crypto/sha256"
 	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
 	"golang.org/x/crypto/hkdf"
-	"io"
 )
 
 const hrp = "syncsh"
