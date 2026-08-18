@@ -22,11 +22,15 @@ keyring).
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/syncsh/config.yaml` | device id, transport, database path |
+| `~/.config/syncsh/config.yaml` | portable settings: transport, suggest, callbacks |
+| `~/.local/share/syncsh/local.yaml` | this machine’s device id and name |
 | `~/.local/share/syncsh/history.db` | local history and key metadata |
 | `~/.local/share/syncsh/daemon-status.json` | last daemon sync result |
 
-Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`.
+`config.yaml` is safe to copy or check into source control. Do not copy
+`local.yaml` between machines; a new device id is created locally on join.
+Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in
+user config (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
 
 ## Install
 
@@ -103,7 +107,8 @@ On the new device:
 
 1. Copy or create `~/.config/syncsh/config.yaml` pointing at the **same**
    remote path (or run setup’s prompts only if this device has no remote yet -
-   prefer writing the config by hand / copying it).
+   prefer writing the config by hand / copying it). Do **not** copy
+   `local.yaml`; this machine gets its own device id.
 2. Join:
 
 ```sh
@@ -163,6 +168,24 @@ Manual sync:
 ```sh
 syncsh sync
 syncsh sync status
+```
+
+### Post-sync callbacks
+
+Optional commands in `config.yaml` run after every successful sync (daemon or
+`syncsh sync`). `$HOME` / `${VAR}` and `~/` are expanded. Each entry is run
+with `sh -c` from your home directory, in order. Remaining callbacks still run
+if one fails; the lock is released only after all of them have finished
+(success or failure). A failed callback fails the sync.
+
+```yaml
+# ~/.config/syncsh/config.yaml
+sync:
+  transport: directory
+  directory:
+    path: $HOME/GoogleDrive/syncsh
+callbacks:
+  - rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh
 ```
 
 ## Keys
@@ -225,6 +248,8 @@ Configured in `config.yaml` under `sync.transport`:
 | `directory` (default) | `sync.directory.path` - any synced folder |
 | `rsync` | `sync.rsync.remote` |
 | `scp` | `sync.scp.host` / `user` / `path` / `port` |
+
+Path fields accept `$HOME` / `${VAR}` and `~/`.
 
 The remote layout is:
 

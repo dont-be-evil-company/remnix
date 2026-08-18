@@ -39,6 +39,10 @@ func ConfigPath() string {
 	return filepath.Join(ConfigDir(), "config.yaml")
 }
 
+func LocalPath() string {
+	return filepath.Join(DataDir(), "local.yaml")
+}
+
 func DatabasePath() string {
 	return filepath.Join(DataDir(), "history.db")
 }

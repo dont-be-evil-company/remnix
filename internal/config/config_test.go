@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,20 +20,46 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := ConfigPath(); got != filepath.Join("/tmp/syncsh-cfg", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got)
 	}
+	if got := LocalPath(); got != filepath.Join("/tmp/syncsh-data", "local.yaml") {
+		t.Fatalf("LocalPath = %q", got)
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
 
 	cfg := Default()
 	cfg.DeviceID = "dev-1"
 	cfg.DeviceName = "laptop"
-	cfg.Sync.Directory.Path = filepath.Join(dir, "remote")
+	cfg.Sync.Directory.Path = "$HOME/remote"
+	cfg.Callbacks = []string{"rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh"}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	user, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(user), "device_id") || strings.Contains(string(user), "device_name") || strings.Contains(string(user), "database") {
+		t.Fatalf("user config leaked machine-local fields:\n%s", user)
+	}
+	if strings.Contains(string(user), "rsync:") || strings.Contains(string(user), "scp:") {
+		t.Fatalf("expected empty transports omitted:\n%s", user)
+	}
+	if !strings.Contains(string(user), "$HOME/remote") {
+		t.Fatalf("path should be stored unexpanded:\n%s", user)
+	}
+	local, err := os.ReadFile(LocalPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(local), "dev-1") || !strings.Contains(string(local), "laptop") {
+		t.Fatalf("local config missing identity:\n%s", local)
+	}
+
 	loaded, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +69,67 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Version != CurrentVersion {
 		t.Fatalf("version = %d", loaded.Version)
+	}
+	if loaded.Database.Path != DatabasePath() {
+		t.Fatalf("database path = %q", loaded.Database.Path)
+	}
+	if loaded.Sync.Directory.Path != "$HOME/remote" {
+		t.Fatalf("directory path = %q", loaded.Sync.Directory.Path)
+	}
+	if len(loaded.Callbacks) != 1 {
+		t.Fatalf("callbacks = %#v", loaded.Callbacks)
+	}
+}
+
+func TestLoadIgnoresStaleIdentityInUserConfig(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := []byte("version: 1\ndevice_id: stale-id\ndevice_name: stale\ndatabase:\n  path: /tmp/old.db\nsync:\n  transport: directory\n  directory:\n    path: /tmp/remote\n")
+	if err := os.WriteFile(ConfigPath(), stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LocalPath(), []byte("device_id: real-id\ndevice_name: real\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeviceID != "real-id" || cfg.DeviceName != "real" {
+		t.Fatalf("expected local identity, got %s %s", cfg.DeviceID, cfg.DeviceName)
+	}
+	if cfg.Database.Path != DatabasePath() {
+		t.Fatalf("database path = %q", cfg.Database.Path)
+	}
+}
+
+func TestExpand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SYNCSH_TEST_VAR", "xyz")
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"~", home},
+		{"~/GoogleDrive/syncsh", filepath.Join(home, "GoogleDrive/syncsh")},
+		{"$HOME/GoogleDrive/syncsh", filepath.Join(home, "GoogleDrive/syncsh")},
+		{"rclone sync r:/x $HOME/GoogleDrive/syncsh", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/syncsh")},
+		{"rclone sync r:/x ~/GoogleDrive/syncsh", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/syncsh")},
+		{"prefix $SYNCSH_TEST_VAR", "prefix xyz"},
+	}
+	for _, tc := range cases {
+		if got := Expand(tc.in); got != tc.want {
+			t.Fatalf("Expand(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

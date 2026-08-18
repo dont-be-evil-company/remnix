@@ -80,18 +80,18 @@ func (a *App) Engine(secret []byte, tokens []piv.Token, fido []fido2.Device) (*s
 func (a *App) Transport() (transport.Transport, error) {
 	switch a.Config.Sync.Transport {
 	case "", "directory":
-		p := a.Config.Sync.Directory.Path
+		p := config.Expand(a.Config.Sync.Directory.Path)
 		if p == "" {
 			return nil, fmt.Errorf("sync directory path is not configured; run syncsh setup")
 		}
 		return directory.New(p), nil
 	case "rsync":
 		work := filepath.Join(config.DataDir(), "stage-rsync")
-		return rsync.New(a.Config.Sync.Rsync.Remote, work), nil
+		return rsync.New(config.Expand(a.Config.Sync.Rsync.Remote), work), nil
 	case "scp":
 		work := filepath.Join(config.DataDir(), "stage-scp")
 		c := a.Config.Sync.SCP
-		return scp.New(c.Host, c.User, c.Path, work, c.Port), nil
+		return scp.New(config.Expand(c.Host), config.Expand(c.User), config.Expand(c.Path), work, c.Port), nil
 	default:
 		return nil, fmt.Errorf("unknown transport %q", a.Config.Sync.Transport)
 	}
@@ -107,5 +107,8 @@ func (a *App) Sync(ctx context.Context, secret []byte, tokens []piv.Token, fido 
 	if err != nil {
 		return err
 	}
-	return eng.Sync(ctx)
+	if err := eng.Sync(ctx); err != nil {
+		return err
+	}
+	return runCallbacks(ctx, a.Config.Callbacks)
 }

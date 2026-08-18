@@ -14,25 +14,31 @@ const CurrentVersion = 1
 
 type Config struct {
 	Version            int      `yaml:"version"`
-	DeviceID           string   `yaml:"device_id"`
-	DeviceName         string   `yaml:"device_name"`
-	Database           Database `yaml:"database"`
+	DeviceID           string   `yaml:"-"`
+	DeviceName         string   `yaml:"-"`
+	Database           Database `yaml:"-"`
 	Sync               Sync     `yaml:"sync"`
 	Suggest            Suggest  `yaml:"suggest"`
+	Callbacks          []string `yaml:"callbacks,omitempty"`
 	DisableAutoMigrate bool     `yaml:"disable_auto_migrate,omitempty"`
 }
 
 type Database struct {
-	Path string `yaml:"path"`
+	Path string
+}
+
+type localFile struct {
+	DeviceID   string `yaml:"device_id"`
+	DeviceName string `yaml:"device_name"`
 }
 
 type Sync struct {
 	Transport  string             `yaml:"transport"`
 	Interval   string             `yaml:"interval,omitempty"`
 	GCInterval string             `yaml:"gc_interval,omitempty"`
-	Directory  DirectoryTransport `yaml:"directory"`
-	Rsync      RsyncTransport     `yaml:"rsync"`
-	SCP        SCPTransport       `yaml:"scp"`
+	Directory  DirectoryTransport `yaml:"directory,omitempty"`
+	Rsync      RsyncTransport     `yaml:"rsync,omitempty"`
+	SCP        SCPTransport       `yaml:"scp,omitempty"`
 }
 
 type DirectoryTransport struct {
@@ -94,45 +100,76 @@ func Default() *Config {
 }
 
 func Load() (*Config, error) {
-	path := ConfigPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			cfg := Default()
-			return cfg, nil
-		}
-		return nil, fmt.Errorf("read config: %w", err)
-	}
 	cfg := Default()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	data, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read config: %w", err)
+		}
+	} else if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	if cfg.Version == 0 {
 		cfg.Version = CurrentVersion
 	}
-	if cfg.Database.Path == "" {
-		cfg.Database.Path = DatabasePath()
+	cfg.Database.Path = DatabasePath()
+	if err := loadLocal(cfg); err != nil {
+		return nil, err
 	}
 	return cfg, nil
+}
+
+func loadLocal(cfg *Config) error {
+	data, err := os.ReadFile(LocalPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read local config: %w", err)
+	}
+	var loc localFile
+	if err := yaml.Unmarshal(data, &loc); err != nil {
+		return fmt.Errorf("parse local config: %w", err)
+	}
+	cfg.DeviceID = loc.DeviceID
+	cfg.DeviceName = loc.DeviceName
+	return nil
 }
 
 func (c *Config) Save() error {
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(c.Database.Path), 0o700); err != nil {
+	if err := os.MkdirAll(DataDir(), 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	tmp := ConfigPath() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := writeAtomic(ConfigPath(), data); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-	if err := os.Rename(tmp, ConfigPath()); err != nil {
-		return fmt.Errorf("replace config: %w", err)
+	local, err := yaml.Marshal(localFile{DeviceID: c.DeviceID, DeviceName: c.DeviceName})
+	if err != nil {
+		return fmt.Errorf("marshal local config: %w", err)
+	}
+	if err := writeAtomic(LocalPath(), local); err != nil {
+		return fmt.Errorf("write local config: %w", err)
+	}
+	return nil
+}
+
+func writeAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
 	}
 	return nil
 }
