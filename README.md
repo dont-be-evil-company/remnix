@@ -173,10 +173,14 @@ syncsh sync status
 ### Post-sync callbacks
 
 Optional commands in `config.yaml` run after every successful sync (daemon or
-`syncsh sync`). `$HOME` / `${VAR}` and `~/` are expanded. Each entry is run
-with `sh -c` from your home directory, in order. Remaining callbacks still run
-if one fails; the lock is released only after all of them have finished
-(success or failure). A failed callback fails the sync.
+`syncsh sync`). They live under `sync.callbacks`. `$HOME` / `${VAR}` and `~/`
+are expanded. Each entry is run with `sh -c` from your home directory, in
+order. Remaining callbacks still run if one fails; the lock is released only
+after all of them have finished (success or failure). A failed callback fails
+the sync.
+
+A typical use is pushing the directory-transport folder to an rclone remote
+(`rclone sync SOURCE DEST` makes DEST match SOURCE):
 
 ```yaml
 # ~/.config/syncsh/config.yaml
@@ -184,9 +188,36 @@ sync:
   transport: directory
   directory:
     path: $HOME/GoogleDrive/syncsh
-callbacks:
-  - rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh
+  callbacks:
+    - rclone sync $HOME/GoogleDrive/syncsh gdrive:/syncsh
 ```
+
+That upload does not pull changes from Drive. Two opposite `rclone sync`
+commands cannot do both: `sync` deletes extras on DEST, so pull-then-push can
+wipe files syncsh just wrote locally, and push-then-pull can wipe files that
+existed only on the remote.
+
+For a union of both sides (no deletes; garbage-collected objects can reappear):
+
+```yaml
+sync:
+  callbacks:
+    - rclone copy $HOME/GoogleDrive/syncsh gdrive:/syncsh
+    - rclone copy gdrive:/syncsh $HOME/GoogleDrive/syncsh
+```
+
+For true two-way sync including deletes, use one `bisync` (first run needs
+`--resync`):
+
+```yaml
+sync:
+  callbacks:
+    - rclone bisync $HOME/GoogleDrive/syncsh gdrive:/syncsh
+```
+
+Do not point rclone at a folder the Google Drive desktop app already syncs;
+they will fight over the same files. Use rclone **or** Drive desktop, not both
+on the same path.
 
 ## Keys
 

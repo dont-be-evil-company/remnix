@@ -105,7 +105,7 @@ func TestSyncRunsCallbacksAndReleasesLock(t *testing.T) {
 	afterFail := filepath.Join(root, "after-fail")
 	lockState := filepath.Join(root, "lock-state")
 	lockPath := config.LockPath()
-	a.Config.Callbacks = []string{
+	a.Config.Sync.Callbacks = []string{
 		"touch " + okFile,
 		`if flock -n '` + lockPath + `' true; then echo unlocked > '` + lockState + `'; else echo locked > '` + lockState + `'; fi`,
 		"false",
@@ -154,7 +154,7 @@ func TestSyncSkipsCallbacksWhenEngineFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(root, "should-not-exist")
-	a.Config.Callbacks = []string{"touch " + marker}
+	a.Config.Sync.Callbacks = []string{"touch " + marker}
 	if err := a.Sync(context.Background(), nil, nil, nil); err == nil {
 		t.Fatal("expected sync error")
 	}

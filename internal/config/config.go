@@ -19,7 +19,6 @@ type Config struct {
 	Database           Database `yaml:"-"`
 	Sync               Sync     `yaml:"sync"`
 	Suggest            Suggest  `yaml:"suggest"`
-	Callbacks          []string `yaml:"callbacks,omitempty"`
 	DisableAutoMigrate bool     `yaml:"disable_auto_migrate,omitempty"`
 }
 
@@ -39,6 +38,7 @@ type Sync struct {
 	Directory  DirectoryTransport `yaml:"directory,omitempty"`
 	Rsync      RsyncTransport     `yaml:"rsync,omitempty"`
 	SCP        SCPTransport       `yaml:"scp,omitempty"`
+	Callbacks  []string           `yaml:"callbacks,omitempty"`
 }
 
 type DirectoryTransport struct {

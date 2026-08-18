@@ -35,7 +35,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg.DeviceID = "dev-1"
 	cfg.DeviceName = "laptop"
 	cfg.Sync.Directory.Path = "$HOME/remote"
-	cfg.Callbacks = []string{"rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh"}
+	cfg.Sync.Callbacks = []string{"rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh"}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,8 +76,32 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Sync.Directory.Path != "$HOME/remote" {
 		t.Fatalf("directory path = %q", loaded.Sync.Directory.Path)
 	}
-	if len(loaded.Callbacks) != 1 {
-		t.Fatalf("callbacks = %#v", loaded.Callbacks)
+	if len(loaded.Sync.Callbacks) != 1 {
+		t.Fatalf("callbacks = %#v", loaded.Sync.Callbacks)
+	}
+	if !strings.Contains(string(user), "callbacks:") {
+		t.Fatalf("callbacks should be under sync:\n%s", user)
+	}
+}
+
+func TestLoadSyncCallbacks(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("version: 1\nsync:\n  transport: directory\n  directory:\n    path: $HOME/GoogleDrive/syncsh\n  callbacks:\n    - rclone copy $HOME/GoogleDrive/syncsh gdrive:/syncsh\n")
+	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Sync.Callbacks) != 1 || !strings.Contains(cfg.Sync.Callbacks[0], "rclone copy") {
+		t.Fatalf("callbacks = %#v", cfg.Sync.Callbacks)
 	}
 }
 

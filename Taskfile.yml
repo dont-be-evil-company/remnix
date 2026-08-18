@@ -23,6 +23,11 @@ tasks:
     cmds:
       - go fmt ./...
     silent: true
+  lint:
+    desc: Runs vet on all files
+    cmds:
+      - go vet ./...
+    silent: true
   test:
     desc: Runs tests
     cmds:

@@ -110,5 +110,5 @@ func (a *App) Sync(ctx context.Context, secret []byte, tokens []piv.Token, fido 
 	if err := eng.Sync(ctx); err != nil {
 		return err
 	}
-	return runCallbacks(ctx, a.Config.Callbacks)
+	return runCallbacks(ctx, a.Config.Sync.Callbacks)
 }
