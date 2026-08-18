@@ -210,7 +210,7 @@ sync:
 ```
 
 For true two-way sync including deletes, use one `bisync` (first run needs
-`--resync`):
+`--resync`; `rclone bisync $HOME/GoogleDrive/syncsh gdrive:/syncsh --resync`):
 
 ```yaml
 sync:
