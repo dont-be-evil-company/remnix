@@ -11,3 +11,4 @@ coverage.html
 *.db
 *.db-wal
 *.db-shm
+*.log
