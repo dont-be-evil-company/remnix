@@ -1,40 +1,43 @@
-# syncsh
+# `syncsh`
 
 Encrypted, server-free shell history. Commands are stored in a local SQLite
 database and synchronized as encrypted events through a folder you already
-trust (Google Drive, Dropbox, Syncthing, rsync, or scp). There is no syncsh
-cloud and no account.
+trust (Google Drive, Dropbox, `Syncthing`, `rsync`, or `scp`).
 
-## How it works
+There is no `syncsh` cloud and no account.
+
+## How It Works
 
 Each device writes history to `$XDG_DATA_HOME/syncsh/history.db` (default
-`~/.local/share/syncsh/history.db`). A **Sync Master Key** (SMK) wraps every
-event bundle and checkpoint. The SMK itself is wrapped in one or more **slots**:
+`~/.local/share/syncsh/history.db`). A **Sync Master Key** (`SMK`) wraps every
+event bundle and checkpoint. The `SMK` itself is wrapped in one or more **slots**:
 
-- a bech32 **recovery key** (`syncsh1…`), shown once at setup and never stored
+- A `bech32` **recovery key** (`syncsh1…`), shown once at setup and never stored
   on the remote
-- optional **FIDO2 hmac-secret** (YubiKey, Security Key over USB HID)
-- optional **YubiKey PIV**
+- Optional **`FIDO2` `hmac`-secret** (YubiKey, Security Key over USB HID)
+- Optional **YubiKey `PIV`**
 
 Devices exchange ciphertext through the configured transport. A login daemon
-syncs in the background after you unlock once (the SMK is kept in the OS
-keyring).
+syncs in the background after you unlock once
+(the `SMK` is kept in the Operating System keyring).
+
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/syncsh/config.yaml` | portable settings: transport, suggest, callbacks |
-| `~/.local/share/syncsh/local.yaml` | this machine’s device id and name |
-| `~/.local/share/syncsh/history.db` | local history and key metadata |
-| `~/.local/share/syncsh/daemon-status.json` | last daemon sync result |
+| `~/.config/syncsh/config.yaml` | Portable settings: transport, suggest, callbacks |
+| `~/.local/share/syncsh/local.yaml` | This machine’s device id and name |
+| `~/.local/share/syncsh/history.db` | Local history and key metadata |
+| `~/.local/share/syncsh/daemon-status.json` | Last daemon sync result |
+
 
 `config.yaml` is safe to copy or check into source control. Do not copy
 `local.yaml` between machines; a new device id is created locally on join.
 Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in
-user config (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
+user configuration (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
 
 ## Install
 
-Go 1.25+ is required. The `piv` build tag enables YubiKey PIV support.
+Go 1.25+ is required. The `piv` build tag enables YubiKey `PIV` support.
 
 ```sh
 task build
@@ -42,9 +45,9 @@ task build
 
 `task test` runs the unit tests. `task ci` also runs `golangci-lint`.
 
-## First device: setup
+## First Device: Setup
 
-Run **`syncsh setup` only on the first machine**. It creates a new SMK,
+Run **`syncsh setup` only on the first machine**. It creates a new `SMK`,
 writes the remote layout, prints a recovery key, and can enroll a hardware
 key and install the login daemon.
 
@@ -52,14 +55,14 @@ key and install the login daemon.
 syncsh setup
 ```
 
-Store the recovery key offline. It is not written to the remote. If the OS
-keyring is unavailable, unlock later with:
+Store the recovery key offline. It is not written to the remote.
+If the Operating System keyring is unavailable, unlock later with:
 
 ```sh
 SYNCSH_RECOVERY_KEY='syncsh1…' syncsh unlock
 ```
 
-Then enable the shell widget (Ctrl+R) and command recording:
+Then enable the shell widget (`Ctrl+R`) and command recording:
 
 ```sh
 # zsh - add to ~/.zshrc
@@ -72,10 +75,10 @@ eval "$(syncsh init bash)"
 syncsh init fish | source
 ```
 
-On zsh, `init` also installs **inline suggestions**: as you type, the rest of
+On `zsh`, `init` also installs **inline suggestions**: as you type, the rest of
 the most recent matching command appears in dim text. Right arrow accepts it
 when the cursor is at the end of the line (otherwise it still moves the
-cursor). Re-run `eval "$(syncsh init zsh)"` after changing these keys.
+cursor). Rerun `eval "$(syncsh init zsh)"` after changing these keys.
 
 ```yaml
 # ~/.config/syncsh/config.yaml
@@ -87,17 +90,17 @@ suggest:
 ```
 
 `accept` is a list; every entry is bound. Named keys: `Right`, `Tab`, `End`,
-`C-e`, `C-f`. Anything else is passed to zsh `bindkey` as-is. Set
-`enabled: false` to keep Ctrl+R search without ghost text. Bash and fish do
-not have inline suggestions yet.
+`C-e`, `C-f`. Anything else is passed to `zsh` `bindkey` as-is.
+Set `enabled: false` to keep `Ctrl+R` search without ghost text.
+Bash and fish do not have inline suggestions yet.
 
-## Additional devices: join, do not run setup
+## Additional Devices: Join, Do Not Run Setup
 
 A second machine must **join** the existing remote. Running `setup` again
-against the same folder creates a **new** SMK (generation `seq=1`) and
+against the same folder creates a **new** `SMK` (generation `seq=1`) and
 overwrites `metadata/manifest`, while leaving the old
 `keys/generations/<id>/manifest` files in place. History encrypted with the
-original SMK becomes unreadable, and the daemon can fail with:
+original `SMK` becomes unreadable, and the daemon can fail with:
 
 ```
 UNIQUE constraint failed: key_generations.seq
@@ -107,7 +110,7 @@ On the new device:
 
 1. Copy or create `~/.config/syncsh/config.yaml` pointing at the **same**
    remote path (or run setup’s prompts only if this device has no remote yet -
-   prefer writing the config by hand / copying it). Do **not** copy
+   prefer writing the configuration by hand / copying it). Do **not** copy
    `local.yaml`; this machine gets its own device id.
 2. Join:
 
@@ -119,9 +122,9 @@ eval "$(syncsh init zsh)"
 
 `device add` registers this device, pulls generations, restores history from
 the newest **checkpoint** when event bundles have already been garbage-collected,
-and stores the SMK in the keyring.
+and stores the `SMK` in the keyring.
 
-### Accidental second setup
+### Accidental Second Setup
 
 If `setup` was run more than once on the same remote:
 
@@ -147,7 +150,7 @@ Leftover `keys/generations/<other-id>/` directories on the remote are ignored
 after recover. You can delete them once `key status` shows the recovered
 generation as `active`.
 
-## Unlock and the daemon
+## Unlock and the Daemon
 
 The daemon cannot prompt for a FIDO touch every minute. Unlock once per
 session (or after reboot, depending on the keyring):
@@ -170,7 +173,7 @@ syncsh sync
 syncsh sync status
 ```
 
-### Post-sync callbacks
+### Post-Sync Callbacks
 
 Optional commands in `config.yaml` run after every successful sync (daemon or
 `syncsh sync`). They live under `sync.callbacks`. `$HOME` / `${VAR}` and `~/`
@@ -179,8 +182,8 @@ order. Remaining callbacks still run if one fails; the lock is released only
 after all of them have finished (success or failure). A failed callback fails
 the sync.
 
-A typical use is pushing the directory-transport folder to an rclone remote
-(`rclone sync SOURCE DEST` makes DEST match SOURCE):
+A typical use is pushing the directory-transport folder to an `rclone` remote
+(`rclone sync SOURCE DEST` makes `DEST` match `SOURCE`):
 
 ```yaml
 # ~/.config/syncsh/config.yaml
@@ -193,8 +196,8 @@ sync:
 ```
 
 That upload does not pull changes from Drive. Two opposite `rclone sync`
-commands cannot do both: `sync` deletes extras on DEST, so pull-then-push can
-wipe files syncsh just wrote locally, and push-then-pull can wipe files that
+commands cannot do both: `sync` deletes extras on `DEST`, so pull-then-push can
+wipe files `syncsh` just wrote locally, and push-then-pull can wipe files that
 existed only on the remote.
 
 For a union of both sides (no deletes; garbage-collected objects can reappear):
@@ -215,8 +218,8 @@ sync:
     - rclone bisync $HOME/GoogleDrive/syncsh gdrive:/syncsh
 ```
 
-Do not point rclone at a folder the Google Drive desktop app already syncs;
-they will fight over the same files. Use rclone **or** Drive desktop, not both
+Do not point `rclone` at a folder the Google Drive desktop app already syncs;
+they will fight over the same files. Use `rclone` **or** Drive desktop, not both
 on the same path.
 
 ## Keys
@@ -236,10 +239,10 @@ syncsh key recover [generation-id]
 `retained` so older bundles still decrypt. That is different from running
 `setup` twice, which produces two generations that both claim `seq=1`.
 
-FIDO-only Security Keys have no PIV applet. Plug them in over USB and use
+FIDO-only Security Keys have no `PIV` applet. Plug them in over USB and use
 `syncsh key fido add`. Do not install `pcscd` for those devices.
 
-## History, search, import
+## History, Search, Import
 
 ```sh
 syncsh                            # TUI (unique commands)
@@ -253,7 +256,7 @@ syncsh import atuin ~/.local/share/atuin/history.db
 The shell hook records `history start` / `history end` for each command.
 Tombstones (deletes from the TUI) propagate to other devices on the next sync.
 
-## Garbage collection
+## Garbage Collection
 
 When every active device has acknowledged a checkpoint, older event bundles
 can be deleted. The checkpoint snapshot is the bootstrap source for a device
@@ -267,18 +270,20 @@ syncsh device list
 syncsh device retire <device-id>   # required before GC if a machine is gone
 ```
 
-A device that never acks blocks GC. Retire it instead of deleting its files
+A device that never `acks` blocks `GC`. Retire it instead of deleting its files
 by hand.
 
 ## Transports
 
 Configured in `config.yaml` under `sync.transport`:
 
+
 | Value | Remote |
 | --- | --- |
 | `directory` (default) | `sync.directory.path` - any synced folder |
 | `rsync` | `sync.rsync.remote` |
 | `scp` | `sync.scp.host` / `user` / `path` / `port` |
+
 
 Path fields accept `$HOME` / `${VAR}` and `~/`.
 
@@ -302,13 +307,13 @@ syncsh database status
 syncsh database doctor
 ```
 
-`doctor` checks config, SQLite integrity, migrations, keyring, FIDO/PIV,
+`doctor` checks configuration, SQLite integrity, migrations, keyring, `FIDO`/`PIV`,
 transport, and the last daemon sync.
 
 ### `UNIQUE constraint failed: key_generations.seq`
 
 Two generation manifests on the remote share the same `seq` (almost always
-`1`) because `setup` was run more than once. Current syncsh skips leftover
+`1`) because `setup` was run more than once. Current `syncsh` skips left-over
 forks and keeps the generation named in `metadata/manifest`. If that active
 generation is the **new** empty fork, recover the original:
 
@@ -320,7 +325,7 @@ If you intended to start over and do not need old history, delete the unused
 `keys/generations/<id>/` directories and keep the generation in
 `metadata/manifest`.
 
-### `no active key generation` / empty keyring
+### `no active key generation` / Empty Keyring
 
 ```sh
 SYNCSH_RECOVERY_KEY='syncsh1…' syncsh unlock
@@ -333,14 +338,15 @@ syncsh unlock
 This device tried to run `setup` against a folder that already has
 `metadata/manifest`. Use `syncsh device add` or `syncsh key recover`.
 
-## Command reference
+## Command Reference
+
 
 | Command | Purpose |
 | --- | --- |
-| `syncsh setup` | First device only: identity, transport, SMK |
+| `syncsh setup` | First device only: identity, transport, `SMK` |
 | `syncsh device add` | Join an existing remote |
 | `syncsh device list` / `retire` | Device roster |
-| `syncsh unlock` | Wrap SMK into the OS keyring |
+| `syncsh unlock` | Wrap `SMK` into the Operating System keyring |
 | `syncsh sync` | Pull/push now |
 | `syncsh daemon` / `install` / `status` | Background sync |
 | `syncsh key …` | Slots, rotation, recover |
@@ -350,5 +356,6 @@ This device tried to run `setup` against a folder that already has
 | `syncsh init zsh\|bash\|fish` | Shell integration |
 | `syncsh completion bash\|zsh\|fish` | Completions |
 
+
 `SYNCSH_RECOVERY_KEY` is accepted by sync, unlock, device add, and key
-commands that need to unwrap the SMK.
+commands that need to unwrap the `SMK`.
