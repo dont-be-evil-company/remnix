@@ -169,9 +169,9 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.input.SetWidth(max(8, msg.Width-14))
+		m.width = max(1, msg.Width)
+		m.height = max(1, msg.Height)
+		m.input.SetWidth(max(8, m.width-14))
 		return m, nil
 	case tea.KeyReleaseMsg:
 		return m, nil
@@ -229,30 +229,31 @@ func (m model) View() tea.View {
 	if m.quitting || m.print {
 		return tea.NewView("")
 	}
-	w := m.width
-	if w < 40 {
-		w = 40
-	}
-	h := m.height
-	if h < 8 {
-		h = 8
-	}
+	w := max(1, m.width)
+	h := max(1, m.height)
+	// Leave one column so a full-width line plus '\n' does not wrap
+	// (terminals advance to the next row after the last column).
+	inner := max(1, w-1)
 
-	header := m.renderHeader(w)
-	help := m.renderHelp()
-	input := m.renderInput()
-	chrome := 4 // header, rule, help, input
+	header := clampLine(m.renderHeader(inner), inner)
+	help := clampLine(m.renderHelp(), inner)
+	input := clampLine(m.renderInput(), inner)
+	rule := styleRule.Render(strings.Repeat("─", inner))
+
+	chrome := lipgloss.Height(header) + 1 + lipgloss.Height(help) + lipgloss.Height(input)
 	listH := h - chrome
-	if listH < 3 {
-		listH = 3
+	if listH < 0 {
+		listH = 0
 	}
 
 	var b strings.Builder
 	b.WriteString(header)
 	b.WriteByte('\n')
-	b.WriteString(styleRule.Render(strings.Repeat("─", w)))
+	b.WriteString(rule)
 	b.WriteByte('\n')
-	b.WriteString(m.renderList(w, listH))
+	if listH > 0 {
+		b.WriteString(m.renderList(inner, listH))
+	}
 	b.WriteString(help)
 	b.WriteByte('\n')
 	b.WriteString(input)
@@ -260,6 +261,19 @@ func (m model) View() tea.View {
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
+}
+
+func clampLine(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	return ansi.Truncate(s, w, "…")
 }
 
 func (m model) renderHeader(w int) string {
@@ -314,7 +328,7 @@ func (m model) renderList(w, listH int) string {
 		b.WriteByte('\n')
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(m.renderRow(m.visible[i], i == m.cursor, w, now))
+		b.WriteString(clampLine(m.renderRow(m.visible[i], i == m.cursor, w, now), w))
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -357,7 +371,8 @@ func (m model) renderRow(e history.Entry, selected bool, w int, now time.Time) s
 	if remain < 8 {
 		remain = 8
 	}
-	cmd := ansi.Truncate(HighlightCommand(e.Command), remain, "…")
+	cmdText := strings.ReplaceAll(strings.ReplaceAll(e.Command, "\r", ""), "\n", " ")
+	cmd := ansi.Truncate(HighlightCommand(cmdText), remain, "…")
 	if selected {
 		cmd = lipgloss.NewStyle().Bold(true).Render(cmd)
 	}

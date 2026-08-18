@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -214,6 +215,43 @@ func TestCtrlDKeepsRowOnError(t *testing.T) {
 	}
 	if gm.status == "" {
 		t.Fatal("expected status")
+	}
+}
+
+func TestViewKeepsInputOnScreen(t *testing.T) {
+	entries := make([]history.Entry, 80)
+	for i := range entries {
+		entries[i] = history.Entry{
+			Command: strings.Repeat("echo lots of results ", 8) + fmt.Sprint(i),
+			StartTS: time.Unix(int64(i+1), 0),
+		}
+	}
+	m := New(entries, Options{Cwd: "/very/long/path/" + strings.Repeat("dir/", 20)})
+	got, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = got.(model)
+	v := m.View()
+	if h := lipgloss.Height(v.Content); h > 24 {
+		t.Fatalf("view height %d exceeds terminal 24\n%s", h, v.Content)
+	}
+	lines := strings.Split(v.Content, "\n")
+	if len(lines) == 0 || !strings.Contains(lines[len(lines)-1], "[ ALL ]") {
+		t.Fatalf("input should be the last line, got %q", lines[len(lines)-1])
+	}
+	for i, line := range lines {
+		if lipgloss.Width(line) > 80 {
+			t.Fatalf("line %d width %d > 80: %q", i, lipgloss.Width(line), line)
+		}
+	}
+
+	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = got.(model)
+	v = m.View()
+	if h := lipgloss.Height(v.Content); h > 24 {
+		t.Fatalf("cwd view height %d exceeds 24", h)
+	}
+	lines = strings.Split(v.Content, "\n")
+	if !strings.Contains(lines[len(lines)-1], "[ DIR ]") {
+		t.Fatalf("input should stay last after tab, got %q", lines[len(lines)-1])
 	}
 }
 
