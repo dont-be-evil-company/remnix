@@ -16,6 +16,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
 	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
 	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/history"
 	"github.com/mistweaverco/syncsh/internal/sync/gc"
 	"github.com/mistweaverco/syncsh/internal/transport/directory"
@@ -415,5 +416,221 @@ func TestUnlockPrefersCachedSMK(t *testing.T) {
 	}
 	if !bytes.Equal(got[m.GenerationID], smk) {
 		t.Fatal("cached SMK mismatch")
+	}
+}
+
+func TestRetiredDeviceStaysRetiredAfterSync(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	_, engA := machine(t, filepath.Join(root, "a"), "dev-a", "A")
+	engA.opts.Transport = directory.New(remote)
+	m, smk, encoded, err := rotation.BootstrapGeneration(1, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := recovery.Decode(encoded)
+	engA.opts.RecoverySecret = secret
+	if err := engA.InitializeRemote(ctx, m, smk); err != nil {
+		t.Fatal(err)
+	}
+
+	_, engB := machine(t, filepath.Join(root, "b"), "dev-b", "B")
+	engB.opts.Transport = directory.New(remote)
+	engB.opts.RecoverySecret = secret
+	if err := engB.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := engA.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := device.NewStore(engA.db).Get("dev-b")
+	if err != nil || !ok || got.Status != device.StatusActive {
+		t.Fatalf("expected B active before retire: ok=%v err=%v %+v", ok, err, got)
+	}
+
+	if err := engA.RetireDevice(ctx, "dev-b", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := DeviceFile{Version: CurrentVersion, ID: "dev-b", Name: "B", Status: device.StatusActive, Head: 1}
+	body, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(remote, "metadata", "devices", "dev-b.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(remote, "acks", "dev-b.ack"), []byte(`{"device_id":"dev-b","frontier":{"dev-a":1},"checkpoint_id":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := engA.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = device.NewStore(engA.db).Get("dev-b")
+	if err != nil || !ok || got.Status != device.StatusRetired {
+		t.Fatalf("retired device resurrected: ok=%v err=%v %+v", ok, err, got)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(remote, "metadata", "manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rm RemoteManifest
+	if err := json.Unmarshal(raw, &rm); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyRemote(rm, smk); err != nil {
+		t.Fatal(err)
+	}
+	foundRetired := false
+	for _, id := range rm.Retired {
+		if id == "dev-b" {
+			foundRetired = true
+		}
+	}
+	if !foundRetired {
+		t.Fatalf("manifest retired=%v devices=%v", rm.Retired, rm.Devices)
+	}
+	for _, id := range rm.Devices {
+		if id == "dev-b" {
+			t.Fatalf("retired device still in active list: %v", rm.Devices)
+		}
+	}
+
+	devs, err := device.NewStore(engA.db).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := gc.RequiredDevices(devs)
+	if len(required) != 1 || required[0] != "dev-a" {
+		t.Fatalf("gc required %v", required)
+	}
+}
+
+func TestPruneDeviceRemovesRosterAndKeepsHistory(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	dbA, engA := machine(t, filepath.Join(root, "a"), "dev-a", "A")
+	engA.opts.Transport = directory.New(remote)
+	m, smk, encoded, err := rotation.BootstrapGeneration(1, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := recovery.Decode(encoded)
+	engA.opts.RecoverySecret = secret
+	if err := engA.InitializeRemote(ctx, m, smk); err != nil {
+		t.Fatal(err)
+	}
+
+	dbB, engB := machine(t, filepath.Join(root, "b"), "dev-b", "B")
+	engB.opts.Transport = directory.New(remote)
+	engB.opts.RecoverySecret = secret
+	e1 := history.Entry{ID: "h-b", Command: "echo from-b", StartTS: time.Unix(1, 0).UTC(), DeviceID: "dev-b"}
+	if _, err := history.NewStore(dbB).Insert(e1); err != nil {
+		t.Fatal(err)
+	}
+	if err := engB.EnqueueHistoryCreated(e1); err != nil {
+		t.Fatal(err)
+	}
+	if err := engB.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := engA.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := engA.PruneDevice(ctx, "dev-a"); err == nil {
+		t.Fatal("expected prune of local device to fail")
+	}
+	if err := engA.PruneDevice(ctx, "dev-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, err := device.NewStore(engA.db).Get("dev-b"); err != nil || ok {
+		t.Fatalf("pruned device still in roster: ok=%v err=%v", ok, err)
+	}
+	got, err := history.NewStore(dbA).List(history.Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Command != "echo from-b" {
+		t.Fatalf("history should remain: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(remote, "metadata", "devices", "dev-b.json")); !os.IsNotExist(err) {
+		t.Fatalf("device file still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(remote, "acks", "dev-b.ack")); !os.IsNotExist(err) {
+		t.Fatalf("ack still present: %v", err)
+	}
+
+	stale := DeviceFile{Version: CurrentVersion, ID: "dev-b", Name: "B", Status: device.StatusActive, Head: 1}
+	body, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(remote, "metadata", "devices"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(remote, "metadata", "devices", "dev-b.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(remote, "acks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(remote, "acks", "dev-b.ack"), []byte(`{"device_id":"dev-b"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := engA.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := device.NewStore(engA.db).Get("dev-b"); err != nil || ok {
+		t.Fatalf("pruned device resurrected: ok=%v err=%v", ok, err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(remote, "metadata", "manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rm RemoteManifest
+	if err := json.Unmarshal(raw, &rm); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyRemote(rm, smk); err != nil {
+		t.Fatal(err)
+	}
+	foundPruned := false
+	for _, id := range rm.Pruned {
+		if id == "dev-b" {
+			foundPruned = true
+		}
+	}
+	if !foundPruned {
+		t.Fatalf("manifest pruned=%v retired=%v devices=%v", rm.Pruned, rm.Retired, rm.Devices)
+	}
+	for _, id := range append(append([]string{}, rm.Devices...), rm.Retired...) {
+		if id == "dev-b" {
+			t.Fatalf("pruned device still in devices/retired: devices=%v retired=%v", rm.Devices, rm.Retired)
+		}
+	}
+
+	if err := engB.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := engA.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := device.NewStore(engA.db).Get("dev-b"); err != nil || ok {
+		t.Fatalf("pruned device returned after peer sync: ok=%v err=%v", ok, err)
 	}
 }

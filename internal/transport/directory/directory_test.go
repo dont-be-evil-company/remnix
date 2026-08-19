@@ -62,3 +62,25 @@ func TestRejectDotDot(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestRemoveAllDeletesCheckpointDir(t *testing.T) {
+	root := t.TempDir()
+	tr := New(root)
+	ctx := context.Background()
+	if err := tr.PutAtomic(ctx, "checkpoints/old/manifest", bytes.NewReader([]byte("{}"))); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := tr.ListDirs(ctx, "checkpoints/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != "checkpoints/old" {
+		t.Fatalf("dirs %v", dirs)
+	}
+	if err := tr.Remove(ctx, "checkpoints/old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "checkpoints", "old")); !os.IsNotExist(err) {
+		t.Fatal("directory should be gone")
+	}
+}

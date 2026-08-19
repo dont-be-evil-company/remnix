@@ -49,21 +49,12 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 		}
 	}
 	plan := Plan{BlockedBy: blocked, Eligible: len(blocked) == 0 && len(required) > 0}
-	if !plan.Eligible {
-		return plan, nil
-	}
 
 	objs, err := tr.List(ctx, "")
 	if err != nil {
 		return plan, err
 	}
-	ckpt, err := resolveCheckpoint(ctx, tr, acks, required, checkpointID)
-	if err != nil {
-		return plan, err
-	}
-	plan.Checkpoint = ckpt.ID
-
-	ckptObjs := map[string][]string{}
+	ckptObjs := map[string]bool{}
 	ckptMeta := map[string]checkpoint.Manifest{}
 	for _, o := range objs {
 		base := path.Base(o.Key)
@@ -72,10 +63,27 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 			continue
 		}
 		if id := checkpointIDFromKey(o.Key); id != "" {
-			ckptObjs[id] = append(ckptObjs[id], o.Key)
-			continue
+			ckptObjs[id] = true
 		}
-		if strings.HasPrefix(o.Key, "events/") && ckpt.ID != "" {
+	}
+	if dirs, err := tr.ListDirs(ctx, "checkpoints/"); err == nil {
+		for _, dir := range dirs {
+			if id := checkpointIDFromKey(dir + "/"); id != "" {
+				ckptObjs[id] = true
+			}
+		}
+	}
+
+	if plan.Eligible {
+		ckpt, err := resolveCheckpoint(ctx, tr, acks, required, checkpointID)
+		if err != nil {
+			return plan, err
+		}
+		plan.Checkpoint = ckpt.ID
+		for _, o := range objs {
+			if !strings.HasPrefix(o.Key, "events/") || ckpt.ID == "" {
+				continue
+			}
 			raw, err := read(ctx, tr, o.Key)
 			if err != nil {
 				continue
@@ -89,43 +97,59 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 			}
 		}
 	}
-	if ckpt.ID != "" {
-		for _, o := range objs {
-			if id := checkpointIDFromKey(o.Key); id != "" {
-				if _, ok := ckptMeta[id]; ok {
-					continue
-				}
-				if !strings.HasSuffix(o.Key, "/manifest") {
-					continue
-				}
-				b, err := read(ctx, tr, o.Key)
-				if err != nil {
-					continue
-				}
-				m, err := checkpoint.DecodeManifest(b)
-				if err == nil {
-					ckptMeta[id] = m
-				}
-			}
-		}
-		for id, keys := range ckptObjs {
-			if id == ckpt.ID {
-				continue
-			}
-			if m, ok := ckptMeta[id]; ok && m.CreatedAt > ckpt.CreatedAt {
-				continue
-			}
-			plan.Checkpoints = append(plan.Checkpoints, keys...)
+	keepID := plan.Checkpoint
+	if keepID == "" {
+		if m, ok, err := NewestCheckpoint(ctx, tr); err == nil && ok {
+			keepID = m.ID
 		}
 	}
+	for _, o := range objs {
+		if !strings.HasSuffix(o.Key, "/manifest") {
+			continue
+		}
+		id := checkpointIDFromKey(o.Key)
+		if id == "" {
+			continue
+		}
+		b, err := read(ctx, tr, o.Key)
+		if err != nil {
+			continue
+		}
+		m, err := checkpoint.DecodeManifest(b)
+		if err == nil {
+			ckptMeta[id] = m
+		}
+	}
+	canDeleteFull := plan.Eligible && plan.Checkpoint != ""
+	keepMeta, haveKeep := ckptMeta[keepID]
+	for id := range ckptObjs {
+		if id == "" || id == keepID {
+			continue
+		}
+		m, hasMeta := ckptMeta[id]
+		if hasMeta && haveKeep && m.CreatedAt > keepMeta.CreatedAt {
+			continue
+		}
+		if hasMeta && !canDeleteFull {
+			continue
+		}
+		plan.Checkpoints = append(plan.Checkpoints, path.Join("checkpoints", id))
+	}
+	sort.Strings(plan.Checkpoints)
 	return plan, nil
 }
 
 func Execute(ctx context.Context, tr transport.Transport, plan Plan, dryRun bool) error {
-	if dryRun || !plan.Eligible {
+	if dryRun {
 		return nil
 	}
-	for _, key := range append(append(append(plan.TmpOrphans, plan.Bundles...), plan.Checkpoints...), plan.Generations...) {
+	keys := append([]string{}, plan.TmpOrphans...)
+	keys = append(keys, plan.Checkpoints...)
+	if plan.Eligible {
+		keys = append(keys, plan.Bundles...)
+		keys = append(keys, plan.Generations...)
+	}
+	for _, key := range keys {
 		if err := tr.Remove(ctx, key); err != nil {
 			return err
 		}
@@ -227,8 +251,8 @@ func allDominate(acks map[string]ack.File, required []string, frontier merge.Fro
 }
 
 func checkpointIDFromKey(key string) string {
-	parts := strings.Split(key, "/")
-	if len(parts) < 3 || parts[0] != "checkpoints" {
+	parts := strings.Split(strings.Trim(key, "/"), "/")
+	if len(parts) < 2 || parts[0] != "checkpoints" || parts[1] == "" {
 		return ""
 	}
 	return parts[1]

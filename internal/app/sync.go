@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
@@ -111,4 +112,47 @@ func (a *App) Sync(ctx context.Context, secret []byte, tokens []piv.Token, fido 
 		return err
 	}
 	return runCallbacks(ctx, a.Config.Sync.Callbacks)
+}
+
+func (a *App) SyncEngine(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device) error {
+	lock, err := AcquireLock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	eng, err := a.Engine(secret, tokens, fido)
+	if err != nil {
+		return err
+	}
+	return eng.Sync(ctx)
+}
+
+func (a *App) RunCallbacks(ctx context.Context) error {
+	return runCallbacks(ctx, a.Config.Sync.Callbacks)
+}
+
+func (a *App) RetireDevice(ctx context.Context, id string, secret []byte, tokens []piv.Token, fido []fido2.Device) error {
+	lock, err := AcquireLock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	eng, err := a.Engine(secret, tokens, fido)
+	if err != nil {
+		return err
+	}
+	return eng.RetireDevice(ctx, id, time.Now().UTC())
+}
+
+func (a *App) PruneDevice(ctx context.Context, id string, secret []byte, tokens []piv.Token, fido []fido2.Device) error {
+	lock, err := AcquireLock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	eng, err := a.Engine(secret, tokens, fido)
+	if err != nil {
+		return err
+	}
+	return eng.PruneDevice(ctx, id)
 }

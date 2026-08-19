@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"charm.land/huh/v2"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
@@ -136,18 +135,16 @@ func runDeviceRetire(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer a.Close()
-	if err := device.NewStore(a.DB).Retire(args[0], time.Now().UTC()); err != nil {
-		return err
-	}
-	eng, err := a.Engine(recoverySecretFromEnv(), tokensFromHardware(), nil)
+	return a.RetireDevice(cmd.Context(), args[0], recoverySecretFromEnv(), tokensFromHardware(), nil)
+}
+
+func runDevicePrune(cmd *cobra.Command, args []string) error {
+	a, err := openApp()
 	if err != nil {
 		return err
 	}
-	smks, active, err := eng.Unlock()
-	if err != nil {
-		return fmt.Errorf("unlock to publish retirement: %w", err)
-	}
-	return eng.PublishGeneration(cmd.Context(), active, smks[active.GenerationID])
+	defer a.Close()
+	return a.PruneDevice(cmd.Context(), args[0], recoverySecretFromEnv(), tokensFromHardware(), nil)
 }
 
 func runKeyStatus(cmd *cobra.Command, _ []string) error {

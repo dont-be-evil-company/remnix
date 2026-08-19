@@ -42,6 +42,16 @@ func TestRunCallbacksContinuesAfterFailure(t *testing.T) {
 	}
 }
 
+func TestRunCallbacksIncludesCommandOutput(t *testing.T) {
+	err := runCallbacks(context.Background(), []string{`echo "Safety abort: too many deletes" >&2; exit 1`})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "too many deletes") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunCallbacksExpandsEnvAndTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

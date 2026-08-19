@@ -209,6 +209,7 @@ func (e *Engine) fidoDevices(gens []generations.Manifest) ([]fido2.Device, func(
 func (e *Engine) pullMetadata(ctx context.Context) error {
 	tr := e.opts.Transport
 	var rm RemoteManifest
+	haveManifest := false
 	if b, err := getBytes(ctx, tr, "metadata/manifest"); err == nil {
 		if err := json.Unmarshal(b, &rm); err != nil {
 			return err
@@ -223,20 +224,17 @@ func (e *Engine) pullMetadata(ctx context.Context) error {
 		if err := e.keys.SetTrusted("remote", rm.ActiveGeneration, rm.Counter, "", b); err != nil {
 			return err
 		}
-		for _, id := range rm.Devices {
-			_, found, _ := e.devices.Get(id)
-			if !found {
-				_ = e.devices.Upsert(device.Device{ID: id, Name: id, Status: device.StatusActive})
-			}
-		}
-		for _, id := range rm.Retired {
-			_ = e.devices.Upsert(device.Device{ID: id, Name: id, Status: device.StatusRetired, RetiredAt: ptrTime(time.Now().UTC())})
-		}
+		haveManifest = true
+		e.applyRemoteRoster(rm)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) && !os.IsNotExist(err) {
 		return err
 	}
 	if err := e.importWantedDevices(ctx); err != nil {
 		return err
+	}
+	if haveManifest {
+		e.applyRetired(rm.Retired)
+		e.applyPruned(rm.Pruned)
 	}
 	raw, err := readAll(ctx, tr, "keys/generations")
 	if err != nil {
@@ -419,6 +417,9 @@ func (e *Engine) PublishAck(ctx context.Context, checkpointID string) error {
 }
 
 func (e *Engine) publishAck(ctx context.Context, checkpointID string) error {
+	if d, ok, err := e.devices.Get(e.opts.DeviceID); err == nil && ok && d.Status == device.StatusRetired {
+		return nil
+	}
 	f, err := e.heads.Get()
 	if err != nil {
 		return err
@@ -432,20 +433,40 @@ func (e *Engine) publishAck(ctx context.Context, checkpointID string) error {
 }
 
 func (e *Engine) publishDeviceHead(ctx context.Context) error {
+	return e.publishDeviceRecord(ctx, e.opts.DeviceID)
+}
+
+func (e *Engine) publishDeviceRecord(ctx context.Context, id string) error {
 	f, _ := e.heads.Get()
 	df := DeviceFile{
-		Version:  CurrentVersion,
-		ID:       e.opts.DeviceID,
-		Name:     e.opts.DeviceName,
-		Hostname: e.opts.Hostname,
-		Status:   device.StatusActive,
-		Head:     f[e.opts.DeviceID],
+		Version: CurrentVersion,
+		ID:      id,
+		Status:  device.StatusActive,
+		Head:    f[id],
+	}
+	if d, ok, err := e.devices.Get(id); err == nil && ok {
+		df.Name = d.Name
+		df.Hostname = d.Hostname
+		if d.Status != "" {
+			df.Status = d.Status
+		}
+	}
+	if id == e.opts.DeviceID {
+		if df.Name == "" {
+			df.Name = e.opts.DeviceName
+		}
+		if df.Hostname == "" {
+			df.Hostname = e.opts.Hostname
+		}
+	}
+	if df.Name == "" {
+		df.Name = id
 	}
 	b, err := json.Marshal(df)
 	if err != nil {
 		return err
 	}
-	return e.opts.Transport.PutAtomic(ctx, path.Join("metadata", "devices", e.opts.DeviceID+".json"), bytes.NewReader(b))
+	return e.opts.Transport.PutAtomic(ctx, path.Join("metadata", "devices", id+".json"), bytes.NewReader(b))
 }
 
 func eventExists(tx *sql.Tx, deviceID string, seq int64) (bool, error) {

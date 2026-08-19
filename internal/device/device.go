@@ -61,8 +61,8 @@ VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     hostname = excluded.hostname,
-    status = excluded.status,
-    retired_at = excluded.retired_at`,
+    status = CASE WHEN devices.status = 'retired' AND excluded.status = 'active' THEN devices.status ELSE excluded.status END,
+    retired_at = CASE WHEN devices.status = 'retired' AND excluded.status = 'active' THEN devices.retired_at ELSE excluded.retired_at END`,
 		dev.ID, dev.Name, nullString(dev.Hostname), dev.Status, dev.CreatedAt.UnixMilli(), unixMilliPtr(dev.RetiredAt),
 	)
 	return err
@@ -99,6 +99,21 @@ func (s *Store) List() ([]Device, error) {
 
 func (s *Store) Retire(id string, at time.Time) error {
 	res, err := s.db.Exec(`UPDATE devices SET status = ?, retired_at = ? WHERE id = ?`, StatusRetired, at.UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("device %s not found", id)
+	}
+	return nil
+}
+
+func (s *Store) Delete(id string) error {
+	res, err := s.db.Exec(`DELETE FROM devices WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}

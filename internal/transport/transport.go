@@ -16,4 +16,5 @@ type Transport interface {
 	Put(ctx context.Context, key string, r io.Reader) error
 	PutAtomic(ctx context.Context, key string, r io.Reader) error
 	Remove(ctx context.Context, key string) error
+	ListDirs(ctx context.Context, prefix string) ([]string, error)
 }

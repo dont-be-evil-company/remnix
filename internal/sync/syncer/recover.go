@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/mistweaverco/syncsh/internal/crypto/generations"
 	"github.com/mistweaverco/syncsh/internal/device"
@@ -15,6 +16,13 @@ import (
 func (e *Engine) RecoverGeneration(ctx context.Context, generationID string) (generations.Manifest, error) {
 	if err := e.importWantedDevices(ctx); err != nil {
 		return generations.Manifest{}, err
+	}
+	if b, err := getBytes(ctx, e.opts.Transport, "metadata/manifest"); err == nil {
+		var rm RemoteManifest
+		if json.Unmarshal(b, &rm) == nil {
+			e.applyRetired(rm.Retired)
+			e.applyPruned(rm.Pruned)
+		}
 	}
 	if generationID == "" {
 		ckpt, ok, err := gc.NewestCheckpoint(ctx, e.opts.Transport)
@@ -118,4 +126,57 @@ func (e *Engine) importWantedDevices(ctx context.Context) error {
 		})
 	}
 	return nil
+}
+
+func (e *Engine) applyRemoteRoster(rm RemoteManifest) {
+	skip := make(map[string]bool, len(rm.Retired)+len(rm.Pruned))
+	for _, id := range rm.Retired {
+		skip[id] = true
+	}
+	for _, id := range rm.Pruned {
+		skip[id] = true
+	}
+	for _, id := range rm.Devices {
+		if id == "" || skip[id] {
+			continue
+		}
+		_, found, _ := e.devices.Get(id)
+		if !found {
+			_ = e.devices.Upsert(device.Device{ID: id, Name: id, Status: device.StatusActive})
+		}
+	}
+}
+
+func (e *Engine) applyRetired(ids []string) {
+	at := time.Now().UTC()
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		name, hostname := id, ""
+		var retiredAt *time.Time
+		if d, ok, err := e.devices.Get(id); err == nil && ok {
+			name, hostname = d.Name, d.Hostname
+			retiredAt = d.RetiredAt
+		}
+		if retiredAt == nil {
+			retiredAt = ptrTime(at)
+		}
+		_ = e.devices.Upsert(device.Device{
+			ID:        id,
+			Name:      name,
+			Hostname:  hostname,
+			Status:    device.StatusRetired,
+			RetiredAt: retiredAt,
+		})
+	}
+}
+
+func (e *Engine) applyPruned(ids []string) {
+	for _, id := range ids {
+		if id == "" || id == e.opts.DeviceID {
+			continue
+		}
+		_ = e.devices.Delete(id)
+	}
 }

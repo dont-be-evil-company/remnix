@@ -119,7 +119,8 @@ VALUES (?, ?, ?, ?, ?, NULL)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     hostname = excluded.hostname,
-    status = CASE WHEN devices.status = 'retired' AND excluded.status = 'active' THEN devices.status ELSE excluded.status END`,
+    status = CASE WHEN devices.status = 'retired' AND excluded.status = 'active' THEN devices.status ELSE excluded.status END,
+    retired_at = CASE WHEN devices.status = 'retired' AND excluded.status = 'active' THEN devices.retired_at ELSE excluded.retired_at END`,
 		ev.DeviceID, p.Name, nullString(p.Hostname), status, time.Now().UnixMilli(),
 	)
 	return err

@@ -3,7 +3,9 @@ package gc
 import (
 	"bytes"
 	"context"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +123,45 @@ func TestGCCollectsCoveredBundles(t *testing.T) {
 	}
 	if _, err := tr.Get(ctx, newKey); err != nil {
 		t.Fatal("newer bundle must remain")
+	}
+	if _, err := os.Stat(filepath.Join(tr.Root, "checkpoints", "old")); !os.IsNotExist(err) {
+		t.Fatal("old checkpoint directory should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(tr.Root, "checkpoints", "new")); err != nil {
+		t.Fatal("kept checkpoint directory must remain")
+	}
+}
+
+func TestGCRemovesEmptyCheckpointDirsWhenBlocked(t *testing.T) {
+	root := t.TempDir()
+	tr := directory.New(root)
+	ctx := context.Background()
+	husk := filepath.Join(root, "checkpoints", "husk")
+	if err := os.MkdirAll(husk, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	keep := checkpoint.NewManifest("keep", "g1", merge.Frontier{"a": 1})
+	keep.CreatedAt = time.Now().UnixMilli()
+	putCheckpoint(t, ctx, tr, keep)
+
+	plan, err := Evaluate(ctx, tr, []string{"a", "missing"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Eligible {
+		t.Fatal("should be blocked")
+	}
+	if len(plan.Checkpoints) != 1 || plan.Checkpoints[0] != "checkpoints/husk" {
+		t.Fatalf("checkpoints %v", plan.Checkpoints)
+	}
+	if err := Execute(ctx, tr, plan, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(husk); !os.IsNotExist(err) {
+		t.Fatal("empty checkpoint dir should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(root, "checkpoints", "keep")); err != nil {
+		t.Fatal("valid checkpoint must remain while gc is blocked")
 	}
 }
 

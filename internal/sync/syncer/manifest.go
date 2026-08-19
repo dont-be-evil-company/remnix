@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
@@ -22,6 +23,7 @@ type RemoteManifest struct {
 	ActiveGeneration string   `json:"active_generation"`
 	Devices          []string `json:"devices"`
 	Retired          []string `json:"retired"`
+	Pruned           []string `json:"pruned,omitempty"`
 	UpdatedAt        int64    `json:"updated_at"`
 	MAC              string   `json:"mac"`
 }
@@ -85,4 +87,18 @@ func MustSMK(smk []byte) error {
 		return fmt.Errorf("invalid smk size")
 	}
 	return nil
+}
+
+func uniqueSorted(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }

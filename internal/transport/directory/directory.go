@@ -131,9 +131,44 @@ func (t *Transport) Remove(_ context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	err = os.Remove(p)
+	err = os.RemoveAll(p)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	return err
+}
+
+func (t *Transport) ListDirs(_ context.Context, prefix string) ([]string, error) {
+	root := t.Root
+	if prefix != "" {
+		p, err := t.resolve(prefix)
+		if err != nil {
+			return nil, err
+		}
+		root = p
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	base := strings.TrimSuffix(strings.TrimPrefix(prefix, "/"), "/")
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".tmp") || strings.Contains(name, ".tmp-") {
+			continue
+		}
+		key := name
+		if base != "" {
+			key = base + "/" + name
+		}
+		out = append(out, filepath.ToSlash(key))
+	}
+	return out, nil
 }

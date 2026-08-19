@@ -180,7 +180,9 @@ Optional commands in `config.yaml` run after every successful sync (daemon or
 are expanded. Each entry is run with `sh -c` from your home directory, in
 order. Remaining callbacks still run if one fails; the lock is released only
 after all of them have finished (success or failure). A failed callback fails
-the sync.
+the sync. The daemon runs callbacks **after** checkpoint/GC so a mass delete
+from GC is included in the same rclone push; a callback failure still reports
+in `syncsh daemon status` but does not skip GC.
 
 A typical use is pushing the directory-transport folder to an `rclone` remote
 (`rclone sync SOURCE DEST` makes `DEST` match `SOURCE`):
@@ -217,6 +219,10 @@ sync:
   callbacks:
     - rclone bisync $HOME/GoogleDrive/syncsh gdrive:/syncsh
 ```
+
+If GC removes a large fraction of remote objects, `rclone bisync` may abort
+with `too many deletes`. Run it once with `--force` to accept the cleanup,
+then leave the callback as-is.
 
 Do not point `rclone` at a folder the Google Drive desktop app already syncs;
 they will fight over the same files. Use `rclone` **or** Drive desktop, not both
@@ -268,10 +274,13 @@ syncsh gc
 syncsh gc status
 syncsh device list
 syncsh device retire <device-id>   # required before GC if a machine is gone
+syncsh device prune <device-id>    # permanently drop it from the roster
 ```
 
 A device that never `acks` blocks `GC`. Retire it instead of deleting its files
-by hand.
+by hand. `retire` is a soft delete: the device stays listed as `retired` and
+no longer blocks `GC`. `prune` removes it from the roster and remote device
+metadata; history recorded on that machine is kept.
 
 ## Transports
 
@@ -345,7 +354,7 @@ This device tried to run `setup` against a folder that already has
 | --- | --- |
 | `syncsh setup` | First device only: identity, transport, `SMK` |
 | `syncsh device add` | Join an existing remote |
-| `syncsh device list` / `retire` | Device roster |
+| `syncsh device list` / `retire` / `prune` | Device roster |
 | `syncsh unlock` | Wrap `SMK` into the Operating System keyring |
 | `syncsh sync` | Pull/push now |
 | `syncsh daemon` / `install` / `status` | Background sync |

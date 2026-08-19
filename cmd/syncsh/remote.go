@@ -55,6 +55,14 @@ func newDeviceCmd() *cobra.Command {
 		RunE:  runDeviceRetire,
 	}
 	cmd.AddCommand(retire)
+	prune := &cobra.Command{
+		Use:   "prune <device-id>",
+		Short: "Permanently remove a device from the roster",
+		Long:  "Delete the device from the local roster and remote metadata. Synced history from that machine is kept. Later syncs will not bring the device back. Use retire to only stop it blocking GC.",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runDevicePrune,
+	}
+	cmd.AddCommand(prune)
 	return cmd
 }
 

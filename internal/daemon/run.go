@@ -17,6 +17,7 @@ import (
 type Status struct {
 	OK         bool   `json:"ok"`
 	At         int64  `json:"at"`
+	HumanAt    string `json:"human_at"`
 	Error      string `json:"error,omitempty"`
 	GCDeleted  int    `json:"gc_deleted,omitempty"`
 	GCEligible bool   `json:"gc_eligible,omitempty"`
@@ -43,25 +44,25 @@ func Run(ctx context.Context) error {
 func runOnce(ctx context.Context) {
 	a, err := app.Open()
 	if err != nil {
-		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error()})
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error(), HumanAt: time.Now().Format(time.RFC3339)})
 		slog.Error("syncsh daemon: open", "err", err)
 		return
 	}
 	defer a.Close()
 	smks, err := keyring.Get(a.Config.DeviceID)
 	if err != nil {
-		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error()})
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error(), HumanAt: time.Now().Format(time.RFC3339)})
 		slog.Error("syncsh daemon: keyring", "err", err)
 		return
 	}
 	if len(smks) == 0 {
 		msg := "keyring empty; run syncsh unlock (recovery key or FIDO touch once)"
-		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: msg})
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: msg, HumanAt: time.Now().Format(time.RFC3339)})
 		slog.Warn(msg)
 		return
 	}
-	if err := a.Sync(ctx, nil, nil, []fido2.Device{}); err != nil {
-		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error()})
+	if err := a.SyncEngine(ctx, nil, nil, []fido2.Device{}); err != nil {
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error(), HumanAt: time.Now().Format(time.RFC3339)})
 		slog.Error("syncsh daemon: sync", "err", err)
 		return
 	}
@@ -70,14 +71,27 @@ func runOnce(ctx context.Context) {
 	}
 	plan, err := a.GarbageCollect(ctx, false)
 	if err != nil {
-		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: "gc: " + err.Error()})
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: "gc: " + err.Error(), HumanAt: time.Now().Format(time.RFC3339)})
 		slog.Error("syncsh daemon: gc", "err", err)
 		return
 	}
 	if n := plan.DeletedCount(); n > 0 {
 		slog.Info("syncsh daemon: gc", "deleted", n, "checkpoint", plan.Checkpoint)
 	}
-	writeStatus(Status{OK: true, At: time.Now().Unix(), GCDeleted: plan.DeletedCount(), GCEligible: plan.Eligible})
+	lock, err := app.AcquireLock()
+	if err != nil {
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: err.Error(), HumanAt: time.Now().Format(time.RFC3339), GCDeleted: plan.DeletedCount(), GCEligible: plan.Eligible})
+		slog.Error("syncsh daemon: callback lock", "err", err)
+		return
+	}
+	cbErr := a.RunCallbacks(ctx)
+	_ = lock.Release()
+	if cbErr != nil {
+		writeStatus(Status{OK: false, At: time.Now().Unix(), Error: cbErr.Error(), HumanAt: time.Now().Format(time.RFC3339), GCDeleted: plan.DeletedCount(), GCEligible: plan.Eligible})
+		slog.Error("syncsh daemon: callback", "err", cbErr)
+		return
+	}
+	writeStatus(Status{OK: true, At: time.Now().Unix(), GCDeleted: plan.DeletedCount(), GCEligible: plan.Eligible, HumanAt: time.Now().Format(time.RFC3339)})
 }
 
 func writeStatus(st Status) {

@@ -75,6 +75,9 @@ func (t *Transport) PutAtomic(ctx context.Context, key string, r io.Reader) erro
 func (t *Transport) Remove(ctx context.Context, key string) error {
 	return t.inner.Remove(ctx, key)
 }
+func (t *Transport) ListDirs(ctx context.Context, prefix string) ([]string, error) {
+	return t.inner.ListDirs(ctx, prefix)
+}
 
 func WorkDir(base string) string {
 	return filepath.Join(base, "scp-stage")
