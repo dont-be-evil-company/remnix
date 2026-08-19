@@ -120,3 +120,19 @@ func LockPath() string {
 func DaemonStatusPath() string {
 	return filepath.Join(DataDir(), "daemon-status.json")
 }
+
+// RuntimeDir is where the shell-agent unix socket lives. Prefer the session
+// runtime dir so the socket disappears on logout.
+func RuntimeDir() string {
+	if d := os.Getenv("SYNCSH_RUNTIME_DIR"); d != "" {
+		return d
+	}
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		return filepath.Join(d, appName)
+	}
+	return filepath.Join(os.TempDir(), appName)
+}
+
+func AgentSocketPath() string {
+	return filepath.Join(RuntimeDir(), "agent.sock")
+}

@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
+	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/mistweaverco/syncsh/internal/agent"
 	"github.com/mistweaverco/syncsh/internal/app"
 	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/history"
@@ -140,19 +141,21 @@ func runSuggest(cmd *cobra.Command, prefix, cwd string) error {
 	if prefix == "" {
 		return nil
 	}
+	if s, err := agent.DialRPC("suggest", prefix, cwd); err == nil {
+		if s != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), s)
+		}
+		return nil
+	}
 	a, err := openApp()
 	if err != nil {
 		return err
 	}
 	defer a.Close()
-	cands, err := history.NewStore(a.DB).SuggestPrefixCandidates(prefix, 64)
+	s, err := agent.NewService(a).Suggest(prefix, cwd)
 	if err != nil {
 		return err
 	}
-	s := search.BestSuggestion(prefix, cands, search.Context{
-		Cwd:      cwd,
-		DeviceID: a.Config.DeviceID,
-	})
 	if s != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), s)
 	}
@@ -184,12 +187,8 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	session, _ := cmd.Flags().GetString("session")
 	sh, _ := cmd.Flags().GetString("shell")
-	id, err := uuid.NewV7()
-	if err != nil {
-		return err
-	}
-	if history.ShouldSkip(command) {
-		fmt.Fprintln(cmd.OutOrStdout(), id.String())
+	if id, err := agent.DialRPC("start", command, cwd, session, sh); err == nil {
+		fmt.Fprintln(cmd.OutOrStdout(), id)
 		return nil
 	}
 	a, err := openApp()
@@ -197,39 +196,26 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer a.Close()
-	host, _ := os.Hostname()
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	e := history.Entry{
-		ID:        id.String(),
-		Command:   command,
-		StartTS:   time.Now().UTC(),
-		Cwd:       cwd,
-		SessionID: session,
-		Hostname:  host,
-		DeviceID:  a.Config.DeviceID,
-		Shell:     sh,
-	}
-	if _, err := history.NewStore(a.DB).Insert(e); err != nil {
+	id, err := agent.NewService(a).Start(command, cwd, session, sh)
+	if err != nil {
 		return err
 	}
-	if err := a.EnqueueHistoryCreated(e); err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), e.ID)
+	fmt.Fprintln(cmd.OutOrStdout(), id)
 	return nil
 }
 
 func runHistoryEnd(cmd *cobra.Command, _ []string) error {
 	id, _ := cmd.Flags().GetString("id")
 	exit, _ := cmd.Flags().GetInt("exit")
+	if _, err := agent.DialRPC("end", id, strconv.Itoa(exit)); err == nil {
+		return nil
+	}
 	a, err := openApp()
 	if err != nil {
 		return err
 	}
 	defer a.Close()
-	return history.NewStore(a.DB).Complete(id, time.Now().UTC(), exit)
+	return agent.NewService(a).End(id, exit)
 }
 
 func runImportHistfile(cmd *cobra.Command, args []string) error {

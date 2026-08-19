@@ -15,6 +15,9 @@ func TestIntegrationSupported(t *testing.T) {
 		if !strings.Contains(out, "history start") || !strings.Contains(out, "history end") {
 			t.Fatalf("%s hook missing lifecycle commands", sh)
 		}
+		if sh == "zsh" && !strings.Contains(out, `"$__syncsh_bin" agent`) {
+			t.Fatal("zsh hook must start the history agent")
+		}
 		if !strings.Contains(out, "search --interactive") {
 			t.Fatalf("%s hook missing interactive search", sh)
 		}
@@ -63,7 +66,9 @@ func TestZshInlineSuggest(t *testing.T) {
 	for _, want := range []string{
 		"POSTDISPLAY",
 		"syncsh-suggest-accept",
-		`suggest --prefix "$BUFFER"`,
+		`__syncsh_rpc suggest "$BUFFER"`,
+		`"$__syncsh_bin" agent`,
+		"zsh/net/socket",
 		"'Right'",
 		"'Tab'",
 		"bindkey $'\\t'",
@@ -98,7 +103,7 @@ func TestZshInlineSuggest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(off, "suggest --prefix") || strings.Contains(off, "syncsh-suggest-accept") {
+	if strings.Contains(off, "suggest --prefix") || strings.Contains(off, "syncsh-suggest-accept") || strings.Contains(off, "__syncsh_rpc suggest") {
 		t.Fatal("disabled suggest should not emit inline suggestion hooks")
 	}
 }

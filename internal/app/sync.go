@@ -22,11 +22,18 @@ import (
 )
 
 func (a *App) EnqueueHistoryCreated(e history.Entry) error {
-	eng, err := a.Engine(nil, nil, nil)
-	if err != nil {
-		return err
-	}
-	return eng.EnqueueHistoryCreated(e)
+	return a.LocalEngine().EnqueueHistoryCreated(e)
+}
+
+// LocalEngine records sync events in SQLite without opening a remote
+// transport. History start/end must not touch rclone; the login daemon syncs later.
+func (a *App) LocalEngine() *syncer.Engine {
+	host, _ := os.Hostname()
+	return syncer.New(a.DB, syncer.Options{
+		DeviceID:   a.Config.DeviceID,
+		DeviceName: a.Config.DeviceName,
+		Hostname:   host,
+	})
 }
 
 func (a *App) TombstoneCommand(command string) error {

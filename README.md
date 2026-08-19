@@ -86,7 +86,9 @@ Disable sync keeps local history. Remote data is not deleted.
 
 On zsh, `init` installs **Ctrl+R** search and **inline suggestions** (ghost
 text). Right arrow accepts when the cursor is at the end of the line.
-Configure accept keys in `config.yaml`:
+Suggestions talk to a long-lived `syncsh agent` over a unix socket (or a
+coproc fallback) so the shell does not spawn a process on every keystroke.
+The agent is started on first use. Configure accept keys in `config.yaml`:
 
 ```yaml
 suggest:
@@ -147,6 +149,7 @@ Files:
 | `~/.local/share/syncsh/local.yaml` | This machine’s device id and name |
 | `~/.local/share/syncsh/history.db` | Local history and key metadata |
 | `~/.local/share/syncsh/daemon-status.json` | Last daemon sync result |
+| `$XDG_RUNTIME_DIR/syncsh/agent.sock` | Local history agent (suggest / history RPC) |
 | `~/.local/share/syncsh/setup-state.json` | Crash-safe setup marker |
 
 Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in
@@ -222,6 +225,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh unlock` | SMK into the OS keyring |
 | `syncsh sync` / `sync status` | Pull/push now; health + probe |
 | `syncsh daemon` / `install` / `status` | Background sync |
+| `syncsh agent` | Local SQLite RPC for suggest / history |
 | `syncsh key …` | Slots, rotation, recover |
 | `syncsh search` / `suggest` / `stats` / `import` | Local history |
 | `syncsh gc` | Compact remote objects |

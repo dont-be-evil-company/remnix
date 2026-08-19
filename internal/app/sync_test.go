@@ -11,6 +11,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
 	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
 	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
+	"github.com/mistweaverco/syncsh/internal/history"
 )
 
 func TestMain(m *testing.M) {
@@ -180,5 +181,26 @@ func TestSyncSkipsCallbacksWhenEngineFails(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("callback ran after failed sync")
+	}
+}
+
+func TestEnqueueHistoryCreatedSkipsRemote(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	a, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.EnsureLocalDevice(); err != nil {
+		t.Fatal(err)
+	}
+	a.Config.Sync.Transport = "rclone"
+	a.Config.Sync.Rclone = &config.RcloneConfig{Primary: "missing"}
+	if err := a.EnqueueHistoryCreated(history.Entry{
+		ID: "h1", Command: "echo hi", DeviceID: a.Config.DeviceID,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

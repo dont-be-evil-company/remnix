@@ -17,6 +17,13 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := DataDir(); got != "/tmp/syncsh-data" {
 		t.Fatalf("DataDir = %q", got)
 	}
+	t.Setenv("SYNCSH_RUNTIME_DIR", "/tmp/syncsh-run")
+	if got := RuntimeDir(); got != "/tmp/syncsh-run" {
+		t.Fatalf("RuntimeDir = %q", got)
+	}
+	if got := AgentSocketPath(); got != "/tmp/syncsh-run/agent.sock" {
+		t.Fatalf("AgentSocketPath = %q", got)
+	}
 	if got := ConfigPath(); got != filepath.Join("/tmp/syncsh-cfg", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got)
 	}

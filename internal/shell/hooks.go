@@ -29,30 +29,101 @@ func Integration(shellName, binary string, opts Options) (string, error) {
 func zsh(bin string, opts Options) string {
 	suggest := ""
 	if opts.SuggestEnabled {
-		suggest = zshSuggest(bin, opts.SuggestAccept)
+		suggest = zshSuggest(opts.SuggestAccept)
 	}
 	return fmt.Sprintf(`# syncsh zsh integration
 # Add to ~/.zshrc: eval "$(%s init zsh)"
 
-__syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
+typeset -g __syncsh_bin=%s
+typeset -g __syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
+typeset -g __syncsh_fd=""
+typeset -g __syncsh_out=""
+typeset -g __syncsh_in=""
+
+__syncsh_sock() {
+  if [[ -n ${SYNCSH_RUNTIME_DIR:-} ]]; then
+    print -r -- "$SYNCSH_RUNTIME_DIR/agent.sock"
+  elif [[ -n ${XDG_RUNTIME_DIR:-} ]]; then
+    print -r -- "$XDG_RUNTIME_DIR/syncsh/agent.sock"
+  else
+    print -r -- "${TMPDIR:-/tmp}/syncsh/agent.sock"
+  fi
+}
+
+__syncsh_agent_reset() {
+  unset __syncsh_fd __syncsh_out __syncsh_in
+  __syncsh_fd=""
+  __syncsh_out=""
+  __syncsh_in=""
+}
+
+__syncsh_agent_connect() {
+  emulate -L zsh
+  [[ -n ${__syncsh_fd:-} || -n ${__syncsh_out:-} ]] && return 0
+  local sock
+  sock="$(__syncsh_sock)"
+  if zmodload zsh/net/socket 2>/dev/null && [[ -S $sock ]] && zsocket "$sock" 2>/dev/null; then
+    __syncsh_fd=$REPLY
+    return 0
+  fi
+  return 1
+}
+
+__syncsh_agent_ensure() {
+  emulate -L zsh
+  __syncsh_agent_connect && return 0
+  "$__syncsh_bin" agent >/dev/null 2>&1 &!
+  local i
+  for i in {1..20}; do
+    __syncsh_agent_connect && return 0
+    zmodload zsh/zselect 2>/dev/null && zselect -t 1 || sleep 0.01
+  done
+  if [[ -z ${__syncsh_out:-} ]]; then
+    coproc { "$__syncsh_bin" agent --stdio }
+    __syncsh_out=${COPROC[1]}
+    __syncsh_in=${COPROC[2]}
+  fi
+  [[ -n ${__syncsh_out:-} ]]
+}
+
+__syncsh_rpc() {
+  emulate -L zsh
+  __syncsh_agent_ensure || return 1
+  local op=$1 f out in
+  shift
+  out=${__syncsh_out:-$__syncsh_fd}
+  in=${__syncsh_in:-$__syncsh_fd}
+  print -n -u $out -- "$op"$'\0' || { __syncsh_agent_reset; return 1 }
+  for f in "$@"; do
+    print -n -u $out -- "$f"$'\0' || { __syncsh_agent_reset; return 1 }
+  done
+  local st
+  IFS= read -r -d $'\0' -u $in st || { __syncsh_agent_reset; return 1 }
+  IFS= read -r -d $'\0' -u $in REPLY || { __syncsh_agent_reset; return 1 }
+  [[ $st == ok ]]
+}
 
 __syncsh_preexec() {
   local cmd="${1:-}"
   [[ -z "$cmd" ]] && return
-  __syncsh_id="$(%s history start --command "$cmd" --cwd "$PWD" --session "$__syncsh_session" --shell zsh 2>/dev/null)" || true
+  if __syncsh_rpc start "$cmd" "$PWD" "$__syncsh_session" zsh; then
+    __syncsh_id="$REPLY"
+    return
+  fi
+  __syncsh_id="$("$__syncsh_bin" history start --command "$cmd" --cwd "$PWD" --session "$__syncsh_session" --shell zsh 2>/dev/null)" || true
 }
 
 __syncsh_precmd() {
   local code=$?
   if [[ -n "${__syncsh_id:-}" ]]; then
-    %s history end --id "$__syncsh_id" --exit "$code" >/dev/null 2>&1 || true
+    __syncsh_rpc end "$__syncsh_id" "$code" || "$__syncsh_bin" history end --id "$__syncsh_id" --exit "$code" >/dev/null 2>&1 || true
     unset __syncsh_id
   fi
 }
 
 syncsh-search() {
   local selected run=0
-  selected="$(%s search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || return
+  selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || return
   if [[ "$selected" == __syncsh_accept__:* ]]; then
     selected="${selected#__syncsh_accept__:}"
     run=1
@@ -75,10 +146,11 @@ bindkey -M viins '^R' syncsh-search
 autoload -Uz add-zsh-hook
 add-zsh-hook preexec __syncsh_preexec
 add-zsh-hook precmd __syncsh_precmd
-%s`, bin, bin, bin, bin, suggest)
+__syncsh_agent_ensure >/dev/null 2>&1 || true
+%s`, bin, zshQuote(bin), suggest)
 }
 
-func zshSuggest(bin string, accept []string) string {
+func zshSuggest(accept []string) string {
 	if len(accept) == 0 {
 		accept = []string{"Right"}
 	}
@@ -128,8 +200,12 @@ __syncsh_suggest_update() {
     return
   fi
   __syncsh_suggest_last="$BUFFER"
-  local s
-  s="$(%s suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
+  local s=""
+  if __syncsh_rpc suggest "$BUFFER" "$PWD"; then
+    s="$REPLY"
+  else
+    s="$("$__syncsh_bin" suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
+  fi
   if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
     POSTDISPLAY="${s#"$BUFFER"}"
   else
@@ -263,7 +339,7 @@ else
   zle -N self-insert __syncsh_suggest_self_insert
   zle -N backward-delete-char __syncsh_suggest_backward_delete
 fi
-`, strings.Join(quoted, " "), bin)
+`, strings.Join(quoted, " "))
 }
 
 func zshQuote(s string) string {

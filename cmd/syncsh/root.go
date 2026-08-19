@@ -43,6 +43,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(newSearchCmd())
 	cmd.AddCommand(newSuggestCmd())
+	cmd.AddCommand(newAgentCmd())
 	cmd.AddCommand(newStatsCmd())
 	cmd.AddCommand(newInitCmd())
 	cmd.AddCommand(newImportCmd())
