@@ -112,6 +112,29 @@ func TestRunNonInteractiveWithFakeFIDO2(t *testing.T) {
 	}
 }
 
+func TestRequireValidRemote(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	a, err := app.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.Config.Sync.Transport = "directory"
+	a.Config.Sync.Directory.Path = filepath.Join(root, "empty")
+	_ = os.MkdirAll(a.Config.Sync.Directory.Path, 0o700)
+	if err := RequireValidRemote(context.Background(), a); err == nil {
+		t.Fatal("empty remote should not be valid")
+	}
+	if _, err := RunNonInteractive(context.Background(), a, a.Config.Sync.Directory.Path, "t", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireValidRemote(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckpointAndGarbageCollect(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))

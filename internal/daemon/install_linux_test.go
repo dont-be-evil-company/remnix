@@ -15,4 +15,7 @@ func TestUnitContents(t *testing.T) {
 	if !strings.Contains(s, "WantedBy=default.target") {
 		t.Fatalf("missing WantedBy:\n%s", s)
 	}
+	if !strings.Contains(s, "TimeoutStopSec=600") {
+		t.Fatalf("missing TimeoutStopSec:\n%s", s)
+	}
 }

@@ -29,6 +29,7 @@ type searchOptions struct {
 	Limit       int
 	Exact       bool
 	Interactive bool
+	Explain     bool
 }
 
 func openApp() (*app.App, error) {
@@ -55,7 +56,8 @@ func runTUI(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return tui.RunOpts(entries, tui.Options{
-		Delete: func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+		Delete:   func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+		DeviceID: a.Config.DeviceID,
 	}, cmd.OutOrStdout())
 }
 
@@ -93,18 +95,28 @@ func runSearch(cmd *cobra.Command, opts searchOptions) error {
 			cwd, _ = os.Getwd()
 		}
 		return tui.RunOpts(entries, tui.Options{
-			Query:  opts.Query,
-			Cwd:    cwd,
-			Widget: true,
-			Delete: func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+			Query:     opts.Query,
+			Cwd:       cwd,
+			DeviceID:  a.Config.DeviceID,
+			SessionID: opts.Session,
+			Widget:    true,
+			Delete:    func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
 		}, cmd.OutOrStdout())
 	}
-	results := search.Rank(opts.Query, entries, opts.Exact)
+	results := search.RankWith(opts.Query, entries, opts.Exact, search.Context{
+		Cwd:       opts.Cwd,
+		DeviceID:  a.Config.DeviceID,
+		SessionID: opts.Session,
+	})
 	n := opts.Limit
 	if n <= 0 || n > len(results) {
 		n = len(results)
 	}
 	for _, r := range results[:n] {
+		if opts.Explain {
+			fmt.Fprintln(cmd.OutOrStdout(), search.Explain(r))
+			continue
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), r.Entry.Command)
 	}
 	return nil
@@ -124,7 +136,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runSuggest(cmd *cobra.Command, prefix, _ string) error {
+func runSuggest(cmd *cobra.Command, prefix, cwd string) error {
 	if prefix == "" {
 		return nil
 	}
@@ -133,10 +145,14 @@ func runSuggest(cmd *cobra.Command, prefix, _ string) error {
 		return err
 	}
 	defer a.Close()
-	s, err := history.NewStore(a.DB).SuggestPrefix(prefix)
+	cands, err := history.NewStore(a.DB).SuggestPrefixCandidates(prefix, 64)
 	if err != nil {
 		return err
 	}
+	s := search.BestSuggestion(prefix, cands, search.Context{
+		Cwd:      cwd,
+		DeviceID: a.Config.DeviceID,
+	})
 	if s != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), s)
 	}
@@ -168,15 +184,19 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	session, _ := cmd.Flags().GetString("session")
 	sh, _ := cmd.Flags().GetString("shell")
+	id, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	if history.ShouldSkip(command) {
+		fmt.Fprintln(cmd.OutOrStdout(), id.String())
+		return nil
+	}
 	a, err := openApp()
 	if err != nil {
 		return err
 	}
 	defer a.Close()
-	id, err := uuid.NewV7()
-	if err != nil {
-		return err
-	}
 	host, _ := os.Hostname()
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -264,6 +284,9 @@ func importEntries(cmd *cobra.Command, a *app.App, entries []history.Entry) erro
 	store := history.NewStore(a.DB)
 	var inserted int
 	for _, e := range entries {
+		if history.ShouldSkip(e.Command) {
+			continue
+		}
 		if e.ID == "" {
 			id, err := uuid.NewV7()
 			if err != nil {

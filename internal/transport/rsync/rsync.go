@@ -12,6 +12,11 @@ import (
 	"github.com/mistweaverco/syncsh/internal/transport/directory"
 )
 
+var (
+	_ transport.Transport = (*Transport)(nil)
+	_ transport.Session   = (*Transport)(nil)
+)
+
 type Transport struct {
 	Remote string
 	Work   string
@@ -53,6 +58,21 @@ func (t *Transport) Remove(ctx context.Context, key string) error {
 }
 func (t *Transport) ListDirs(ctx context.Context, prefix string) ([]string, error) {
 	return t.inner.ListDirs(ctx, prefix)
+}
+func (t *Transport) ListShallow(ctx context.Context, prefix string) ([]transport.Object, error) {
+	return t.inner.ListShallow(ctx, prefix)
+}
+func (t *Transport) Mkdir(ctx context.Context, key string) error {
+	return t.inner.Mkdir(ctx, key)
+}
+func (t *Transport) HealthCheck(ctx context.Context) (transport.HealthStatus, error) {
+	if t.Remote == "" {
+		return transport.HealthStatus{State: transport.HealthMisconfigured, Message: "rsync remote is empty"}, nil
+	}
+	return t.inner.HealthCheck(ctx)
+}
+func (t *Transport) Capabilities() transport.Capabilities {
+	return t.inner.Capabilities()
 }
 
 func runRsync(ctx context.Context, src, dst string) error {

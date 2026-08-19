@@ -16,6 +16,7 @@ func newSearchCmd() *cobra.Command {
 		limit       int
 		exact       bool
 		interactive bool
+		explain     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "search [query]",
@@ -40,6 +41,7 @@ func newSearchCmd() *cobra.Command {
 				Limit:       limit,
 				Exact:       exact,
 				Interactive: interactive,
+				Explain:     explain,
 			})
 		},
 	}
@@ -51,6 +53,7 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().IntVar(&exit, "exit", 0, "filter by exit code")
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum results")
 	cmd.Flags().BoolVar(&exact, "exact", false, "substring match instead of fuzzy ranking")
+	cmd.Flags().BoolVar(&explain, "explain", false, "print ranking score breakdown")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open fuzzy search TUI (Ctrl+R widget)")
 	return cmd
 }
@@ -73,7 +76,7 @@ func newSuggestCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed command prefix")
-	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory (unused; reserved for ranking)")
+	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory used for ranking")
 	return cmd
 }
 

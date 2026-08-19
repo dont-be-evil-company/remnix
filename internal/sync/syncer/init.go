@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"time"
 
 	"github.com/mistweaverco/syncsh/internal/crypto/generations"
 	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/mistweaverco/syncsh/internal/repository"
 	"github.com/mistweaverco/syncsh/internal/sync/event"
 	"github.com/mistweaverco/syncsh/internal/transport"
 )
@@ -20,23 +20,23 @@ import (
 var ErrRemoteInitialized = errors.New("remote already initialized; use 'syncsh device add' to join, or 'syncsh key recover' if setup created a conflicting generation")
 
 func RemoteInitialized(ctx context.Context, tr transport.Transport) (bool, error) {
-	_, err := getBytes(ctx, tr, "metadata/manifest")
-	if err == nil {
-		return true, nil
+	rep, err := repository.Probe(ctx, tr)
+	if err != nil {
+		return false, err
 	}
-	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+	return rep.Result == repository.Valid || rep.Result == repository.Partial || rep.Result == repository.UnsupportedVersion, nil
 }
 
 func (e *Engine) InitializeRemote(ctx context.Context, m generations.Manifest, smk []byte) error {
-	exists, err := RemoteInitialized(ctx, e.opts.Transport)
+	rep, err := repository.Probe(ctx, e.opts.Transport)
 	if err != nil {
 		return err
 	}
-	if exists {
+	switch rep.Result {
+	case repository.Valid:
 		return ErrRemoteInitialized
+	case repository.Partial, repository.UnsupportedVersion:
+		return fmt.Errorf("%w (%s)", ErrRemoteInitialized, rep.Message)
 	}
 	if err := e.keys.PutGeneration(m); err != nil {
 		return err

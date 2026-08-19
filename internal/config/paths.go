@@ -39,6 +39,72 @@ func ConfigPath() string {
 	return filepath.Join(ConfigDir(), "config.yaml")
 }
 
+// RcloneConfigPath is the machine-local rclone credential file. It lives next
+// to local.yaml in the data directory so ~/.config/syncsh/config.yaml can be
+// committed without tokens.
+func RcloneConfigPath() string {
+	return filepath.Join(DataDir(), "rclone.conf")
+}
+
+func legacyRcloneConfigPath() string {
+	return filepath.Join(ConfigDir(), "rclone.conf")
+}
+
+func rcloneConfHasContent(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() > 0
+}
+
+// LeftoverPortableRcloneConfig reports a secrets file still sitting in the
+// commit-safe config directory after migration to the data dir.
+func LeftoverPortableRcloneConfig() (string, bool) {
+	src := legacyRcloneConfigPath()
+	if src == RcloneConfigPath() {
+		return "", false
+	}
+	if !rcloneConfHasContent(src) {
+		return "", false
+	}
+	return src, true
+}
+
+// MigrateRcloneConfig moves a leftover rclone.conf out of the portable config
+// directory. Safe to call repeatedly. An empty destination (created by a
+// previous Init) is treated as missing so tokens are not stranded next to
+// config.yaml.
+func MigrateRcloneConfig() error {
+	dst := RcloneConfigPath()
+	src := legacyRcloneConfigPath()
+	if src == dst {
+		return nil
+	}
+	if rcloneConfHasContent(dst) {
+		return nil
+	}
+	if _, err := os.Stat(src); err != nil {
+		return nil
+	}
+	if err := os.MkdirAll(DataDir(), 0o700); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		_ = os.Chmod(dst, 0o600)
+		return nil
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+func SetupStatePath() string {
+	return filepath.Join(DataDir(), "setup-state.json")
+}
+
 func LocalPath() string {
 	return filepath.Join(DataDir(), "local.yaml")
 }

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/mistweaverco/syncsh/internal/redact"
 	"github.com/mistweaverco/syncsh/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,10 @@ func newRootCmd() *cobra.Command {
 			if debugFlag {
 				level = slog.LevelDebug
 			}
-			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+				Level:       level,
+				ReplaceAttr: redact.ReplaceAttr,
+			})))
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if versionFlag {
@@ -53,6 +57,27 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newUnlockCmd())
 	cmd.AddCommand(newDaemonCmd())
 	cmd.AddCommand(newCompletionCmd())
+	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newConfigCmd())
+	cmd.AddCommand(newRemoteCmd())
+	return cmd
+}
+
+func newVersionCmd() *cobra.Command {
+	var verbose bool
+	cmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the syncsh version",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if verbose {
+				cmd.Print(version.Verbose())
+				return nil
+			}
+			cmd.Println(version.Version)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "include embedded rclone engine version")
 	return cmd
 }
 

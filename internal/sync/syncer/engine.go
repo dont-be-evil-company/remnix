@@ -291,7 +291,7 @@ func chooseGeneration(ms []generations.Manifest, activeID, localID string) gener
 }
 
 func (e *Engine) pullBundles(ctx context.Context, smks map[string][]byte) error {
-	objs, err := e.opts.Transport.List(ctx, "events/")
+	objs, err := listEventBundles(ctx, e.opts.Transport)
 	if err != nil {
 		return err
 	}
@@ -303,6 +303,9 @@ func (e *Engine) pullBundles(ctx context.Context, smks map[string][]byte) error 
 	for _, o := range objs {
 		deviceID := bundleDevice(o.Key)
 		if deviceID == "" {
+			continue
+		}
+		if e.bundlePulled(o.Key) {
 			continue
 		}
 		raw, err := getBytes(ctx, e.opts.Transport, o.Key)
@@ -327,6 +330,9 @@ func (e *Engine) pullBundles(ctx context.Context, smks map[string][]byte) error 
 			return fmt.Errorf("bundle %s: %w", o.Key, err)
 		}
 		if err := e.applyEvents(evs); err != nil {
+			return err
+		}
+		if err := e.markBundlePulled(o.Key); err != nil {
 			return err
 		}
 		if h.SeqEnd > remoteHeads[h.DeviceID] {
@@ -467,6 +473,46 @@ func (e *Engine) publishDeviceRecord(ctx context.Context, id string) error {
 		return err
 	}
 	return e.opts.Transport.PutAtomic(ctx, path.Join("metadata", "devices", id+".json"), bytes.NewReader(b))
+}
+
+func listEventBundles(ctx context.Context, tr transport.Transport) ([]transport.Object, error) {
+	s, ok := tr.(interface {
+		ListShallow(context.Context, string) ([]transport.Object, error)
+	})
+	if !ok {
+		return tr.List(ctx, "events/")
+	}
+	var out []transport.Object
+	files, err := s.ListShallow(ctx, "events")
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, files...)
+	dirs, err := tr.ListDirs(ctx, "events")
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range dirs {
+		more, err := s.ListShallow(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, more...)
+	}
+	return out, nil
+}
+
+func (e *Engine) bundlePulled(key string) bool {
+	var v string
+	err := e.db.SQL.QueryRow(`SELECT value FROM transport_state WHERE key = ?`, "pulled:"+key).Scan(&v)
+	return err == nil && v != ""
+}
+
+func (e *Engine) markBundlePulled(key string) error {
+	_, err := e.db.SQL.Exec(`
+INSERT INTO transport_state (key, value) VALUES (?, '1')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, "pulled:"+key)
+	return err
 }
 
 func eventExists(tx *sql.Tx, deviceID string, seq int64) (bool, error) {

@@ -16,6 +16,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/sync/syncer"
 	"github.com/mistweaverco/syncsh/internal/transport"
 	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	rclonetr "github.com/mistweaverco/syncsh/internal/transport/rclone"
 	"github.com/mistweaverco/syncsh/internal/transport/rsync"
 	"github.com/mistweaverco/syncsh/internal/transport/scp"
 )
@@ -79,6 +80,9 @@ func (a *App) Engine(secret []byte, tokens []piv.Token, fido []fido2.Device) (*s
 }
 
 func (a *App) Transport() (transport.Transport, error) {
+	if !a.Config.Sync.IsEnabled() {
+		return nil, transport.ErrSyncDisabled
+	}
 	switch a.Config.Sync.Transport {
 	case "", "directory":
 		p := config.Expand(a.Config.Sync.Directory.Path)
@@ -93,6 +97,29 @@ func (a *App) Transport() (transport.Transport, error) {
 		work := filepath.Join(config.DataDir(), "stage-scp")
 		c := a.Config.Sync.SCP
 		return scp.New(config.Expand(c.Host), config.Expand(c.User), config.Expand(c.Path), work, c.Port), nil
+	case "rclone":
+		rc := a.Config.Sync.Rclone
+		if rc == nil {
+			return nil, fmt.Errorf("rclone transport is not configured; run syncsh config")
+		}
+		id := rc.Primary
+		var rem *config.RemoteConfig
+		for i := range rc.Remotes {
+			if rc.Remotes[i].ID == id || (id == "" && rc.Remotes[i].Enabled) {
+				rem = &rc.Remotes[i]
+				break
+			}
+		}
+		if rem == nil {
+			return nil, fmt.Errorf("rclone primary remote is not configured; run syncsh config")
+		}
+		if err := rclonetr.Init(config.RcloneConfigPath()); err != nil {
+			return nil, err
+		}
+		rclonetr.HardenRemote(rem.RcloneRemote)
+		return rclonetr.Open(context.Background(), rem.RcloneRemote, rem.Path)
+	case "none":
+		return nil, transport.ErrSyncDisabled
 	default:
 		return nil, fmt.Errorf("unknown transport %q", a.Config.Sync.Transport)
 	}

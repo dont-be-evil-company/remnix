@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"charm.land/huh/v2"
@@ -17,6 +18,8 @@ import (
 	"github.com/mistweaverco/syncsh/internal/daemon"
 	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/doctor"
+	"github.com/mistweaverco/syncsh/internal/redact"
+	"github.com/mistweaverco/syncsh/internal/repository"
 	"github.com/mistweaverco/syncsh/internal/setup"
 	"github.com/mistweaverco/syncsh/internal/sync/gc"
 	"github.com/mistweaverco/syncsh/internal/sync/merge"
@@ -48,7 +51,11 @@ func runSync(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer a.Close()
-	return a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil)
+	if err := a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
+		return err
+	}
+	daemon.RecordOK()
+	return nil
 }
 
 func runSyncStatus(cmd *cobra.Command, _ []string) error {
@@ -57,14 +64,48 @@ func runSyncStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer a.Close()
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "device: %s (%s)\n", a.Config.DeviceID, a.Config.DeviceName)
+	fmt.Fprintf(out, "enabled: %v\n", a.Config.Sync.IsEnabled())
+	fmt.Fprintf(out, "transport: %s\n", a.Config.Sync.Transport)
+	if rc := a.Config.Sync.Rclone; rc != nil {
+		fmt.Fprintf(out, "engine: %s\n", rc.EngineOrDefault())
+		fmt.Fprintf(out, "primary: %s\n", rc.Primary)
+		for _, r := range rc.Remotes {
+			if r.ID == rc.Primary {
+				fmt.Fprintf(out, "provider: %s\n", r.Provider)
+				fmt.Fprintf(out, "path: %s\n", r.Path)
+			}
+		}
+	}
+	if !a.Config.Sync.IsEnabled() {
+		fmt.Fprintln(out, "sync: disabled (local history only)")
+		return nil
+	}
+	tr, err := a.Transport()
+	if err != nil {
+		fmt.Fprintf(out, "transport error: %s\n", redact.String(err.Error()))
+		return nil
+	}
+	st, _ := tr.HealthCheck(cmd.Context())
+	fmt.Fprintf(out, "auth: %s %s\n", st.State, redact.String(st.Message))
+	rep, err := repository.Probe(cmd.Context(), tr)
+	if err != nil {
+		fmt.Fprintf(out, "probe: %s\n", redact.String(err.Error()))
+	} else {
+		fmt.Fprintf(out, "repository: %s %s\n", rep.Result, redact.String(rep.Message))
+	}
+	if _, err := tr.List(cmd.Context(), "metadata"); err != nil {
+		fmt.Fprintf(out, "read: %s\n", redact.String(err.Error()))
+	} else {
+		fmt.Fprintln(out, "read: ok")
+	}
 	f, err := merge.NewHeadStore(a.DB).Get()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "device: %s (%s)\n", a.Config.DeviceID, a.Config.DeviceName)
-	fmt.Fprintf(cmd.OutOrStdout(), "transport: %s\n", a.Config.Sync.Transport)
 	for id, seq := range f {
-		fmt.Fprintf(cmd.OutOrStdout(), "head %s = %d\n", id, seq)
+		fmt.Fprintf(out, "head %s = %d\n", id, seq)
 	}
 	return nil
 }
@@ -83,9 +124,15 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if res.Joined {
+		fmt.Fprintln(cmd.OutOrStdout(), "joined existing history")
+		return nil
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "setup complete")
-	fmt.Fprintln(cmd.OutOrStdout(), "store this recovery key offline; it is not written to the remote:")
-	fmt.Fprintln(cmd.OutOrStdout(), res.RecoveryKey)
+	if res.RecoveryKey != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "store this recovery key offline; it is not written to the remote:")
+		fmt.Fprintln(cmd.OutOrStdout(), res.RecoveryKey)
+	}
 	return nil
 }
 
@@ -114,16 +161,34 @@ func runDeviceAdd(cmd *cobra.Command, _ []string) error {
 	defer a.Close()
 	if name != "" {
 		a.Config.DeviceName = name
-		if err := a.Config.Save(); err != nil {
+	}
+	ranWizard := false
+	if setup.NeedsJoinWizard(a) {
+		if err := setup.ConfigureJoin(cmd.Context(), a); err != nil {
 			return err
 		}
+		ranWizard = true
+	} else if err := a.Config.Save(); err != nil {
+		return err
 	}
 	if err := a.EnsureLocalDevice(); err != nil {
 		return err
 	}
+	if !ranWizard {
+		fmt.Fprintln(cmd.ErrOrStderr(), "checking configured remote for syncsh metadata (not a Drive-wide scan)...")
+		if err := setup.RequireValidRemote(cmd.Context(), a); err != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), err)
+			fmt.Fprintln(cmd.ErrOrStderr(), "re-running join wizard; pick the folder that already contains metadata/")
+			if err := setup.ConfigureJoin(cmd.Context(), a); err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "joining (sync)...")
 	if err := a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
 		return err
 	}
+	daemon.RecordOK()
 	fmt.Fprintln(cmd.ErrOrStderr(), "device joined; SMK stored in the OS keyring when unlock succeeded")
 	offerDaemonInstall(cmd)
 	return nil
@@ -471,7 +536,14 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if last.At != 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%d gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, last.At, last.GCDeleted, last.GCEligible, last.Error)
+		when := last.HumanAt
+		if when == "" {
+			when = fmt.Sprintf("%d", last.At)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%s gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, when, last.GCDeleted, last.GCEligible, last.Error)
+		if !last.OK && strings.Contains(last.Error, "context canceled") {
+			fmt.Fprintln(cmd.OutOrStdout(), "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart syncsh-daemon")
+		}
 	}
 	return nil
 }

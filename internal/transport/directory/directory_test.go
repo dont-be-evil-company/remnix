@@ -63,6 +63,25 @@ func TestRejectDotDot(t *testing.T) {
 	}
 }
 
+func TestMkdirAndHealth(t *testing.T) {
+	root := t.TempDir()
+	tr := New(root)
+	ctx := context.Background()
+	if err := tr.Mkdir(ctx, "events/d1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "events", "d1")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tr.HealthCheck(ctx)
+	if err != nil || st.State != "ok" {
+		t.Fatalf("health %+v err=%v", st, err)
+	}
+	if !tr.Capabilities().AtomicRename {
+		t.Fatal("directory should advertise atomic rename")
+	}
+}
+
 func TestRemoveAllDeletesCheckpointDir(t *testing.T) {
 	root := t.TempDir()
 	tr := New(root)

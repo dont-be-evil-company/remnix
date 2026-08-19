@@ -32,13 +32,51 @@ type localFile struct {
 }
 
 type Sync struct {
-	Transport  string             `yaml:"transport"`
+	Enabled    *bool              `yaml:"enabled,omitempty"`
+	Transport  string             `yaml:"transport,omitempty"`
 	Interval   string             `yaml:"interval,omitempty"`
 	GCInterval string             `yaml:"gc_interval,omitempty"`
 	Directory  DirectoryTransport `yaml:"directory,omitempty"`
 	Rsync      RsyncTransport     `yaml:"rsync,omitempty"`
 	SCP        SCPTransport       `yaml:"scp,omitempty"`
+	Rclone     *RcloneConfig      `yaml:"rclone,omitempty"`
 	Callbacks  []string           `yaml:"callbacks,omitempty"`
+}
+
+type RcloneEngine string
+
+const (
+	RcloneEngineEmbedded RcloneEngine = "embedded"
+	RcloneEngineExternal RcloneEngine = "external"
+)
+
+type RcloneConfig struct {
+	Engine  RcloneEngine   `yaml:"engine,omitempty"`
+	Primary string         `yaml:"primary,omitempty"`
+	Remotes []RemoteConfig `yaml:"remotes,omitempty"`
+}
+
+func (c *RcloneConfig) EngineOrDefault() RcloneEngine {
+	if c == nil || c.Engine == "" {
+		return RcloneEngineEmbedded
+	}
+	return c.Engine
+}
+
+type RemoteConfig struct {
+	ID           string `yaml:"id"`
+	DisplayName  string `yaml:"name,omitempty"`
+	RcloneRemote string `yaml:"rclone_remote"`
+	Provider     string `yaml:"provider,omitempty"`
+	Path         string `yaml:"path,omitempty"`
+	Enabled      bool   `yaml:"enabled"`
+}
+
+func (s Sync) IsEnabled() bool {
+	if s.Enabled != nil {
+		return *s.Enabled
+	}
+	return s.Transport != "" && s.Transport != "none"
 }
 
 type DirectoryTransport struct {
@@ -113,6 +151,7 @@ func Load() (*Config, error) {
 		cfg.Version = CurrentVersion
 	}
 	cfg.Database.Path = DatabasePath()
+	_ = MigrateRcloneConfig()
 	if err := loadLocal(cfg); err != nil {
 		return nil, err
 	}

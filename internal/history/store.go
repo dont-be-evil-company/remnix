@@ -154,19 +154,31 @@ FROM history WHERE 1=1`)
 }
 
 func (s *Store) SuggestPrefix(prefix string) (string, error) {
-	if prefix == "" {
-		return "", nil
+	cands, err := s.SuggestPrefixCandidates(prefix, 32)
+	if err != nil || len(cands) == 0 {
+		return "", err
 	}
-	var command string
-	err := s.db.QueryRow(`
-SELECT command FROM history
+	return cands[0].Command, nil
+}
+
+func (s *Store) SuggestPrefixCandidates(prefix string, limit int) ([]Entry, error) {
+	if prefix == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 32
+	}
+	rows, err := s.db.Query(`
+SELECT `+historySelect("")+`
+FROM history
 WHERE deleted = 0 AND command LIKE ? ESCAPE '\' AND command != ?
 ORDER BY start_ts DESC, id DESC
-LIMIT 1`, likePrefix(prefix), prefix).Scan(&command)
-	if err == sql.ErrNoRows {
-		return "", nil
+LIMIT ?`, likePrefix(prefix), prefix, limit)
+	if err != nil {
+		return nil, err
 	}
-	return command, err
+	defer rows.Close()
+	return scanEntries(rows)
 }
 
 func likePrefix(s string) string {

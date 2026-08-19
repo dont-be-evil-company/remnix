@@ -1,6 +1,7 @@
 package search
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -84,7 +85,38 @@ func TestRankEmptyQueryNewestFirst(t *testing.T) {
 	}
 }
 
-func TestMinSpanConsecutive(t *testing.T) {
+func TestRankCwdAndFrequency(t *testing.T) {
+	now := time.Unix(1000, 0)
+	entries := []history.Entry{
+		{Command: "make test", StartTS: time.Unix(10, 0), Cwd: "/old"},
+		{Command: "make test", StartTS: time.Unix(20, 0), Cwd: "/old"},
+		{Command: "make clean", StartTS: time.Unix(900, 0), Cwd: "/proj"},
+	}
+	got := RankWith("make", entries, false, Context{Now: now, Cwd: "/proj"})
+	if got[0].Entry.Command != "make clean" {
+		t.Fatalf("cwd should lift recent make clean, got %q", got[0].Entry.Command)
+	}
+}
+
+func TestRankAncientFrequentDoesNotBeatRecentPrefix(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	entries := []history.Entry{
+		{Command: "ls", StartTS: time.Unix(1, 0)},
+		{Command: "ls", StartTS: time.Unix(2, 0)},
+		{Command: "ls", StartTS: time.Unix(3, 0)},
+		{Command: "ls", StartTS: time.Unix(4, 0)},
+		{Command: "lsync status", StartTS: time.Unix(999_000, 0)},
+	}
+	got := RankWith("ls", entries, false, Context{Now: now})
+	if got[0].Entry.Command != "lsync status" && got[0].Entry.Command != "ls" {
+		t.Fatalf("got %q", got[0].Entry.Command)
+	}
+	if got[0].Entry.Command != "ls" && got[0].Parts.Match < classPrefix*classWeight-100 {
+		t.Fatalf("prefix match should dominate: %+v", got[0])
+	}
+}
+
+func TestMinSpan(t *testing.T) {
 	span, ok := minSpan([]rune("daemon"), []rune("syncsh daemon uninstall"))
 	if !ok || span != 6 {
 		t.Fatalf("span=%d ok=%v", span, ok)
@@ -95,5 +127,36 @@ func TestMinSpanConsecutive(t *testing.T) {
 	}
 	if loose <= span {
 		t.Fatalf("loose span %d should be wider than consecutive %d", loose, span)
+	}
+}
+
+func TestBestSuggestionSkipsIdentical(t *testing.T) {
+	entries := []history.Entry{
+		{Command: "git", StartTS: time.Unix(3, 0)},
+		{Command: "git status", StartTS: time.Unix(2, 0)},
+	}
+	got := BestSuggestion("git", entries, Context{})
+	if got != "git status" {
+		t.Fatalf("got %q", got)
+	}
+	if BestSuggestion("missing", entries, Context{}) != "" {
+		t.Fatal("expected no suggestion")
+	}
+}
+
+func BenchmarkRank(b *testing.B) {
+	entries := make([]history.Entry, 8000)
+	now := time.Unix(1_000_000, 0)
+	for i := range entries {
+		entries[i] = history.Entry{
+			Command:  fmt.Sprintf("cmd-%d git status extra %d", i%50, i),
+			StartTS:  now.Add(-time.Duration(i) * time.Minute),
+			Cwd:      fmt.Sprintf("/p/%d", i%20),
+			DeviceID: "d1",
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = RankWith("git st", entries, false, Context{Now: now, Cwd: "/p/1", DeviceID: "d1"})
 	}
 }

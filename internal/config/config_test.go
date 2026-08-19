@@ -232,6 +232,180 @@ func TestLoadSuggestAccept(t *testing.T) {
 	}
 }
 
+func TestLegacyDirectoryConfigStaysEnabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("version: 1\nsync:\n  transport: directory\n  directory:\n    path: $HOME/GoogleDrive/syncsh\n")
+	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Sync.IsEnabled() {
+		t.Fatal("legacy config without enabled must stay enabled")
+	}
+	if cfg.Sync.Transport != "directory" {
+		t.Fatalf("transport = %q", cfg.Sync.Transport)
+	}
+	if cfg.Sync.Directory.Path != "$HOME/GoogleDrive/syncsh" {
+		t.Fatalf("path = %q", cfg.Sync.Directory.Path)
+	}
+	if cfg.Sync.Rclone != nil {
+		t.Fatal("rclone should be absent")
+	}
+}
+
+func TestSyncEnabledFalseDisables(t *testing.T) {
+	off := false
+	s := Sync{Enabled: &off, Transport: "rclone"}
+	if s.IsEnabled() {
+		t.Fatal("enabled: false")
+	}
+	on := true
+	if !(Sync{Enabled: &on}).IsEnabled() {
+		t.Fatal("enabled: true")
+	}
+	if (Sync{Transport: "none"}).IsEnabled() {
+		t.Fatal("transport none")
+	}
+	if (Sync{}).IsEnabled() {
+		t.Fatal("empty transport with nil enabled")
+	}
+}
+
+func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	cfg := Default()
+	on := true
+	cfg.Sync.Enabled = &on
+	cfg.Sync.Transport = "rclone"
+	cfg.Sync.Rclone = &RcloneConfig{
+		Engine:  RcloneEngineEmbedded,
+		Primary: "personal-drive",
+		Remotes: []RemoteConfig{{
+			ID:           "personal-drive",
+			DisplayName:  "Google Drive",
+			RcloneRemote: "syncsh-personal",
+			Provider:     "google-drive",
+			Path:         "syncsh",
+			Enabled:      true,
+		}},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	for _, leak := range []string{"password", "token", "secret_access_key", "client_secret"} {
+		if strings.Contains(s, leak) {
+			t.Fatalf("portable config leaked %s:\n%s", leak, s)
+		}
+	}
+	if !strings.Contains(s, "rclone_remote: syncsh-personal") {
+		t.Fatalf("missing rclone remote ref:\n%s", s)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Sync.Rclone == nil || loaded.Sync.Rclone.Primary != "personal-drive" {
+		t.Fatalf("rclone = %+v", loaded.Sync.Rclone)
+	}
+	if loaded.Sync.Rclone.EngineOrDefault() != RcloneEngineEmbedded {
+		t.Fatal("engine default")
+	}
+}
+
+func TestRcloneConfigPath(t *testing.T) {
+	t.Setenv("SYNCSH_DATA_DIR", "/tmp/syncsh-data")
+	if got := RcloneConfigPath(); got != "/tmp/syncsh-data/rclone.conf" {
+		t.Fatalf("RcloneConfigPath = %q", got)
+	}
+}
+
+func TestMigrateRcloneConfigFromPortableDir(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	src := filepath.Join(cfgDir, "rclone.conf")
+	if err := os.WriteFile(src, []byte("[gdrive]\ntype = drive\ntoken = secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateRcloneConfig(); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dataDir, "rclone.conf")
+	b, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "token = secret") {
+		t.Fatalf("migrated contents: %s", b)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("legacy rclone.conf should be removed from the portable config dir")
+	}
+}
+
+func TestMigrateRcloneConfigOverwritesEmptyDest(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	src := filepath.Join(cfgDir, "rclone.conf")
+	dst := filepath.Join(dataDir, "rclone.conf")
+	if err := os.WriteFile(src, []byte("[gdrive]\ntype = drive\ntoken = secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateRcloneConfig(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "token = secret") {
+		t.Fatalf("migrated contents: %s", b)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("legacy rclone.conf should be removed from the portable config dir")
+	}
+}
+
+func TestLeftoverPortableRcloneConfig(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	if p, ok := LeftoverPortableRcloneConfig(); ok {
+		t.Fatalf("unexpected leftover %s", p)
+	}
+	src := filepath.Join(cfgDir, "rclone.conf")
+	if err := os.WriteFile(src, []byte("[gdrive]\ntoken = secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := LeftoverPortableRcloneConfig()
+	if !ok || p != src {
+		t.Fatalf("got %q ok=%v", p, ok)
+	}
+}
+
 func TestLoadSuggestAcceptKeepsEnabledDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SYNCSH_CONFIG_DIR", dir)

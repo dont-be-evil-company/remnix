@@ -17,27 +17,31 @@ import (
 )
 
 type Options struct {
-	Query  string
-	Cwd    string
-	Widget bool
-	Delete func(history.Entry) error
+	Query     string
+	Cwd       string
+	DeviceID  string
+	SessionID string
+	Widget    bool
+	Delete    func(history.Entry) error
 }
 
 type model struct {
-	input    textinput.Model
-	all      []history.Entry
-	visible  []history.Entry
-	cursor   int
-	cwd      string
-	cwdOnly  bool
-	selected string
-	print    bool
-	run      bool
-	quitting bool
-	width    int
-	height   int
-	delete   func(history.Entry) error
-	status   string
+	input     textinput.Model
+	all       []history.Entry
+	visible   []history.Entry
+	cursor    int
+	cwd       string
+	deviceID  string
+	sessionID string
+	cwdOnly   bool
+	selected  string
+	print     bool
+	run       bool
+	quitting  bool
+	width     int
+	height    int
+	delete    func(history.Entry) error
+	status    string
 }
 
 var (
@@ -76,28 +80,34 @@ func New(entries []history.Entry, opts Options) model {
 	st.Focused.Text = lipgloss.NewStyle().Foreground(colArg)
 	ti.SetStyles(st)
 	m := model{
-		input:  ti,
-		all:    entries,
-		cwd:    opts.Cwd,
-		width:  80,
-		height: 24,
-		delete: opts.Delete,
+		input:     ti,
+		all:       entries,
+		cwd:       opts.Cwd,
+		deviceID:  opts.DeviceID,
+		sessionID: opts.SessionID,
+		width:     80,
+		height:    24,
+		delete:    opts.Delete,
 	}
 	m.refresh()
 	return m
 }
 
 func Filter(entries []history.Entry, query, cwd string, cwdOnly bool) []history.Entry {
+	return FilterWith(entries, query, search.Context{Cwd: cwd}, cwdOnly)
+}
+
+func FilterWith(entries []history.Entry, query string, ctx search.Context, cwdOnly bool) []history.Entry {
 	src := entries
-	if cwdOnly && cwd != "" {
+	if cwdOnly && ctx.Cwd != "" {
 		src = make([]history.Entry, 0, len(entries))
 		for _, e := range entries {
-			if e.Cwd == cwd {
+			if e.Cwd == ctx.Cwd {
 				src = append(src, e)
 			}
 		}
 	}
-	ranked := search.Rank(query, src, false)
+	ranked := search.RankWith(query, src, false, ctx)
 	out := make([]history.Entry, len(ranked))
 	for i, r := range ranked {
 		out[i] = r.Entry
@@ -114,7 +124,7 @@ func (m *model) refresh() {
 }
 
 func (m *model) refilter() {
-	ranked := Filter(m.all, m.input.Value(), m.cwd, m.cwdOnly)
+	ranked := FilterWith(m.all, m.input.Value(), search.Context{Cwd: m.cwd, DeviceID: m.deviceID, SessionID: m.sessionID}, m.cwdOnly)
 	m.visible = reverseEntries(ranked)
 }
 

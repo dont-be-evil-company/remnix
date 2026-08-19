@@ -50,7 +50,7 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 	}
 	plan := Plan{BlockedBy: blocked, Eligible: len(blocked) == 0 && len(required) > 0}
 
-	objs, err := tr.List(ctx, "")
+	objs, err := listLayoutObjects(ctx, tr)
 	if err != nil {
 		return plan, err
 	}
@@ -256,6 +256,61 @@ func checkpointIDFromKey(key string) string {
 		return ""
 	}
 	return parts[1]
+}
+
+func listLayoutObjects(ctx context.Context, tr transport.Transport) ([]transport.Object, error) {
+	var out []transport.Object
+	seen := map[string]bool{}
+	add := func(objs []transport.Object) {
+		for _, o := range objs {
+			if seen[o.Key] {
+				continue
+			}
+			seen[o.Key] = true
+			out = append(out, o)
+		}
+	}
+	for _, p := range []string{"metadata", "keys", "events", "checkpoints", "acks"} {
+		var objs []transport.Object
+		var err error
+		if p == "events" {
+			objs, err = listEventObjects(ctx, tr)
+		} else {
+			objs, err = tr.List(ctx, p)
+		}
+		if err != nil {
+			return nil, err
+		}
+		add(objs)
+	}
+	return out, nil
+}
+
+type shallowLister interface {
+	ListShallow(ctx context.Context, prefix string) ([]transport.Object, error)
+}
+
+func listEventObjects(ctx context.Context, tr transport.Transport) ([]transport.Object, error) {
+	s, ok := tr.(shallowLister)
+	if !ok {
+		return tr.List(ctx, "events")
+	}
+	files, err := s.ListShallow(ctx, "events")
+	if err != nil {
+		return nil, err
+	}
+	dirs, err := tr.ListDirs(ctx, "events")
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range dirs {
+		more, err := s.ListShallow(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, more...)
+	}
+	return files, nil
 }
 
 func loadAcks(ctx context.Context, tr transport.Transport) (map[string]ack.File, error) {

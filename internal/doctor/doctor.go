@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/mistweaverco/syncsh/internal/app"
 	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
@@ -16,8 +18,12 @@ import (
 	"github.com/mistweaverco/syncsh/internal/daemon"
 	"github.com/mistweaverco/syncsh/internal/db"
 	"github.com/mistweaverco/syncsh/internal/device"
+	"github.com/mistweaverco/syncsh/internal/redact"
+	"github.com/mistweaverco/syncsh/internal/repository"
+	"github.com/mistweaverco/syncsh/internal/setup"
 	"github.com/mistweaverco/syncsh/internal/sync/gc"
 	"github.com/mistweaverco/syncsh/internal/sync/merge"
+	"github.com/mistweaverco/syncsh/internal/transport"
 )
 
 type Report struct {
@@ -28,6 +34,7 @@ type Report struct {
 func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	r := Report{OK: true}
 	check := func(ok bool, msg string) {
+		msg = redact.String(msg)
 		fmt.Fprintln(w, msg)
 		if !ok {
 			r.OK = false
@@ -36,6 +43,9 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	}
 
 	check(a.Config.Version == config.CurrentVersion, fmt.Sprintf("config version: %d", a.Config.Version))
+	if p, ok := config.LeftoverPortableRcloneConfig(); ok {
+		check(false, "rclone credentials still in "+p+" (portable config dir); they belong in "+config.RcloneConfigPath())
+	}
 	check(a.Config.DeviceID != "", "device id: "+a.Config.DeviceID)
 	if a.Config.Database.Path != "" {
 		check(true, "database path: "+a.Config.Database.Path)
@@ -68,16 +78,53 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	reportHardware(check, hasFIDOSlot)
 	reportKeyringAndDaemon(check, a.Config.DeviceID)
 
-	if _, err := a.Transport(); err != nil {
+	if st, err := setup.LoadState(); err != nil {
+		check(false, "setup-state: "+err.Error())
+	} else if st != nil && st.Phase != "" {
+		check(false, fmt.Sprintf("partial setup: phase=%s generation=%s (retry syncsh setup, or delete setup-state.json to start over)", st.Phase, st.GenerationID))
+	}
+
+	if !a.Config.Sync.IsEnabled() {
+		check(true, "sync: disabled (local history only)")
+	} else if _, err := a.Transport(); err != nil {
 		check(false, "transport: "+err.Error())
 	} else {
 		check(true, "transport: "+a.Config.Sync.Transport)
+		if rc := a.Config.Sync.Rclone; rc != nil {
+			check(true, "rclone engine: "+string(rc.EngineOrDefault()))
+			check(true, "rclone primary: "+rc.Primary)
+			for _, rem := range rc.Remotes {
+				if rem.ID == rc.Primary {
+					check(true, "provider: "+rem.Provider+" path="+rem.Path)
+				}
+			}
+		}
 		tr, _ := a.Transport()
-		objs, err := tr.List(ctx, "")
+		st, _ := tr.HealthCheck(ctx)
+		check(st.State == transport.HealthOK || st.State == transport.HealthNotFound, "remote health: "+string(st.State)+" "+st.Message)
+		rep, err := repository.Probe(ctx, tr)
 		if err != nil {
-			check(false, "remote list: "+err.Error())
+			check(false, "repository probe: "+err.Error())
 		} else {
-			check(true, fmt.Sprintf("remote objects: %d", len(objs)))
+			check(rep.Result == repository.Valid || rep.Result == repository.Empty, "repository: "+rep.Result.String()+" "+rep.Message)
+		}
+		if tr.Capabilities().ListingExpensive {
+			check(true, "remote list: skipped (cloud folder listing is expensive)")
+		} else {
+			dirs, err := tr.ListDirs(ctx, "")
+			if err != nil {
+				check(false, "remote list: "+err.Error())
+			} else {
+				check(true, fmt.Sprintf("remote directories: %d", len(dirs)))
+			}
+		}
+		hid := uuid.NewString()
+		hkey := "metadata/health/" + a.Config.DeviceID + "/" + hid
+		if err := tr.PutAtomic(ctx, hkey, strings.NewReader("ok")); err != nil {
+			check(true, "write probe skipped: "+err.Error())
+		} else {
+			_ = tr.Remove(ctx, hkey)
+			check(true, "write probe: ok")
 		}
 		plan, err := gc.Evaluate(ctx, tr, gc.RequiredDevices(devs), "")
 		if err == nil {

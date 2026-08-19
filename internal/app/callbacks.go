@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/mistweaverco/syncsh/internal/redact"
 )
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -73,6 +74,7 @@ func callbackOutputTail(s string) string {
 		pick = pick[len(pick)-3:]
 	}
 	out := strings.Join(pick, "; ")
+	out = redact.String(out)
 	if len(out) > 400 {
 		return out[:400] + "…"
 	}

@@ -35,6 +35,7 @@ After=default.target
 ExecStart=%s daemon
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=600
 
 [Install]
 WantedBy=default.target

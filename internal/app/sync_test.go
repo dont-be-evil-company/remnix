@@ -52,6 +52,16 @@ func TestRunCallbacksIncludesCommandOutput(t *testing.T) {
 	}
 }
 
+func TestRunCallbacksRedactsSecrets(t *testing.T) {
+	err := runCallbacks(context.Background(), []string{`echo "ERROR password=supersecret token=abc" >&2; exit 1`})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "supersecret") || strings.Contains(err.Error(), "abc") {
+		t.Fatalf("leaked: %v", err)
+	}
+}
+
 func TestRunCallbacksExpandsEnvAndTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
