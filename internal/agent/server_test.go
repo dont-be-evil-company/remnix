@@ -55,6 +55,13 @@ func TestServiceSuggestStartEnd(t *testing.T) {
 	if got != "git status --short" && got != "git status" {
 		t.Fatalf("suggest=%q", got)
 	}
+	list, err := svc.SuggestList("git st", "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) == 0 {
+		t.Fatal("expected suggest-list hits")
+	}
 	if err := svc.End(id, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +100,13 @@ func TestListenAndServeRPC(t *testing.T) {
 	}
 	if got != "echo hi" {
 		t.Fatalf("suggest=%q", got)
+	}
+	items, err := DialRPCList(opSuggestList, "echo", "/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0] != "echo hi" {
+		t.Fatalf("suggest-list=%v", items)
 	}
 	if _, err := DialRPC(opEnd, id, "0"); err != nil {
 		t.Fatal(err)

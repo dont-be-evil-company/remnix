@@ -93,11 +93,16 @@ The agent is started on first use. Configure accept keys in `config.yaml`:
 ```yaml
 suggest:
   enabled: true
+  menu: false          # optional LSP-style picker under the prompt (zsh)
+  menu_max: 8
   accept:
     - Right
 ```
 
-Set `enabled: false` to keep Ctrl+R without ghost text.
+Set `enabled: false` to keep Ctrl+R without ghost text. Set `menu: true` to show a
+small list of matching history entries while typing; Up/Down (and Ctrl-P/N)
+cycle the selection, Esc dismisses, and the usual accept keys insert the
+selected command. Ghost text still previews the selected match.
 
 ## Search / suggestions
 
@@ -107,7 +112,9 @@ syncsh search --interactive       # Ctrl+R widget
 syncsh search git
 syncsh search --explain git
 syncsh suggest --prefix 'git st' --cwd "$PWD"
+syncsh suggest --prefix 'git st' --cwd "$PWD" --list
 syncsh stats
+syncsh inspect                    # history stats TUI (`explore` alias)
 syncsh import histfile ~/.histfile
 syncsh import atuin ~/.local/share/atuin/history.db
 ```
@@ -227,7 +234,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh daemon` / `install` / `status` | Background sync |
 | `syncsh agent` | Local SQLite RPC for suggest / history |
 | `syncsh key ...` | Slots, rotation, recover |
-| `syncsh search` / `suggest` / `stats` / `import` | Local history |
+| `syncsh search` / `suggest` / `stats` / `inspect` / `import` | Local history |
 | `syncsh gc` | Compact remote objects |
 | `syncsh doctor` | Read-only diagnostics |
 | `syncsh init zsh\|bash\|fish` | Shell integration |

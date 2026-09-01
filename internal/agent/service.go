@@ -34,6 +34,20 @@ func (s *Service) Suggest(prefix, cwd string) (string, error) {
 	}), nil
 }
 
+func (s *Service) SuggestList(prefix, cwd string) ([]string, error) {
+	if prefix == "" {
+		return nil, nil
+	}
+	cands, err := history.NewStore(s.app.DB).SuggestPrefixCandidates(prefix, 64)
+	if err != nil {
+		return nil, err
+	}
+	return search.Suggestions(prefix, cands, search.Context{
+		Cwd:      cwd,
+		DeviceID: s.app.Config.DeviceID,
+	}, s.app.Config.Suggest.MenuLimit()), nil
+}
+
 func (s *Service) Start(command, cwd, session, shell string) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {

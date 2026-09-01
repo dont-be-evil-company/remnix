@@ -44,13 +44,14 @@ func (a *App) TombstoneCommand(command string) error {
 	if err != nil {
 		return err
 	}
+	return a.TombstoneEntries(entries)
+}
+
+func (a *App) TombstoneEntries(entries []history.Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	eng, err := a.Engine(nil, nil, nil)
-	if err != nil {
-		return err
-	}
+	eng := a.LocalEngine()
 	for _, e := range entries {
 		if err := eng.EnqueueHistoryTombstoned(e); err != nil {
 			return err

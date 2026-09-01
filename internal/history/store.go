@@ -199,6 +199,135 @@ ORDER BY start_ts DESC, id DESC`, command)
 	return scanEntries(rows)
 }
 
+type SummarySort int
+
+const (
+	SortRecent SummarySort = iota
+	SortTop
+	SortFailed
+)
+
+func (s SummarySort) Next() SummarySort {
+	return (s + 1) % 3
+}
+
+type CommandSummary struct {
+	Command        string
+	Runs           int64
+	Success        int64
+	Failed         int64
+	FirstTS        time.Time
+	LastTS         time.Time
+	LastExit       *int
+	LastCwd        string
+	LastHost       string
+	LastDurationMs *int64
+}
+
+type SummaryFilter struct {
+	Query string
+	Sort  SummarySort
+	Limit int
+}
+
+func (s *Store) CommandSummaries(f SummaryFilter) ([]CommandSummary, error) {
+	var b strings.Builder
+	var args []any
+	b.WriteString(`
+SELECT
+    h.command,
+    agg.runs,
+    agg.success,
+    agg.failed,
+    agg.first_ts,
+    agg.last_ts,
+    h.exit_status,
+    h.cwd,
+    h.hostname,
+    h.duration_ms
+FROM history h
+INNER JOIN (
+    SELECT
+        command,
+        COUNT(*) AS runs,
+        COUNT(*) FILTER (WHERE exit_status = 0) AS success,
+        COUNT(*) FILTER (WHERE exit_status IS NOT NULL AND exit_status != 0) AS failed,
+        MIN(start_ts) AS first_ts,
+        MAX(start_ts) AS last_ts
+    FROM history
+    WHERE deleted = 0`)
+	if f.Query != "" {
+		b.WriteString(`
+    AND instr(lower(command), lower(?)) > 0`)
+		args = append(args, f.Query)
+	}
+	b.WriteString(`
+    GROUP BY command`)
+	if f.Sort == SortFailed {
+		b.WriteString(`
+    HAVING COUNT(*) FILTER (WHERE exit_status IS NOT NULL AND exit_status != 0) > 0`)
+	}
+	b.WriteString(`
+) agg ON agg.command = h.command
+WHERE h.deleted = 0
+AND NOT EXISTS (
+    SELECT 1 FROM history h2
+    WHERE h2.deleted = 0
+    AND h2.command = h.command
+    AND (h2.start_ts, h2.id) > (h.start_ts, h.id)
+)`)
+	switch f.Sort {
+	case SortTop:
+		b.WriteString(`
+ORDER BY agg.runs DESC, agg.last_ts DESC, h.command`)
+	default:
+		b.WriteString(`
+ORDER BY agg.last_ts DESC, h.command`)
+	}
+	if f.Limit > 0 {
+		b.WriteString(`
+LIMIT ?`)
+		args = append(args, f.Limit)
+	}
+	rows, err := s.db.Query(b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommandSummary
+	for rows.Next() {
+		var (
+			cs      CommandSummary
+			firstMS int64
+			lastMS  int64
+			exit    sql.NullInt64
+			cwd     sql.NullString
+			host    sql.NullString
+			dur     sql.NullInt64
+		)
+		if err := rows.Scan(
+			&cs.Command, &cs.Runs, &cs.Success, &cs.Failed, &firstMS, &lastMS,
+			&exit, &cwd, &host, &dur,
+		); err != nil {
+			return nil, err
+		}
+		cs.FirstTS = time.UnixMilli(firstMS).UTC()
+		cs.LastTS = time.UnixMilli(lastMS).UTC()
+		if exit.Valid {
+			v := int(exit.Int64)
+			cs.LastExit = &v
+		}
+		cs.LastCwd = cwd.String
+		cs.LastHost = host.String
+		if dur.Valid {
+			v := dur.Int64
+			cs.LastDurationMs = &v
+		}
+		out = append(out, cs)
+	}
+	return out, rows.Err()
+}
+
 func scanEntries(rows *sql.Rows) ([]Entry, error) {
 	var out []Entry
 	for rows.Next() {

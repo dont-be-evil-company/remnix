@@ -144,6 +144,34 @@ func TestBestSuggestionSkipsIdentical(t *testing.T) {
 	}
 }
 
+func TestSuggestionsUniqueAndLimit(t *testing.T) {
+	entries := []history.Entry{
+		{Command: "git status", StartTS: time.Unix(5, 0)},
+		{Command: "git status", StartTS: time.Unix(4, 0)},
+		{Command: "git stash", StartTS: time.Unix(3, 0)},
+		{Command: "git", StartTS: time.Unix(2, 0)},
+		{Command: "git switch", StartTS: time.Unix(1, 0)},
+	}
+	got := Suggestions("git", entries, Context{}, 2)
+	if len(got) != 2 {
+		t.Fatalf("limit: %v", got)
+	}
+	seen := map[string]struct{}{}
+	for _, s := range got {
+		if s == "git" {
+			t.Fatal("should skip exact prefix")
+		}
+		if _, ok := seen[s]; ok {
+			t.Fatalf("duplicate %q", s)
+		}
+		seen[s] = struct{}{}
+	}
+	all := Suggestions("git", entries, Context{}, 10)
+	if len(all) != 3 {
+		t.Fatalf("unique all: %v", all)
+	}
+}
+
 func BenchmarkRank(b *testing.B) {
 	entries := make([]history.Entry, 8000)
 	now := time.Unix(1_000_000, 0)

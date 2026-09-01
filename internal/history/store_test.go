@@ -160,6 +160,99 @@ func TestListByCommand(t *testing.T) {
 	}
 }
 
+func TestCommandSummaries(t *testing.T) {
+	s := testStore(t)
+	ok := 0
+	fail := 1
+	durNew := int64(20)
+	durOld := int64(5)
+	base := time.UnixMilli(1_000).UTC()
+	insert := func(id, cmd string, ts time.Time, cwd, host string, exit *int, dur *int64) {
+		t.Helper()
+		e := Entry{
+			ID: id, Command: cmd, StartTS: ts, Cwd: cwd, Hostname: host,
+			DeviceID: "d", ExitStatus: exit, DurationMs: dur,
+		}
+		if _, err := s.Insert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("1", "git status", base, "/old", "host-a", &ok, &durOld)
+	insert("2", "git status", base.Add(time.Second), "/new", "host-b", &fail, &durNew)
+	insert("3", "git status", base.Add(2*time.Second), "/new", "host-b", &ok, &durNew)
+	insert("4", "ls", base.Add(3*time.Second), "/tmp", "host-a", &ok, &durOld)
+	insert("5", "make test", base.Add(4*time.Second), "/src", "host-a", &fail, &durNew)
+	_, _ = s.Insert(Entry{ID: "6", Command: "gone", StartTS: base, DeviceID: "d"})
+	if err := s.Tombstone("6"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.CommandSummaries(SummaryFilter{Sort: SortRecent, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("recent len %d %+v", len(got), got)
+	}
+	if got[0].Command != "make test" || got[1].Command != "ls" || got[2].Command != "git status" {
+		t.Fatalf("recent order %+v", commandsOf(got))
+	}
+
+	gs := got[2]
+	if gs.Runs != 3 || gs.Success != 2 || gs.Failed != 1 {
+		t.Fatalf("git status counts %+v", gs)
+	}
+	if gs.FirstTS != base || gs.LastTS != base.Add(2*time.Second) {
+		t.Fatalf("git status times first=%s last=%s", gs.FirstTS, gs.LastTS)
+	}
+	if gs.LastCwd != "/new" || gs.LastHost != "host-b" || gs.LastExit == nil || *gs.LastExit != 0 {
+		t.Fatalf("last row %+v", gs)
+	}
+	if gs.LastDurationMs == nil || *gs.LastDurationMs != durNew {
+		t.Fatalf("last duration %+v", gs.LastDurationMs)
+	}
+
+	top, err := s.CommandSummaries(SummaryFilter{Sort: SortTop, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 3 || top[0].Command != "git status" || top[0].Runs != 3 {
+		t.Fatalf("top %+v", top)
+	}
+
+	failed, err := s.CommandSummaries(SummaryFilter{Sort: SortFailed, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 2 || failed[0].Command != "make test" || failed[1].Command != "git status" {
+		t.Fatalf("failed %+v", commandsOf(failed))
+	}
+
+	q, err := s.CommandSummaries(SummaryFilter{Query: "git", Sort: SortRecent, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q) != 1 || q[0].Command != "git status" {
+		t.Fatalf("query %+v", q)
+	}
+
+	limited, err := s.CommandSummaries(SummaryFilter{Sort: SortTop, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 || limited[0].Command != "git status" {
+		t.Fatalf("limit %+v", limited)
+	}
+}
+
+func commandsOf(in []CommandSummary) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = s.Command
+	}
+	return out
+}
+
 func TestSuggestPrefix(t *testing.T) {
 	s := testStore(t)
 	_, _ = s.Insert(Entry{ID: "1", Command: "git status", StartTS: time.UnixMilli(1).UTC(), DeviceID: "d"})

@@ -47,6 +47,20 @@ func serveOne(r *bufio.Reader, w io.Writer, svc *Service) error {
 			return writeErr(w, err.Error())
 		}
 		return writeOK(w, s)
+	case opSuggestList:
+		prefix, err := readField(r)
+		if err != nil {
+			return err
+		}
+		cwd, err := readField(r)
+		if err != nil {
+			return err
+		}
+		items, err := svc.SuggestList(prefix, cwd)
+		if err != nil {
+			return writeErr(w, err.Error())
+		}
+		return writeOKList(w, items)
 	case opStart:
 		command, err := readField(r)
 		if err != nil {
@@ -166,4 +180,22 @@ func DialRPC(op string, fields ...string) (string, error) {
 		}
 	}
 	return readReply(bufio.NewReader(conn))
+}
+
+func DialRPCList(op string, fields ...string) ([]string, error) {
+	conn, err := dial()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+	if err := writeField(conn, op); err != nil {
+		return nil, err
+	}
+	for _, f := range fields {
+		if err := writeField(conn, f); err != nil {
+			return nil, err
+		}
+	}
+	return readReplyList(bufio.NewReader(conn))
 }

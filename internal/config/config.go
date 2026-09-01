@@ -98,6 +98,8 @@ type SCPTransport struct {
 // Suggest is inline history completion (zsh ghost text).
 type Suggest struct {
 	Enabled *bool    `yaml:"enabled,omitempty"`
+	Menu    *bool    `yaml:"menu,omitempty"`
+	MenuMax int      `yaml:"menu_max,omitempty"`
 	Accept  []string `yaml:"accept,omitempty"`
 }
 
@@ -106,6 +108,20 @@ func (s Suggest) IsEnabled() bool {
 		return true
 	}
 	return *s.Enabled
+}
+
+func (s Suggest) MenuEnabled() bool {
+	return s.Menu != nil && *s.Menu
+}
+
+func (s Suggest) MenuLimit() int {
+	if s.MenuMax <= 0 {
+		return 8
+	}
+	if s.MenuMax > 32 {
+		return 32
+	}
+	return s.MenuMax
 }
 
 func (s Suggest) AcceptKeys() []string {

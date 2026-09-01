@@ -107,3 +107,46 @@ func TestZshInlineSuggest(t *testing.T) {
 		t.Fatal("disabled suggest should not emit inline suggestion hooks")
 	}
 }
+
+func TestZshSuggestMenu(t *testing.T) {
+	off, err := Integration("zsh", "syncsh", Options{SuggestEnabled: true, SuggestAccept: []string{"Right"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(off, "suggest-list") || strings.Contains(off, "syncsh-suggest-next") || strings.Contains(off, "┌") || strings.Contains(off, "#F5C2E7") {
+		t.Fatal("menu should be omitted when disabled")
+	}
+	on, err := Integration("zsh", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true, SuggestAccept: []string{"Right"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"suggest-list",
+		"__syncsh_suggest_menu_box",
+		"┌",
+		"__syncsh_suggest_suffix",
+		"syncsh-suggest-next",
+		"syncsh-suggest-prev",
+		"syncsh-suggest-dismiss",
+		"bindkey '^N'",
+		"bindkey '^P'",
+		"bindkey '\\e'",
+		"__syncsh_rpc_list",
+		"[0-9]##",
+		"__syncsh_menu_hl_sel",
+		"fg=#F5C2E7",
+		"bg=#313244",
+		"fg=#CDD6F4",
+		"--list",
+	} {
+		if !strings.Contains(on, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(on, "zle -M") {
+		t.Fatal("menu must not use zle -M status dumps")
+	}
+	if strings.Contains(on, "]10;?") || strings.Contains(on, "suggest_pick_hl") {
+		t.Fatal("menu must not query the terminal for colors")
+	}
+}

@@ -13,7 +13,17 @@ func TestRootHelp(t *testing.T) {
 }
 
 func TestUnlockAndDaemonHelp(t *testing.T) {
-	for _, args := range [][]string{{"unlock", "--help"}, {"daemon", "--help"}, {"agent", "--help"}, {"search", "--help"}, {"config", "--help"}, {"remote", "--help"}, {"version", "--help"}} {
+	for _, args := range [][]string{
+		{"unlock", "--help"},
+		{"daemon", "--help"},
+		{"agent", "--help"},
+		{"search", "--help"},
+		{"config", "--help"},
+		{"remote", "--help"},
+		{"version", "--help"},
+		{"inspect", "--help"},
+		{"explore", "--help"},
+	} {
 		cmd := newRootCmd()
 		cmd.SetArgs(args)
 		if err := cmd.Execute(); err != nil {

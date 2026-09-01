@@ -93,13 +93,35 @@ func RankWith(query string, entries []history.Entry, exact bool, ctx Context) []
 }
 
 func BestSuggestion(prefix string, entries []history.Entry, ctx Context) string {
+	s := Suggestions(prefix, entries, ctx, 1)
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
+}
+
+func Suggestions(prefix string, entries []history.Entry, ctx Context, limit int) []string {
+	if limit <= 0 {
+		limit = 8
+	}
 	ranked := RankWith(prefix, entries, false, ctx)
+	seen := make(map[string]struct{}, len(ranked))
+	out := make([]string, 0, limit)
 	for _, r := range ranked {
-		if r.Entry.Command != prefix {
-			return r.Entry.Command
+		cmd := r.Entry.Command
+		if cmd == prefix {
+			continue
+		}
+		if _, ok := seen[cmd]; ok {
+			continue
+		}
+		seen[cmd] = struct{}{}
+		out = append(out, cmd)
+		if len(out) >= limit {
+			break
 		}
 	}
-	return ""
+	return out
 }
 
 func Explain(r Result) string {

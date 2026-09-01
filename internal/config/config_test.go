@@ -434,3 +434,35 @@ func TestLoadSuggestAcceptKeepsEnabledDefault(t *testing.T) {
 		t.Fatalf("accept: %v", keys)
 	}
 }
+
+func TestLoadSuggestMenu(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Suggest.MenuEnabled() {
+		t.Fatal("menu should default off")
+	}
+	if cfg.Suggest.MenuLimit() != 8 {
+		t.Fatalf("default limit %d", cfg.Suggest.MenuLimit())
+	}
+	if err := os.WriteFile(ConfigPath(), []byte("version: 1\nsuggest:\n  menu: true\n  menu_max: 40\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Suggest.MenuEnabled() {
+		t.Fatal("menu should be on")
+	}
+	if cfg.Suggest.MenuLimit() != 32 {
+		t.Fatalf("cap 32, got %d", cfg.Suggest.MenuLimit())
+	}
+}

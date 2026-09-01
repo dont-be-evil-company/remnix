@@ -137,8 +137,63 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runSuggest(cmd *cobra.Command, prefix, cwd string) error {
+func runInspect(_ *cobra.Command, _ []string) error {
+	a, err := openApp()
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	store := history.NewStore(a.DB)
+	load := func(sort history.SummarySort, query string) ([]history.CommandSummary, history.Stats, error) {
+		st, err := store.Stats()
+		if err != nil {
+			return nil, st, err
+		}
+		sums, err := store.CommandSummaries(history.SummaryFilter{
+			Query: query,
+			Sort:  sort,
+			Limit: 5000,
+		})
+		return sums, st, err
+	}
+	summaries, st, err := load(history.SortRecent, "")
+	if err != nil {
+		return err
+	}
+	return tui.RunInspect(tui.InspectOptions{
+		Stats:     st,
+		Summaries: summaries,
+		Load:      load,
+		ListRuns:  store.ListByCommand,
+		DeleteCommand: func(command string) error {
+			return a.TombstoneCommand(command)
+		},
+		DeleteEntry: func(e history.Entry) error {
+			return a.TombstoneEntries([]history.Entry{e})
+		},
+	})
+}
+
+func runSuggest(cmd *cobra.Command, prefix, cwd string, list bool) error {
 	if prefix == "" {
+		return nil
+	}
+	if list {
+		items, err := agent.DialRPCList("suggest-list", prefix, cwd)
+		if err != nil {
+			a, err := openApp()
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+			items, err = agent.NewService(a).SuggestList(prefix, cwd)
+			if err != nil {
+				return err
+			}
+		}
+		for _, s := range items {
+			fmt.Fprintln(cmd.OutOrStdout(), s)
+		}
 		return nil
 	}
 	if s, err := agent.DialRPC("suggest", prefix, cwd); err == nil {
@@ -174,6 +229,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	out, err := shell.Integration(args[0], bin, shell.Options{
 		SuggestEnabled: cfg.Suggest.IsEnabled(),
 		SuggestAccept:  cfg.Suggest.AcceptKeys(),
+		SuggestMenu:    cfg.Suggest.MenuEnabled(),
 	})
 	if err != nil {
 		return err

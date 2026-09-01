@@ -204,3 +204,36 @@ func TestEnqueueHistoryCreatedSkipsRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTombstoneEntriesSkipsRemote(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	a, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.EnsureLocalDevice(); err != nil {
+		t.Fatal(err)
+	}
+	store := history.NewStore(a.DB)
+	e := history.Entry{
+		ID: "h1", Command: "echo hi", DeviceID: a.Config.DeviceID,
+	}
+	if _, err := store.Insert(e); err != nil {
+		t.Fatal(err)
+	}
+	a.Config.Sync.Transport = "rclone"
+	a.Config.Sync.Rclone = &config.RcloneConfig{Primary: "missing"}
+	if err := a.TombstoneEntries([]history.Entry{e}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ListByCommand("echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected tombstone, got %+v", got)
+	}
+}

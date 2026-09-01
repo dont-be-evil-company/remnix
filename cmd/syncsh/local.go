@@ -66,17 +66,28 @@ func newStatsCmd() *cobra.Command {
 	}
 }
 
+func newInspectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "inspect",
+		Aliases: []string{"explore"},
+		Short:   "Explore local history statistics",
+		RunE:    runInspect,
+	}
+}
+
 func newSuggestCmd() *cobra.Command {
 	var prefix, cwd string
+	var list bool
 	cmd := &cobra.Command{
 		Use:   "suggest",
 		Short: "Print the best history prefix match for inline shell suggestions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSuggest(cmd, prefix, cwd)
+			return runSuggest(cmd, prefix, cwd, list)
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed command prefix")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory used for ranking")
+	cmd.Flags().BoolVar(&list, "list", false, "print ranked prefix matches, one per line")
 	return cmd
 }
 
