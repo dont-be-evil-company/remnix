@@ -41,6 +41,12 @@ rclone config without modifying the original.
 
 Google Drive remotes get `skip_gdocs` and `skip_dangling_shortcuts` so native
 Docs/Sheets (size -1, `alt=media` downloads) are never listed or fetched.
+They also get `use_trash=false` so overwrites and GC permanently replace
+files. Drive allows multiple objects with the same name; PutAtomic uploads a
+temp object, moves it into place, then deletes every other object with that
+path (by file ID). Sync and GC run the same collapse on `acks/`,
+`metadata/`, and `keys/` so leftover duplicates from older builds are
+removed.
 
 ## Providers
 

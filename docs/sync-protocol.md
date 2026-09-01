@@ -19,7 +19,9 @@ pushes local events, writes acks, and may checkpoint.
 
 Writes use `Transport.PutAtomic`. Directory transport is tmp+rename. rclone
 writes a temp object then moves when the backend supports it; otherwise
-write-then-verify.
+write-then-verify. On backends that allow duplicate names (Google Drive),
+the move is followed by a sweep that deletes every other object with that
+path so acks and device metadata replace instead of stacking.
 
 `repository.Probe` inspects `metadata/manifest` **and** `keys/generations/`
 so a stray file is not treated as a live repository.

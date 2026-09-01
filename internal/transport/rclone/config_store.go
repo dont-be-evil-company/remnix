@@ -133,5 +133,10 @@ func hardenRemoteLocked(name string) bool {
 		config.FileSetValue(name, "skip_dangling_shortcuts", "true")
 		changed = true
 	}
+	// Permanent deletes so overwrite/GC can actually drop duplicate Drive files.
+	if v, _ := config.FileGetValue(name, "use_trash"); v != "false" {
+		config.FileSetValue(name, "use_trash", "false")
+		changed = true
+	}
 	return changed
 }

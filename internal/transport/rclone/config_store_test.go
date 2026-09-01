@@ -63,6 +63,9 @@ func TestHardenDriveRemote(t *testing.T) {
 	if v, _ := config.FileGetValue("gdrive", "skip_dangling_shortcuts"); v != "true" {
 		t.Fatalf("skip_dangling_shortcuts=%q", v)
 	}
+	if v, _ := config.FileGetValue("gdrive", "use_trash"); v != "false" {
+		t.Fatalf("use_trash=%q", v)
+	}
 }
 
 func TestFirstURL(t *testing.T) {

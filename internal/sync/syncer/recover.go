@@ -11,9 +11,13 @@ import (
 	"github.com/mistweaverco/syncsh/internal/crypto/generations"
 	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/sync/gc"
+	"github.com/mistweaverco/syncsh/internal/transport"
 )
 
 func (e *Engine) RecoverGeneration(ctx context.Context, generationID string) (generations.Manifest, error) {
+	if err := transport.Dedupe(ctx, e.opts.Transport); err != nil {
+		return generations.Manifest{}, err
+	}
 	if err := e.importWantedDevices(ctx); err != nil {
 		return generations.Manifest{}, err
 	}

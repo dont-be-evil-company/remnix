@@ -32,6 +32,9 @@ func (p Plan) DeletedCount() int {
 }
 
 func Evaluate(ctx context.Context, tr transport.Transport, required []string, checkpointID string) (Plan, error) {
+	if err := transport.Dedupe(ctx, tr); err != nil {
+		return Plan{}, err
+	}
 	acks, err := loadAcks(ctx, tr)
 	if err != nil {
 		return Plan{}, err
@@ -371,7 +374,12 @@ func loadAcks(ctx context.Context, tr transport.Transport) (map[string]ack.File,
 		return nil, err
 	}
 	out := map[string]ack.File{}
+	seen := map[string]bool{}
 	for _, o := range objs {
+		if seen[o.Key] {
+			continue
+		}
+		seen[o.Key] = true
 		b, err := read(ctx, tr, o.Key)
 		if err != nil {
 			return nil, err

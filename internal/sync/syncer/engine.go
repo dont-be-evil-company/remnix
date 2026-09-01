@@ -74,6 +74,9 @@ func (e *Engine) Sync(ctx context.Context) error {
 		}
 		defer func() { _ = s.End(ctx) }()
 	}
+	if err := transport.Dedupe(ctx, e.opts.Transport); err != nil {
+		return err
+	}
 	if err := e.pullMetadata(ctx); err != nil {
 		return err
 	}
@@ -544,6 +547,9 @@ func readAll(ctx context.Context, tr transport.Transport, prefix string) (map[st
 	}
 	out := map[string][]byte{}
 	for _, o := range objs {
+		if _, ok := out[o.Key]; ok {
+			continue
+		}
 		b, err := getBytes(ctx, tr, o.Key)
 		if err != nil {
 			return nil, err

@@ -53,6 +53,20 @@ type Transport interface {
 	Capabilities() Capabilities
 }
 
+// Deduper collapses same-path objects on backends that allow duplicate names
+// (Google Drive). Directory and S3-style transports do not implement it.
+type Deduper interface {
+	Dedupe(ctx context.Context) error
+}
+
+func Dedupe(ctx context.Context, tr Transport) error {
+	d, ok := tr.(Deduper)
+	if !ok {
+		return nil
+	}
+	return d.Dedupe(ctx)
+}
+
 // Session is implemented by rsync/scp-style transports that stage a local copy.
 type Session interface {
 	Begin(ctx context.Context) error

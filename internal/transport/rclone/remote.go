@@ -19,6 +19,7 @@ import (
 )
 
 var _ transport.Transport = (*Transport)(nil)
+var _ transport.Deduper = (*Transport)(nil)
 
 type Transport struct {
 	fs     fs.Fs
@@ -62,8 +63,7 @@ func (t *Transport) List(ctx context.Context, prefix string) ([]transport.Object
 			return
 		}
 		key := o.Remote()
-		base := path.Base(key)
-		if strings.HasSuffix(key, ".tmp") || strings.Contains(base, ".tmp-") {
+		if isTempName(key) {
 			return
 		}
 		out = append(out, transport.Object{Key: key, Size: o.Size()})
@@ -109,8 +109,7 @@ func (t *Transport) ListShallow(ctx context.Context, prefix string) ([]transport
 			return
 		}
 		key := o.Remote()
-		base := path.Base(key)
-		if strings.HasSuffix(key, ".tmp") || strings.Contains(base, ".tmp-") {
+		if isTempName(key) {
 			return
 		}
 		out = append(out, transport.Object{Key: key, Size: o.Size()})
@@ -158,28 +157,49 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 	if atomic {
 		upload = key + ".tmp-" + uuid.NewString()
 	}
-	src := object.NewStaticObjectInfo(upload, time.Now(), int64(len(data)), true, nil, t.fs)
+	obj, err := t.upload(ctx, upload, data)
+	if err != nil {
+		return err
+	}
+	if !atomic || upload == final {
+		t.removeOthers(ctx, final, obj)
+		return nil
+	}
+	moved, err := t.rename(ctx, obj, final, data)
+	if err != nil {
+		_ = obj.Remove(ctx)
+		return err
+	}
+	t.removeOthers(ctx, final, moved)
+	return nil
+}
+
+func (t *Transport) upload(ctx context.Context, key string, data []byte) (fs.Object, error) {
+	src := object.NewStaticObjectInfo(key, time.Now(), int64(len(data)), true, nil, t.fs)
 	obj, err := t.fs.Put(ctx, bytes.NewReader(data), src)
 	if err != nil {
 		if obj != nil {
 			_ = obj.Remove(ctx)
 		}
-		return mapErr(err)
+		return nil, mapErr(err)
 	}
 	if obj.Size() != int64(len(data)) {
 		_ = obj.Remove(ctx)
-		return fmt.Errorf("rclone put size mismatch: got %d want %d", obj.Size(), len(data))
+		return nil, fmt.Errorf("rclone put size mismatch: got %d want %d", obj.Size(), len(data))
 	}
-	if !atomic || upload == final {
-		return nil
-	}
-	t.removeNamed(ctx, final)
+	return obj, nil
+}
+
+func (t *Transport) rename(ctx context.Context, obj fs.Object, final string, data []byte) (fs.Object, error) {
 	if move := t.fs.Features().Move; move != nil {
-		if _, err := move(ctx, obj, final); err != nil {
-			_ = obj.Remove(ctx)
-			return mapErr(err)
+		moved, err := move(ctx, obj, final)
+		if err != nil {
+			return nil, mapErr(err)
 		}
-		return nil
+		if moved != nil {
+			return moved, nil
+		}
+		return obj, nil
 	}
 	finalSrc := object.NewStaticObjectInfo(final, time.Now(), int64(len(data)), true, nil, t.fs)
 	finalObj, err := t.fs.Put(ctx, bytes.NewReader(data), finalSrc)
@@ -188,26 +208,110 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 		if finalObj != nil {
 			_ = finalObj.Remove(ctx)
 		}
-		return mapErr(err)
+		return nil, mapErr(err)
+	}
+	return finalObj, nil
+}
+
+// Dedupe deletes extra objects that share a path. Google Drive (and a few
+// other backends) allow duplicate names; rclone Feature Move only renames and
+// does not replace, so acks and device metadata used to accumulate copies.
+func (t *Transport) Dedupe(ctx context.Context) error {
+	if !t.allowsDuplicateNames() {
+		return nil
+	}
+	t.flushDirCache()
+	for _, dir := range []string{"acks", "metadata", "keys"} {
+		if err := t.dedupeTree(ctx, dir); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (t *Transport) removeNamed(ctx context.Context, key string) {
+func (t *Transport) allowsDuplicateNames() bool {
+	return t.fs.Features().DuplicateFiles
+}
+
+func (t *Transport) flushDirCache() {
+	if flush := t.fs.Features().DirCacheFlush; flush != nil {
+		flush()
+	}
+}
+
+func (t *Transport) dedupeTree(ctx context.Context, dir string) error {
+	entries, err := t.fs.List(ctx, dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrorDirNotFound) {
+			return nil
+		}
+		return mapErr(err)
+	}
+	byName := map[string][]fs.Object{}
+	var dirs []string
+	entries.ForObject(func(o fs.Object) {
+		if skipObject(o) || isTempName(o.Remote()) {
+			return
+		}
+		byName[o.Remote()] = append(byName[o.Remote()], o)
+	})
+	entries.ForDir(func(d fs.Directory) {
+		if strings.Contains(path.Base(d.Remote()), ".tmp-") {
+			return
+		}
+		dirs = append(dirs, d.Remote())
+	})
+	for _, objs := range byName {
+		if len(objs) < 2 {
+			continue
+		}
+		keep := newestObject(objs)
+		for _, o := range objs {
+			if sameObject(o, keep) {
+				continue
+			}
+			_ = o.Remove(ctx)
+		}
+	}
+	for _, d := range dirs {
+		if err := t.dedupeTree(ctx, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Transport) objectsNamed(ctx context.Context, key string) []fs.Object {
+	key = strings.Trim(key, "/")
 	parent := path.Dir(key)
-	base := path.Base(key)
 	if parent == "." {
 		parent = ""
 	}
-	objs, err := t.ListShallow(ctx, parent)
+	entries, err := t.fs.List(ctx, parent)
 	if err != nil {
-		_ = t.Remove(ctx, key)
+		return nil
+	}
+	var out []fs.Object
+	entries.ForObject(func(o fs.Object) {
+		if skipObject(o) {
+			return
+		}
+		if o.Remote() == key {
+			out = append(out, o)
+		}
+	})
+	return out
+}
+
+func (t *Transport) removeOthers(ctx context.Context, key string, keep fs.Object) {
+	if !t.allowsDuplicateNames() {
 		return
 	}
-	for _, o := range objs {
-		if path.Base(o.Key) == base {
-			_ = t.Remove(ctx, o.Key)
+	for _, o := range t.objectsNamed(ctx, key) {
+		if sameObject(o, keep) {
+			continue
 		}
+		_ = o.Remove(ctx)
 	}
 }
 
@@ -217,6 +321,18 @@ func (t *Transport) Mkdir(ctx context.Context, key string) error {
 
 func (t *Transport) Remove(ctx context.Context, key string) error {
 	key = strings.Trim(key, "/")
+	if t.allowsDuplicateNames() {
+		objs := t.objectsNamed(ctx, key)
+		if len(objs) > 0 {
+			var firstErr error
+			for _, o := range objs {
+				if err := o.Remove(ctx); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+			return mapErr(firstErr)
+		}
+	}
 	obj, err := t.fs.NewObject(ctx, key)
 	if err == nil {
 		return mapErr(obj.Remove(ctx))
@@ -303,6 +419,43 @@ func skipObject(o fs.Object) bool {
 		return true
 	}
 	return false
+}
+
+func isTempName(key string) bool {
+	base := path.Base(key)
+	return strings.HasSuffix(base, ".tmp") || strings.Contains(base, ".tmp-")
+}
+
+func objectID(o fs.Object) string {
+	type ider interface{ ID() string }
+	if o == nil {
+		return ""
+	}
+	if x, ok := o.(ider); ok {
+		return x.ID()
+	}
+	return ""
+}
+
+func sameObject(a, b fs.Object) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	idA, idB := objectID(a), objectID(b)
+	return idA != "" && idA == idB
+}
+
+func newestObject(objs []fs.Object) fs.Object {
+	keep := objs[0]
+	for _, o := range objs[1:] {
+		if o.ModTime(context.Background()).After(keep.ModTime(context.Background())) {
+			keep = o
+		}
+	}
+	return keep
 }
 
 func walkRemove(ctx context.Context, f fs.Fs, dir string) error {
