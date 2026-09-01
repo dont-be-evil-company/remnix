@@ -3,6 +3,8 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"path"
 
@@ -13,8 +15,32 @@ import (
 	"github.com/mistweaverco/syncsh/internal/sync/merge"
 )
 
+var ErrCheckpointNotCaughtUp = errors.New("local frontier does not dominate newest checkpoint")
+
 func (e *Engine) CreateCheckpoint(ctx context.Context, smk []byte, generationID string) (checkpoint.Manifest, error) {
+	behind, err := e.behindNewestCheckpoint(ctx)
+	if err != nil {
+		return checkpoint.Manifest{}, err
+	}
+	if behind {
+		return checkpoint.Manifest{}, ErrCheckpointNotCaughtUp
+	}
 	return e.createCheckpoint(ctx, smk, generationID)
+}
+
+func (e *Engine) behindNewestCheckpoint(ctx context.Context) (bool, error) {
+	if e.opts.Transport == nil {
+		return false, nil
+	}
+	m, ok, err := gc.NewestCheckpoint(ctx, e.opts.Transport)
+	if err != nil || !ok {
+		return false, err
+	}
+	local, err := e.heads.Get()
+	if err != nil {
+		return false, err
+	}
+	return !merge.Dominates(local, m.Frontier), nil
 }
 
 func (e *Engine) createCheckpoint(ctx context.Context, smk []byte, generationID string) (checkpoint.Manifest, error) {
@@ -58,7 +84,19 @@ func (e *Engine) BootstrapFromCheckpoint(ctx context.Context, smk []byte, m chec
 	if err != nil {
 		return err
 	}
+	tombIDs, tombOrigins, err := e.tombstonedIndex()
+	if err != nil {
+		return err
+	}
 	for _, ent := range entries {
+		if tombIDs[ent.ID] {
+			ent.Deleted = true
+		}
+		if ent.OriginDeviceID != "" && ent.OriginSeq != nil {
+			if tombOrigins[ent.OriginDeviceID+"\x00"+fmt.Sprintf("%d", *ent.OriginSeq)] {
+				ent.Deleted = true
+			}
+		}
 		if _, err := e.history.Insert(ent); err != nil {
 			return err
 		}
@@ -74,7 +112,30 @@ func (e *Engine) BootstrapFromCheckpoint(ctx context.Context, smk []byte, m chec
 			}
 		}
 	}
-	return nil
+	return e.keys.SetTrustedCheckpoint("remote", m.ID)
+}
+
+func (e *Engine) tombstonedIndex() (ids map[string]bool, origins map[string]bool, err error) {
+	rows, err := e.db.SQL.Query(`SELECT id, origin_device_id, origin_seq FROM history WHERE deleted = 1`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	ids = map[string]bool{}
+	origins = map[string]bool{}
+	for rows.Next() {
+		var id string
+		var origin sql.NullString
+		var seq sql.NullInt64
+		if err := rows.Scan(&id, &origin, &seq); err != nil {
+			return nil, nil, err
+		}
+		ids[id] = true
+		if origin.Valid && origin.String != "" && seq.Valid {
+			origins[origin.String+"\x00"+fmt.Sprintf("%d", seq.Int64)] = true
+		}
+	}
+	return ids, origins, rows.Err()
 }
 
 func (e *Engine) pullCheckpoint(ctx context.Context, smks map[string][]byte) error {
@@ -82,12 +143,15 @@ func (e *Engine) pullCheckpoint(ctx context.Context, smks map[string][]byte) err
 	if err != nil || !ok {
 		return err
 	}
+	if skip, err := e.skipStaleCheckpoint(ctx, m); err != nil || skip {
+		return err
+	}
 	local, err := e.heads.Get()
 	if err != nil {
 		return err
 	}
 	if merge.Dominates(local, m.Frontier) {
-		return nil
+		return e.keys.SetTrustedCheckpoint("remote", m.ID)
 	}
 	snap, err := getBytes(ctx, e.opts.Transport, path.Join("checkpoints", m.ID, "snapshot"))
 	if err != nil {
@@ -114,4 +178,23 @@ func (e *Engine) pullCheckpoint(ctx context.Context, smks map[string][]byte) err
 		return fmt.Errorf("checkpoint %s: %w", m.ID, last)
 	}
 	return fmt.Errorf("no key for checkpoint %s generation %s", m.ID, m.GenerationID)
+}
+
+func (e *Engine) skipStaleCheckpoint(ctx context.Context, m checkpoint.Manifest) (bool, error) {
+	trustedID, err := e.keys.TrustedCheckpointID("remote")
+	if err != nil || trustedID == "" || trustedID == m.ID {
+		return false, err
+	}
+	b, err := getBytes(ctx, e.opts.Transport, path.Join("checkpoints", trustedID, "manifest"))
+	if err != nil {
+		return false, nil
+	}
+	tm, err := checkpoint.DecodeManifest(b)
+	if err != nil {
+		return false, nil
+	}
+	if merge.Dominates(tm.Frontier, m.Frontier) && !merge.Dominates(m.Frontier, tm.Frontier) {
+		return true, nil
+	}
+	return false, nil
 }

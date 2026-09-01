@@ -76,7 +76,7 @@ func callbackOutputTail(s string) string {
 	out := strings.Join(pick, "; ")
 	out = redact.String(out)
 	if len(out) > 400 {
-		return out[:400] + "…"
+		return out[:400] + "..."
 	}
 	return out
 }

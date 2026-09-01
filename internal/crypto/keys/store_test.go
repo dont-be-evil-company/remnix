@@ -33,8 +33,26 @@ func TestClearUnpublishedAllowsRetry(t *testing.T) {
 	if err := s.PutGeneration(m); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetTrusted("remote", "g2", 1, "", []byte("{}")); err != nil {
+	if err := s.SetTrusted("remote", "g2", 1, "ckpt-1", []byte("{}")); err != nil {
 		t.Fatal(err)
+	}
+	id, err := s.TrustedCheckpointID("remote")
+	if err != nil || id != "ckpt-1" {
+		t.Fatalf("trusted checkpoint: %q err=%v", id, err)
+	}
+	if err := s.SetTrusted("remote", "g2", 2, "", []byte("{2}")); err != nil {
+		t.Fatal(err)
+	}
+	id, err = s.TrustedCheckpointID("remote")
+	if err != nil || id != "ckpt-1" {
+		t.Fatalf("empty checkpoint id should be preserved: %q err=%v", id, err)
+	}
+	if err := s.SetTrustedCheckpoint("remote", "ckpt-2"); err != nil {
+		t.Fatal(err)
+	}
+	id, err = s.TrustedCheckpointID("remote")
+	if err != nil || id != "ckpt-2" {
+		t.Fatalf("set checkpoint: %q err=%v", id, err)
 	}
 	if err := s.ClearUnpublished(); err != nil {
 		t.Fatal(err)

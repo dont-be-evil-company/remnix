@@ -37,7 +37,8 @@ func (s *HeadStore) Get() (Frontier, error) {
 func (s *HeadStore) Set(deviceID string, seq int64) error {
 	_, err := s.db.Exec(`
 INSERT INTO sync_heads (device_id, seq) VALUES (?, ?)
-ON CONFLICT(device_id) DO UPDATE SET seq = excluded.seq`, deviceID, seq)
+ON CONFLICT(device_id) DO UPDATE SET seq = excluded.seq
+WHERE excluded.seq > sync_heads.seq`, deviceID, seq)
 	return err
 }
 

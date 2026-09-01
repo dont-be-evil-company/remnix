@@ -7,7 +7,7 @@ metadata/manifest              # signed active generation + device list
 metadata/devices/<id>.json
 metadata/version
 keys/generations/<id>/manifest
-events/<device-id>/…           # encrypted bundles
+events/<device-id>/...           # encrypted bundles
 checkpoints/<id>/manifest
 checkpoints/<id>/snapshot      # gzip + encrypted compact history
 acks/<device-id>.ack

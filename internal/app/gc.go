@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
 	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/sync/gc"
+	"github.com/mistweaverco/syncsh/internal/sync/syncer"
 )
 
 func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) {
@@ -53,6 +55,9 @@ func (a *App) MaybeCheckpoint(ctx context.Context) error {
 	}
 	m, err := eng.CreateCheckpoint(ctx, smks[active.GenerationID], active.GenerationID)
 	if err != nil {
+		if errors.Is(err, syncer.ErrCheckpointNotCaughtUp) {
+			return nil
+		}
 		return err
 	}
 	return eng.PublishAck(ctx, m.ID)

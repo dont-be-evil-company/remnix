@@ -2,7 +2,7 @@
 
 Encrypted, server-free shell history. Commands live in a local SQLite database.
 Synchronization is optional: a background daemon can copy **encrypted** event
-bundles to storage you already have (Google Drive, Dropbox, S3, a folder, …)
+bundles to storage you already have (Google Drive, Dropbox, S3, a folder, ...)
 using an embedded rclone engine. There is no syncsh cloud and no account.
 
 Remote storage is untrusted. Encryption, key wrapping, and merge happen in
@@ -47,7 +47,7 @@ eval "$(syncsh init bash)"
 syncsh init fish | source
 ```
 
-Prefer typing the recovery key interactively. Putting `SYNCSH_RECOVERY_KEY=…`
+Prefer typing the recovery key interactively. Putting `SYNCSH_RECOVERY_KEY=...`
 on the command line is recorded by the shell; syncsh skips inserting those
 commands into history, but they may still appear in your original histfile.
 
@@ -158,7 +158,7 @@ user configuration (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when sa
 ## Keys / recovery
 
 Each device wraps a **Sync Master Key** (`SMK`) in slots: a `bech32` recovery
-key (`syncsh1…`), optional FIDO2 `hmac-secret`, optional YubiKey PIV. The
+key (`syncsh1...`), optional FIDO2 `hmac-secret`, optional YubiKey PIV. The
 daemon stores the unwrapped SMK in the OS keyring after `syncsh unlock`.
 
 ```sh
@@ -221,12 +221,12 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh setup` | First device: identity, transport, SMK |
 | `syncsh device add` | Join an existing remote |
 | `syncsh config` / `config sync` | Reusable configuration wizard |
-| `syncsh remote …` | List/add/edit/remove/test/reconnect/browse |
+| `syncsh remote ...` | List/add/edit/remove/test/reconnect/browse |
 | `syncsh unlock` | SMK into the OS keyring |
 | `syncsh sync` / `sync status` | Pull/push now; health + probe |
 | `syncsh daemon` / `install` / `status` | Background sync |
 | `syncsh agent` | Local SQLite RPC for suggest / history |
-| `syncsh key …` | Slots, rotation, recover |
+| `syncsh key ...` | Slots, rotation, recover |
 | `syncsh search` / `suggest` / `stats` / `import` | Local history |
 | `syncsh gc` | Compact remote objects |
 | `syncsh doctor` | Read-only diagnostics |

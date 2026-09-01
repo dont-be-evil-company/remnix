@@ -173,6 +173,7 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 	if !atomic || upload == final {
 		return nil
 	}
+	t.removeNamed(ctx, final)
 	if move := t.fs.Features().Move; move != nil {
 		if _, err := move(ctx, obj, final); err != nil {
 			_ = obj.Remove(ctx)
@@ -190,6 +191,24 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 		return mapErr(err)
 	}
 	return nil
+}
+
+func (t *Transport) removeNamed(ctx context.Context, key string) {
+	parent := path.Dir(key)
+	base := path.Base(key)
+	if parent == "." {
+		parent = ""
+	}
+	objs, err := t.ListShallow(ctx, parent)
+	if err != nil {
+		_ = t.Remove(ctx, key)
+		return
+	}
+	for _, o := range objs {
+		if path.Base(o.Key) == base {
+			_ = t.Remove(ctx, o.Key)
+		}
+	}
 }
 
 func (t *Transport) Mkdir(ctx context.Context, key string) error {

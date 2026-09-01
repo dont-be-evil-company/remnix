@@ -90,7 +90,7 @@ func New(fs BrowserFS, opts Options) Model {
 		height: 24,
 	}
 	if fs.Capabilities().Expensive {
-		m.status = "Listing…"
+		m.status = "Listing..."
 	} else {
 		m.reloadSync()
 	}
@@ -109,7 +109,7 @@ func (m Model) Selected() Result {
 
 func (m *Model) reload() tea.Cmd {
 	if m.fs.Capabilities().Expensive {
-		m.status = "Listing…"
+		m.status = "Listing..."
 		m.entries = nil
 		m.visible = nil
 		return m.listCmd()

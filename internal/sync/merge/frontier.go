@@ -51,6 +51,15 @@ func Dominates(a, b Frontier) bool {
 	return true
 }
 
+// Score is the sum of sequence numbers. Used to rank incomparable checkpoints.
+func Score(f Frontier) int64 {
+	var n int64
+	for _, seq := range f {
+		n += seq
+	}
+	return n
+}
+
 func Union(a, b Frontier) Frontier {
 	out := Clone(a)
 	for id, seq := range b {

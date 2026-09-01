@@ -1,6 +1,6 @@
 # Configuration wizard and filesystem picker
 
-`syncsh setup`, `syncsh device add`, `syncsh config`, and `syncsh remote …`
+`syncsh setup`, `syncsh device add`, `syncsh config`, and `syncsh remote ...`
 share wizard components in `internal/tui/wizard` and `internal/tui/picker`.
 
 ## Setup

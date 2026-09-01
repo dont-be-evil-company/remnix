@@ -430,6 +430,13 @@ func (e *Engine) publishAck(ctx context.Context, checkpointID string) error {
 	if err != nil {
 		return err
 	}
+	if checkpointID == "" && e.opts.Transport != nil {
+		if b, err := getBytes(ctx, e.opts.Transport, path.Join("acks", e.opts.DeviceID+".ack")); err == nil {
+			if old, err := ack.Decode(b); err == nil {
+				checkpointID = old.CheckpointID
+			}
+		}
+	}
 	file := ack.New(e.opts.DeviceID, f, checkpointID)
 	b, err := ack.Encode(file)
 	if err != nil {

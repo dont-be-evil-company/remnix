@@ -60,6 +60,37 @@ func TestLocalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPutAtomicOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := OpenLocal(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := tr.PutAtomic(ctx, "acks/dev.ack", bytes.NewReader([]byte("old-frontier"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.PutAtomic(ctx, "acks/dev.ack", bytes.NewReader([]byte("new-frontier"))); err != nil {
+		t.Fatal(err)
+	}
+	r, err := tr.Get(ctx, "acks/dev.ack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	got, _ := io.ReadAll(r)
+	if string(got) != "new-frontier" {
+		t.Fatalf("got %q", got)
+	}
+	objs, err := tr.List(ctx, "acks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("duplicate ack objects: %v", objs)
+	}
+}
+
 func TestVersionPinned(t *testing.T) {
 	if Version() == "" {
 		t.Fatal("empty rclone version")

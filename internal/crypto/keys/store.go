@@ -184,10 +184,31 @@ VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(kind) DO UPDATE SET
     generation_id = excluded.generation_id,
     counter = excluded.counter,
-    checkpoint_id = excluded.checkpoint_id,
+    checkpoint_id = CASE WHEN excluded.checkpoint_id = '' THEN trusted_manifests.checkpoint_id ELSE excluded.checkpoint_id END,
     payload = excluded.payload,
     updated_at = excluded.updated_at`,
 		kind, generationID, counter, checkpointID, payload, time.Now().UnixMilli())
+	return err
+}
+
+func (s *Store) TrustedCheckpointID(kind string) (string, error) {
+	var id sql.NullString
+	err := s.db.QueryRow(`SELECT checkpoint_id FROM trusted_manifests WHERE kind = ?`, kind).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id.String, nil
+}
+
+func (s *Store) SetTrustedCheckpoint(kind, checkpointID string) error {
+	if checkpointID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`UPDATE trusted_manifests SET checkpoint_id = ?, updated_at = ? WHERE kind = ?`,
+		checkpointID, time.Now().UnixMilli(), kind)
 	return err
 }
 

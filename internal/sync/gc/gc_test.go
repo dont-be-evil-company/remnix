@@ -181,6 +181,46 @@ func TestCheckpointDue(t *testing.T) {
 	}
 }
 
+func TestNewestCheckpointPrefersDominatingFrontier(t *testing.T) {
+	tr := directory.New(t.TempDir())
+	ctx := context.Background()
+	stale := checkpoint.NewManifest("stale", "g1", merge.Frontier{"a": 1})
+	stale.CreatedAt = 9_000
+	good := checkpoint.NewManifest("good", "g1", merge.Frontier{"a": 50, "b": 20})
+	good.CreatedAt = 1
+	putCheckpoint(t, ctx, tr, stale)
+	putCheckpoint(t, ctx, tr, good)
+	got, ok, err := NewestCheckpoint(ctx, tr)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if got.ID != "good" {
+		t.Fatalf("picked %s want good", got.ID)
+	}
+}
+
+func TestGCDeletesNewerButDominatedCheckpoint(t *testing.T) {
+	tr := directory.New(t.TempDir())
+	ctx := context.Background()
+	good := checkpoint.NewManifest("good", "g1", merge.Frontier{"a": 10})
+	good.CreatedAt = 1
+	stale := checkpoint.NewManifest("stale", "g1", merge.Frontier{"a": 2})
+	stale.CreatedAt = 9_000
+	putCheckpoint(t, ctx, tr, good)
+	putCheckpoint(t, ctx, tr, stale)
+
+	plan, err := Evaluate(ctx, tr, []string{"a", "missing"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Eligible {
+		t.Fatal("should be blocked")
+	}
+	if len(plan.Checkpoints) != 1 || plan.Checkpoints[0] != "checkpoints/stale" {
+		t.Fatalf("checkpoints %v", plan.Checkpoints)
+	}
+}
+
 func putCheckpoint(t *testing.T, ctx context.Context, tr *directory.Transport, m checkpoint.Manifest) {
 	t.Helper()
 	b, err := checkpoint.EncodeManifest(m)

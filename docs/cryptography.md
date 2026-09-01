@@ -3,7 +3,7 @@
 A **Sync Master Key** (SMK) wraps event bundles and checkpoints. The SMK is
 itself wrapped in one or more **slots**:
 
-- Recovery key: `bech32` `syncsh1…`, shown once at setup, never stored on the remote
+- Recovery key: `bech32` `syncsh1...`, shown once at setup, never stored on the remote
 - FIDO2 `hmac-secret` (USB HID; NFC is not used)
 - YubiKey PIV
 

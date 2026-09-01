@@ -291,7 +291,7 @@ func collectProviderParams(ctx context.Context, def providers.Definition) (rc.Pa
 		kind := "AWS"
 		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("S3 flavor").Options(
 			huh.NewOption("Amazon AWS", "AWS"),
-			huh.NewOption("S3-compatible (MinIO, R2, B2, …)", "Other"),
+			huh.NewOption("S3-compatible (MinIO, R2, B2, ...)", "Other"),
 		).Value(&kind)))
 		if err := form.RunWithContext(ctx); err != nil {
 			return nil, err

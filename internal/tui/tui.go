@@ -283,7 +283,7 @@ func clampLine(s string, w int) string {
 	if lipgloss.Width(s) <= w {
 		return s
 	}
-	return ansi.Truncate(s, w, "…")
+	return ansi.Truncate(s, w, "...")
 }
 
 func (m model) renderHeader(w int) string {
@@ -382,7 +382,7 @@ func (m model) renderRow(e history.Entry, selected bool, w int, now time.Time) s
 		remain = 8
 	}
 	cmdText := strings.ReplaceAll(strings.ReplaceAll(e.Command, "\r", ""), "\n", " ")
-	cmd := ansi.Truncate(HighlightCommand(cmdText), remain, "…")
+	cmd := ansi.Truncate(HighlightCommand(cmdText), remain, "...")
 	if selected {
 		cmd = lipgloss.NewStyle().Bold(true).Render(cmd)
 	}

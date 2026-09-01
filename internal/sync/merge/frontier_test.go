@@ -24,3 +24,9 @@ func TestDominates(t *testing.T) {
 		t.Fatal("dominates")
 	}
 }
+
+func TestScore(t *testing.T) {
+	if Score(Frontier{"a": 3, "b": 7}) != 10 {
+		t.Fatal("score")
+	}
+}

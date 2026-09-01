@@ -97,12 +97,6 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 			}
 		}
 	}
-	keepID := plan.Checkpoint
-	if keepID == "" {
-		if m, ok, err := NewestCheckpoint(ctx, tr); err == nil && ok {
-			keepID = m.ID
-		}
-	}
 	for _, o := range objs {
 		if !strings.HasSuffix(o.Key, "/manifest") {
 			continue
@@ -120,15 +114,38 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 			ckptMeta[id] = m
 		}
 	}
+	keepID := plan.Checkpoint
+	var keepMeta checkpoint.Manifest
+	haveKeep := false
+	if best, ok := pickBestCheckpoint(ckptMeta); ok {
+		keepID = best.ID
+		keepMeta = best
+		haveKeep = true
+	} else if keepID != "" {
+		keepMeta, haveKeep = ckptMeta[keepID]
+	} else if m, ok, err := NewestCheckpoint(ctx, tr); err == nil && ok {
+		keepID = m.ID
+		keepMeta, haveKeep = m, true
+	}
 	canDeleteFull := plan.Eligible && plan.Checkpoint != ""
-	keepMeta, haveKeep := ckptMeta[keepID]
 	for id := range ckptObjs {
 		if id == "" || id == keepID {
 			continue
 		}
 		m, hasMeta := ckptMeta[id]
-		if hasMeta && haveKeep && m.CreatedAt > keepMeta.CreatedAt {
-			continue
+		if hasMeta && haveKeep {
+			keepDom := merge.Dominates(keepMeta.Frontier, m.Frontier)
+			candDom := merge.Dominates(m.Frontier, keepMeta.Frontier)
+			if candDom && !keepDom {
+				continue
+			}
+			if keepDom {
+				plan.Checkpoints = append(plan.Checkpoints, path.Join("checkpoints", id))
+				continue
+			}
+			if m.CreatedAt > keepMeta.CreatedAt {
+				continue
+			}
 		}
 		if hasMeta && !canDeleteFull {
 			continue
@@ -192,6 +209,41 @@ func NewestCheckpoint(ctx context.Context, tr transport.Transport) (checkpoint.M
 	return all[0], true, nil
 }
 
+func pickBestCheckpoint(byID map[string]checkpoint.Manifest) (checkpoint.Manifest, bool) {
+	var all []checkpoint.Manifest
+	for _, m := range byID {
+		all = append(all, m)
+	}
+	if len(all) == 0 {
+		return checkpoint.Manifest{}, false
+	}
+	sortCheckpoints(all)
+	return all[0], true
+}
+
+func betterCheckpoint(a, b checkpoint.Manifest) bool {
+	aDom := merge.Dominates(a.Frontier, b.Frontier)
+	bDom := merge.Dominates(b.Frontier, a.Frontier)
+	if aDom && !bDom {
+		return true
+	}
+	if bDom && !aDom {
+		return false
+	}
+	sa, sb := merge.Score(a.Frontier), merge.Score(b.Frontier)
+	if sa != sb {
+		return sa > sb
+	}
+	if a.CreatedAt != b.CreatedAt {
+		return a.CreatedAt > b.CreatedAt
+	}
+	return a.ID > b.ID
+}
+
+func sortCheckpoints(all []checkpoint.Manifest) {
+	sort.Slice(all, func(i, j int) bool { return betterCheckpoint(all[i], all[j]) })
+}
+
 func resolveCheckpoint(ctx context.Context, tr transport.Transport, acks map[string]ack.File, required []string, checkpointID string) (checkpoint.Manifest, error) {
 	if checkpointID != "" {
 		b, err := read(ctx, tr, path.Join("checkpoints", checkpointID, "manifest"))
@@ -236,7 +288,7 @@ func listCheckpoints(ctx context.Context, tr transport.Transport) ([]checkpoint.
 		}
 		out = append(out, m)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	sortCheckpoints(out)
 	return out, nil
 }
 

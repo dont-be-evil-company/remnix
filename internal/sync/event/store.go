@@ -16,15 +16,19 @@ func NewStore(d *db.DB) *Store {
 }
 
 func (s *Store) NextSeq(deviceID string) (int64, error) {
-	var seq sql.NullInt64
-	err := s.db.QueryRow(`SELECT MAX(seq) FROM sync_events WHERE device_id = ?`, deviceID).Scan(&seq)
-	if err != nil {
+	var eventMax, headMax sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MAX(seq) FROM sync_events WHERE device_id = ?`, deviceID).Scan(&eventMax); err != nil {
 		return 0, err
 	}
-	if !seq.Valid {
-		return 1, nil
+	_ = s.db.QueryRow(`SELECT seq FROM sync_heads WHERE device_id = ?`, deviceID).Scan(&headMax)
+	n := int64(0)
+	if eventMax.Valid {
+		n = eventMax.Int64
 	}
-	return seq.Int64 + 1, nil
+	if headMax.Valid && headMax.Int64 > n {
+		n = headMax.Int64
+	}
+	return n + 1, nil
 }
 
 func (s *Store) Append(ev Event) error {
