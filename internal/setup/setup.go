@@ -7,6 +7,7 @@ import (
 
 	"charm.land/huh/v2"
 	"github.com/mistweaverco/syncsh/internal/app"
+	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
 	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
 	"github.com/mistweaverco/syncsh/internal/crypto/keys"
@@ -80,43 +81,19 @@ func Run(ctx context.Context, a *app.App) (Result, error) {
 	case wizard.IntentLocal:
 		off := false
 		cfg.Sync.Enabled = &off
-		cfg.Sync.Transport = "none"
+		cfg.Sync.Endpoints = nil
 	default:
-		tr, err := wizard.ChooseTransport(ctx)
+		ep, err := wizard.AddEndpoint(ctx, cfg, false)
 		if err != nil {
 			return Result{}, err
 		}
-		on := true
-		cfg.Sync.Enabled = &on
-		cfg.Sync.Transport = tr
-		switch tr {
-		case "none":
+		if ep.ID == "" {
 			off := false
 			cfg.Sync.Enabled = &off
-		case "directory":
-			res, err := wizard.PickLocalDir(ctx, "Select syncsh storage folder", true)
-			if err != nil {
-				return Result{}, err
-			}
-			if res.Canceled {
-				return Result{}, fmt.Errorf("setup cancelled")
-			}
-			if res.Join {
-				return Result{}, fmt.Errorf("an existing repository was selected; use 'syncsh device add' to join")
-			}
-			cfg.Sync.Directory.Path = res.Path
-		case "rclone":
-			if err := wizard.ConfigureRcloneRemoteMode(ctx, cfg, false); err != nil {
-				return Result{}, err
-			}
-		case "rsync":
-			_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&cfg.Sync.Rsync.Remote))).RunWithContext(ctx)
-		case "scp":
-			_ = huh.NewForm(huh.NewGroup(
-				huh.NewInput().Title("Host").Value(&cfg.Sync.SCP.Host),
-				huh.NewInput().Title("User").Value(&cfg.Sync.SCP.User),
-				huh.NewInput().Title("Path").Value(&cfg.Sync.SCP.Path),
-			)).RunWithContext(ctx)
+		} else {
+			on := true
+			cfg.Sync.Enabled = &on
+			cfg.Sync.UpsertEndpoint(ep)
 		}
 	}
 	if cfg.DeviceID == "" {
@@ -326,8 +303,9 @@ func RunNonInteractive(ctx context.Context, a *app.App, dirPath, name string, fa
 		name = device.DefaultName()
 	}
 	a.Config.DeviceName = name
-	a.Config.Sync.Transport = "directory"
-	a.Config.Sync.Directory.Path = dirPath
+	on := true
+	a.Config.Sync.Enabled = &on
+	a.Config.Sync.UpsertEndpoint(config.DirectoryEndpoint("local", dirPath))
 	if err := a.Config.Save(); err != nil {
 		return Result{}, err
 	}
@@ -358,7 +336,11 @@ func RunNonInteractive(ctx context.Context, a *app.App, dirPath, name string, fa
 }
 
 func refuseInitializedRemote(ctx context.Context, a *app.App) error {
-	tr, err := a.Transport()
+	eps := a.Config.Sync.EnabledEndpoints()
+	if len(eps) == 0 {
+		return nil
+	}
+	tr, err := a.OpenTransport(eps[0])
 	if err != nil {
 		return err
 	}

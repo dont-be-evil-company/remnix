@@ -7,17 +7,19 @@ share wizard components in `internal/tui/wizard` and `internal/tui/picker`.
 
 - Welcome: Create / Join / Local-only / Exit (`setup` preselects Create,
   `device add` preselects Join)
-- Create default transport is rclone
-- Join requires `repository.Probe == Valid` and never initializes the remote
+- Create default endpoint type is rclone. Additional endpoints are added with
+  `syncsh remote add` (append; does not replace existing ones).
+- Join requires `repository.Probe == Valid` on the endpoint being joined and
+  never initializes that remote
 - Crash-safe marker: `$XDG_DATA_HOME/syncsh/setup-state.json`. Retry reuses
   the SMK already minted. `syncsh doctor` reports a partial setup. Delete the
   file only to start over (unpublished local keys are cleared)
 
 ## Config
 
-Draft is in memory. `Config.Save` runs only on success. Changing transport
-does not regenerate the SMK. Disabling sync keeps local history and does not
-delete the remote.
+Draft is in memory. `Config.Save` runs only on success. Adding or removing
+endpoints does not regenerate the SMK. Disabling sync keeps local history and
+does not delete remotes.
 
 rclone OAuth tokens are written to a temporary section, renamed on commit,
 deleted on cancel. The file is `$XDG_DATA_HOME/syncsh/rclone.conf` (beside

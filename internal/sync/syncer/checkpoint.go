@@ -112,7 +112,7 @@ func (e *Engine) BootstrapFromCheckpoint(ctx context.Context, smk []byte, m chec
 			}
 		}
 	}
-	return e.keys.SetTrustedCheckpoint("remote", m.ID)
+	return e.keys.SetTrustedCheckpoint(e.trustKind(), m.ID)
 }
 
 func (e *Engine) tombstonedIndex() (ids map[string]bool, origins map[string]bool, err error) {
@@ -151,7 +151,7 @@ func (e *Engine) pullCheckpoint(ctx context.Context, smks map[string][]byte) err
 		return err
 	}
 	if merge.Dominates(local, m.Frontier) {
-		return e.keys.SetTrustedCheckpoint("remote", m.ID)
+		return e.keys.SetTrustedCheckpoint(e.trustKind(), m.ID)
 	}
 	snap, err := getBytes(ctx, e.opts.Transport, path.Join("checkpoints", m.ID, "snapshot"))
 	if err != nil {
@@ -181,7 +181,7 @@ func (e *Engine) pullCheckpoint(ctx context.Context, smks map[string][]byte) err
 }
 
 func (e *Engine) skipStaleCheckpoint(ctx context.Context, m checkpoint.Manifest) (bool, error) {
-	trustedID, err := e.keys.TrustedCheckpointID("remote")
+	trustedID, err := e.keys.TrustedCheckpointID(e.trustKind())
 	if err != nil || trustedID == "" || trustedID == m.ID {
 		return false, err
 	}

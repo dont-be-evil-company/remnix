@@ -143,7 +143,9 @@ func (t *Transport) PutAtomic(ctx context.Context, key string, r io.Reader) erro
 func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic bool) error {
 	key = strings.Trim(key, "/")
 	parent := path.Dir(key)
-	if parent != "." && parent != "" {
+	// Drive Put already creates parents via FindPath. Extra Mkdir after a
+	// dir-cache flush can spawn a second folder with the same name.
+	if parent != "." && parent != "" && !t.allowsDuplicateNames() {
 		if err := operations.Mkdir(ctx, t.fs, parent); err != nil {
 			return mapErr(err)
 		}
@@ -151,6 +153,17 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return err
+	}
+	// Drive (and other duplicate-name backends) must not use tmp+rename.
+	// A server-side rename leaves the old tmp name in local Drive mirrors.
+	if t.allowsDuplicateNames() {
+		obj, err := t.upload(ctx, key, data)
+		if err != nil {
+			return err
+		}
+		t.removeOthers(ctx, key, obj)
+		t.removeTempsFor(ctx, key)
+		return nil
 	}
 	final := key
 	upload := key
@@ -162,15 +175,12 @@ func (t *Transport) put(ctx context.Context, key string, r io.Reader, atomic boo
 		return err
 	}
 	if !atomic || upload == final {
-		t.removeOthers(ctx, final, obj)
 		return nil
 	}
-	moved, err := t.rename(ctx, obj, final, data)
-	if err != nil {
+	if _, err := t.rename(ctx, obj, final, data); err != nil {
 		_ = obj.Remove(ctx)
 		return err
 	}
-	t.removeOthers(ctx, final, moved)
 	return nil
 }
 
@@ -213,15 +223,18 @@ func (t *Transport) rename(ctx context.Context, obj fs.Object, final string, dat
 	return finalObj, nil
 }
 
-// Dedupe deletes extra objects that share a path. Google Drive (and a few
-// other backends) allow duplicate names; rclone Feature Move only renames and
-// does not replace, so acks and device metadata used to accumulate copies.
+// Dedupe deletes extra objects that share a path, leftover `.tmp-*` files,
+// and duplicate directories. Google Drive allows the same name more than
+// once; rclone Feature Move only renames, so acks and device metadata used
+// to accumulate copies, and Mkdir after a dir-cache flush used to spawn a
+// second `checkpoints/` folder that GC could not see.
 func (t *Transport) Dedupe(ctx context.Context) error {
-	if !t.allowsDuplicateNames() {
-		return nil
+	t.flushDirCache()
+	if err := t.mergeDuplicateDirs(ctx, ""); err != nil {
+		return err
 	}
 	t.flushDirCache()
-	for _, dir := range []string{"acks", "metadata", "keys"} {
+	for _, dir := range []string{"acks", "metadata", "keys", "events", "checkpoints"} {
 		if err := t.dedupeTree(ctx, dir); err != nil {
 			return err
 		}
@@ -239,7 +252,45 @@ func (t *Transport) flushDirCache() {
 	}
 }
 
+func (t *Transport) mergeDuplicateDirs(ctx context.Context, dir string) error {
+	merge := t.fs.Features().MergeDirs
+	if merge == nil {
+		return nil
+	}
+	entries, err := t.fs.List(ctx, dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrorDirNotFound) {
+			return nil
+		}
+		return mapErr(err)
+	}
+	byName := map[string][]fs.Directory{}
+	entries.ForDir(func(d fs.Directory) {
+		if strings.Contains(path.Base(d.Remote()), ".tmp-") {
+			return
+		}
+		byName[d.Remote()] = append(byName[d.Remote()], d)
+	})
+	merged := false
+	for _, ds := range byName {
+		if len(ds) < 2 {
+			continue
+		}
+		if err := merge(ctx, ds); err != nil {
+			return mapErr(err)
+		}
+		merged = true
+	}
+	if merged {
+		t.flushDirCache()
+	}
+	return nil
+}
+
 func (t *Transport) dedupeTree(ctx context.Context, dir string) error {
+	if err := t.mergeDuplicateDirs(ctx, dir); err != nil {
+		return err
+	}
 	entries, err := t.fs.List(ctx, dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrorDirNotFound) {
@@ -250,16 +301,28 @@ func (t *Transport) dedupeTree(ctx context.Context, dir string) error {
 	byName := map[string][]fs.Object{}
 	var dirs []string
 	entries.ForObject(func(o fs.Object) {
-		if skipObject(o) || isTempName(o.Remote()) {
+		if skipObject(o) {
 			return
 		}
-		byName[o.Remote()] = append(byName[o.Remote()], o)
+		if isTempName(o.Remote()) {
+			_ = o.Remove(ctx)
+			return
+		}
+		if t.allowsDuplicateNames() {
+			byName[o.Remote()] = append(byName[o.Remote()], o)
+		}
 	})
+	seen := map[string]bool{}
 	entries.ForDir(func(d fs.Directory) {
 		if strings.Contains(path.Base(d.Remote()), ".tmp-") {
 			return
 		}
-		dirs = append(dirs, d.Remote())
+		name := d.Remote()
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		dirs = append(dirs, name)
 	})
 	for _, objs := range byName {
 		if len(objs) < 2 {
@@ -313,6 +376,27 @@ func (t *Transport) removeOthers(ctx context.Context, key string, keep fs.Object
 		}
 		_ = o.Remove(ctx)
 	}
+}
+
+func (t *Transport) removeTempsFor(ctx context.Context, key string) {
+	key = strings.Trim(key, "/")
+	parent := path.Dir(key)
+	if parent == "." {
+		parent = ""
+	}
+	prefix := key + ".tmp-"
+	entries, err := t.fs.List(ctx, parent)
+	if err != nil {
+		return
+	}
+	entries.ForObject(func(o fs.Object) {
+		if skipObject(o) {
+			return
+		}
+		if strings.HasPrefix(o.Remote(), prefix) {
+			_ = o.Remove(ctx)
+		}
+	})
 }
 
 func (t *Transport) Mkdir(ctx context.Context, key string) error {

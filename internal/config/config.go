@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type Config struct {
 	Version            int      `yaml:"version"`
@@ -32,15 +32,12 @@ type localFile struct {
 }
 
 type Sync struct {
-	Enabled    *bool              `yaml:"enabled,omitempty"`
-	Transport  string             `yaml:"transport,omitempty"`
-	Interval   string             `yaml:"interval,omitempty"`
-	GCInterval string             `yaml:"gc_interval,omitempty"`
-	Directory  DirectoryTransport `yaml:"directory,omitempty"`
-	Rsync      RsyncTransport     `yaml:"rsync,omitempty"`
-	SCP        SCPTransport       `yaml:"scp,omitempty"`
-	Rclone     *RcloneConfig      `yaml:"rclone,omitempty"`
-	Callbacks  []string           `yaml:"callbacks,omitempty"`
+	Enabled      *bool        `yaml:"enabled,omitempty"`
+	Interval     string       `yaml:"interval,omitempty"`
+	GCInterval   string       `yaml:"gc_interval,omitempty"`
+	RcloneEngine RcloneEngine `yaml:"rclone_engine,omitempty"`
+	Endpoints    []Endpoint   `yaml:"endpoints,omitempty"`
+	Callbacks    []string     `yaml:"callbacks,omitempty"`
 }
 
 type RcloneEngine string
@@ -50,49 +47,88 @@ const (
 	RcloneEngineExternal RcloneEngine = "external"
 )
 
-type RcloneConfig struct {
-	Engine  RcloneEngine   `yaml:"engine,omitempty"`
-	Primary string         `yaml:"primary,omitempty"`
-	Remotes []RemoteConfig `yaml:"remotes,omitempty"`
-}
+const (
+	TypeRclone    = "rclone"
+	TypeDirectory = "directory"
+	TypeRsync     = "rsync"
+	TypeSCP       = "scp"
+)
 
-func (c *RcloneConfig) EngineOrDefault() RcloneEngine {
-	if c == nil || c.Engine == "" {
-		return RcloneEngineEmbedded
-	}
-	return c.Engine
-}
-
-type RemoteConfig struct {
+type Endpoint struct {
 	ID           string `yaml:"id"`
+	Type         string `yaml:"type"`
 	DisplayName  string `yaml:"name,omitempty"`
-	RcloneRemote string `yaml:"rclone_remote"`
+	Enabled      bool   `yaml:"enabled"`
+	RcloneRemote string `yaml:"rclone_remote,omitempty"`
 	Provider     string `yaml:"provider,omitempty"`
 	Path         string `yaml:"path,omitempty"`
-	Enabled      bool   `yaml:"enabled"`
+	Remote       string `yaml:"remote,omitempty"`
+	Host         string `yaml:"host,omitempty"`
+	User         string `yaml:"user,omitempty"`
+	Port         int    `yaml:"port,omitempty"`
+}
+
+func (s Sync) RcloneEngineOrDefault() RcloneEngine {
+	if s.RcloneEngine == "" {
+		return RcloneEngineEmbedded
+	}
+	return s.RcloneEngine
 }
 
 func (s Sync) IsEnabled() bool {
-	if s.Enabled != nil {
-		return *s.Enabled
+	if s.Enabled != nil && !*s.Enabled {
+		return false
 	}
-	return s.Transport != "" && s.Transport != "none"
+	return len(s.EnabledEndpoints()) > 0
 }
 
-type DirectoryTransport struct {
-	Path string `yaml:"path"`
+func (s Sync) EnabledEndpoints() []Endpoint {
+	var out []Endpoint
+	for _, ep := range s.Endpoints {
+		if ep.Enabled {
+			out = append(out, ep)
+		}
+	}
+	return out
 }
 
-type RsyncTransport struct {
-	Remote string `yaml:"remote"`
-	Path   string `yaml:"path"`
+func (s Sync) Endpoint(id string) (Endpoint, bool) {
+	for _, ep := range s.Endpoints {
+		if ep.ID == id {
+			return ep, true
+		}
+	}
+	return Endpoint{}, false
 }
 
-type SCPTransport struct {
-	Host string `yaml:"host"`
-	User string `yaml:"user"`
-	Path string `yaml:"path"`
-	Port int    `yaml:"port,omitempty"`
+func (s *Sync) UpsertEndpoint(ep Endpoint) {
+	for i, existing := range s.Endpoints {
+		if existing.ID == ep.ID {
+			s.Endpoints[i] = ep
+			return
+		}
+	}
+	s.Endpoints = append(s.Endpoints, ep)
+}
+
+func (s *Sync) RemoveEndpoint(id string) (Endpoint, bool) {
+	kept := s.Endpoints[:0]
+	var removed Endpoint
+	found := false
+	for _, ep := range s.Endpoints {
+		if ep.ID == id {
+			removed = ep
+			found = true
+			continue
+		}
+		kept = append(kept, ep)
+	}
+	s.Endpoints = kept
+	return removed, found
+}
+
+func DirectoryEndpoint(id, path string) Endpoint {
+	return Endpoint{ID: id, Type: TypeDirectory, Path: path, Enabled: true}
 }
 
 // SuggestIcons labels rows in the zsh LSP-style menu.
@@ -181,9 +217,7 @@ func Default() *Config {
 		Database: Database{
 			Path: DatabasePath(),
 		},
-		Sync: Sync{
-			Transport: "directory",
-		},
+		Sync: Sync{},
 	}
 }
 
@@ -194,10 +228,15 @@ func Load() (*Config, error) {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read config: %w", err)
 		}
-	} else if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	} else {
+		if err := rejectLegacyConfig(data); err != nil {
+			return nil, err
+		}
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
 	}
-	if cfg.Version == 0 {
+	if cfg.Version < CurrentVersion {
 		cfg.Version = CurrentVersion
 	}
 	cfg.Database.Path = DatabasePath()
@@ -225,7 +264,60 @@ func loadLocal(cfg *Config) error {
 	return nil
 }
 
+func rejectLegacyConfig(data []byte) error {
+	var probe struct {
+		Sync struct {
+			Transport string    `yaml:"transport"`
+			Directory yaml.Node `yaml:"directory"`
+			Rsync     yaml.Node `yaml:"rsync"`
+			SCP       yaml.Node `yaml:"scp"`
+			Rclone    yaml.Node `yaml:"rclone"`
+		} `yaml:"sync"`
+	}
+	if err := yaml.Unmarshal(data, &probe); err != nil {
+		return nil
+	}
+	legacy := probe.Sync.Transport != "" ||
+		nodePresent(probe.Sync.Directory) ||
+		nodePresent(probe.Sync.Rsync) ||
+		nodePresent(probe.Sync.SCP) ||
+		nodePresent(probe.Sync.Rclone)
+	if !legacy {
+		return nil
+	}
+	return fmt.Errorf("config format is no longer supported; run syncsh setup")
+}
+
+func nodePresent(n yaml.Node) bool {
+	return n.Kind != 0 && n.Tag != "!!null"
+}
+
+func (c *Config) validate() error {
+	seen := map[string]bool{}
+	for _, ep := range c.Sync.Endpoints {
+		if strings.TrimSpace(ep.ID) == "" {
+			return fmt.Errorf("endpoint id is required")
+		}
+		if seen[ep.ID] {
+			return fmt.Errorf("duplicate endpoint id %q", ep.ID)
+		}
+		seen[ep.ID] = true
+		switch ep.Type {
+		case TypeRclone, TypeDirectory, TypeRsync, TypeSCP:
+		case "":
+			return fmt.Errorf("endpoint %s: type is required", ep.ID)
+		default:
+			return fmt.Errorf("endpoint %s: unknown type %q", ep.ID, ep.Type)
+		}
+	}
+	return nil
+}
+
 func (c *Config) Save() error {
+	if err := c.validate(); err != nil {
+		return err
+	}
+	c.Version = CurrentVersion
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}

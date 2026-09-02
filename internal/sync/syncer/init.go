@@ -75,7 +75,7 @@ func (e *Engine) InitializeRemote(ctx context.Context, m generations.Manifest, s
 	if err := e.opts.Transport.PutAtomic(ctx, "metadata/version", bytes.NewReader([]byte(`{"version":1}`))); err != nil {
 		return err
 	}
-	if err := e.keys.SetTrusted("remote", m.GenerationID, rm.Counter, "", body); err != nil {
+	if err := e.keys.SetTrusted(e.trustKind(), m.GenerationID, rm.Counter, "", body); err != nil {
 		return err
 	}
 	return e.publishDeviceHead(ctx)
@@ -163,10 +163,13 @@ func (e *Engine) PruneDevice(ctx context.Context, id string) error {
 	if id == e.opts.DeviceID {
 		return fmt.Errorf("cannot prune this device (%s)", id)
 	}
-	return e.withRemote(ctx, func() error {
+	_, found, _ := e.devices.Get(id)
+	if found {
 		if err := e.devices.Delete(id); err != nil {
 			return err
 		}
+	}
+	return e.withRemote(ctx, func() error {
 		if err := e.removeRemoteDeviceArtifacts(ctx, id); err != nil {
 			return err
 		}
@@ -260,7 +263,7 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 		Retired:          uniqueSorted(retiredIDs),
 		Pruned:           uniqueSorted(prunedIDs),
 	}
-	trusted, _ := e.keys.TrustedCounter("remote")
+	trusted, _ := e.keys.TrustedCounter(e.trustKind())
 	if trusted >= rm.Counter {
 		rm.Counter = trusted + 1
 	}
@@ -274,5 +277,5 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	if err := e.opts.Transport.PutAtomic(ctx, "metadata/manifest", bytes.NewReader(raw)); err != nil {
 		return err
 	}
-	return e.keys.SetTrusted("remote", m.GenerationID, rm.Counter, "", raw)
+	return e.keys.SetTrusted(e.trustKind(), m.GenerationID, rm.Counter, "", raw)
 }

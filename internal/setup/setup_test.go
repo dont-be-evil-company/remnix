@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mistweaverco/syncsh/internal/app"
+	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
 	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
 	"github.com/mistweaverco/syncsh/internal/crypto/keys"
@@ -121,13 +122,13 @@ func TestRequireValidRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.Config.Sync.Transport = "directory"
-	a.Config.Sync.Directory.Path = filepath.Join(root, "empty")
-	_ = os.MkdirAll(a.Config.Sync.Directory.Path, 0o700)
+	empty := filepath.Join(root, "empty")
+	a.Config.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("local", empty)}
+	_ = os.MkdirAll(empty, 0o700)
 	if err := RequireValidRemote(context.Background(), a); err == nil {
 		t.Fatal("empty remote should not be valid")
 	}
-	if _, err := RunNonInteractive(context.Background(), a, a.Config.Sync.Directory.Path, "t", nil, nil); err != nil {
+	if _, err := RunNonInteractive(context.Background(), a, empty, "t", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := RequireValidRemote(context.Background(), a); err != nil {

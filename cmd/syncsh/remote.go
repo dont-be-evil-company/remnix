@@ -5,11 +5,15 @@ import (
 )
 
 func newSyncCmd() *cobra.Command {
+	var endpoint string
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Synchronize encrypted history with the configured remote",
-		RunE:  runSync,
+		Short: "Synchronize encrypted history with configured endpoints",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSync(cmd, endpoint)
+		},
 	}
+	cmd.Flags().StringVar(&endpoint, "endpoint", "", "sync only this endpoint")
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Show local and remote synchronization status",

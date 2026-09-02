@@ -68,7 +68,6 @@ func TestRunOnceDisabled(t *testing.T) {
 	off := false
 	cfg := config.Default()
 	cfg.Sync.Enabled = &off
-	cfg.Sync.Transport = "none"
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +107,13 @@ func TestRunOnceEmptyKeyring(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SYNCSH_DATA_DIR", dir)
 	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	cfg := config.Default()
+	on := true
+	cfg.Sync.Enabled = &on
+	cfg.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("local", filepath.Join(dir, "remote"))}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
 	runOnce(context.Background())
 	st, err := ReadStatus()
 	if err != nil {

@@ -40,6 +40,7 @@ type Options struct {
 	CachedSMKs     map[string][]byte
 	StoreSMKs      func(map[string][]byte)
 	Transport      transport.Transport
+	EndpointID     string
 }
 
 type Engine struct {
@@ -50,6 +51,20 @@ type Engine struct {
 	keys    *keys.Store
 	devices *device.Store
 	history *history.Store
+}
+
+func (e *Engine) trustKind() string {
+	if e.opts.EndpointID == "" {
+		return "remote"
+	}
+	return "remote:" + e.opts.EndpointID
+}
+
+func (e *Engine) publishedSeqKey() string {
+	if e.opts.EndpointID == "" {
+		return "published_seq:" + e.opts.DeviceID
+	}
+	return "published_seq:" + e.opts.EndpointID + ":" + e.opts.DeviceID
 }
 
 func New(d *db.DB, opts Options) *Engine {
@@ -173,15 +188,27 @@ func (e *Engine) cachedSMKValid(g generations.Manifest, smk []byte) bool {
 	if !g.Active {
 		return true
 	}
-	payload, err := e.keys.TrustedPayload("remote")
-	if err != nil || len(payload) == 0 {
+	kinds, err := e.keys.TrustedKinds()
+	if err != nil {
 		return false
 	}
-	var rm RemoteManifest
-	if json.Unmarshal(payload, &rm) != nil {
-		return false
+	for _, kind := range kinds {
+		if !strings.HasPrefix(kind, "remote") {
+			continue
+		}
+		payload, err := e.keys.TrustedPayload(kind)
+		if err != nil || len(payload) == 0 {
+			continue
+		}
+		var rm RemoteManifest
+		if json.Unmarshal(payload, &rm) != nil {
+			continue
+		}
+		if VerifyRemote(rm, smk) == nil {
+			return true
+		}
 	}
-	return VerifyRemote(rm, smk) == nil
+	return false
 }
 
 func (e *Engine) fidoDevices(gens []generations.Manifest) ([]fido2.Device, func(), error) {
@@ -217,14 +244,14 @@ func (e *Engine) pullMetadata(ctx context.Context) error {
 		if err := json.Unmarshal(b, &rm); err != nil {
 			return err
 		}
-		trusted, err := e.keys.TrustedCounter("remote")
+		trusted, err := e.keys.TrustedCounter(e.trustKind())
 		if err != nil {
 			return err
 		}
 		if rm.Counter < trusted {
 			return fmt.Errorf("remote manifest rollback detected (counter %d < trusted %d)", rm.Counter, trusted)
 		}
-		if err := e.keys.SetTrusted("remote", rm.ActiveGeneration, rm.Counter, "", b); err != nil {
+		if err := e.keys.SetTrusted(e.trustKind(), rm.ActiveGeneration, rm.Counter, "", b); err != nil {
 			return err
 		}
 		haveManifest = true
@@ -385,7 +412,7 @@ func (e *Engine) applyEvents(evs []event.Event) error {
 func (e *Engine) publishLocal(ctx context.Context, smk []byte, active generations.Manifest) error {
 	var lastPub int64
 	var lastPubStr string
-	if err := e.db.SQL.QueryRow(`SELECT value FROM transport_state WHERE key = ?`, "published_seq:"+e.opts.DeviceID).Scan(&lastPubStr); err == nil {
+	if err := e.db.SQL.QueryRow(`SELECT value FROM transport_state WHERE key = ?`, e.publishedSeqKey()).Scan(&lastPubStr); err == nil {
 		lastPub, _ = strconv.ParseInt(lastPubStr, 10, 64)
 	}
 	var maxSeq int64
@@ -414,7 +441,7 @@ func (e *Engine) publishLocal(ctx context.Context, smk []byte, active generation
 	}
 	_, err = e.db.SQL.Exec(`
 INSERT INTO transport_state (key, value) VALUES (?, ?)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value`, "published_seq:"+e.opts.DeviceID, fmt.Sprintf("%d", maxSeq))
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, e.publishedSeqKey(), fmt.Sprintf("%d", maxSeq))
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	cfg := Default()
 	cfg.DeviceID = "dev-1"
 	cfg.DeviceName = "laptop"
-	cfg.Sync.Directory.Path = "$HOME/remote"
+	on := true
+	cfg.Sync.Enabled = &on
+	cfg.Sync.Endpoints = []Endpoint{DirectoryEndpoint("local", "$HOME/remote")}
 	cfg.Sync.Callbacks = []string{"rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh"}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -80,8 +82,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Database.Path != DatabasePath() {
 		t.Fatalf("database path = %q", loaded.Database.Path)
 	}
-	if loaded.Sync.Directory.Path != "$HOME/remote" {
-		t.Fatalf("directory path = %q", loaded.Sync.Directory.Path)
+	if len(loaded.Sync.Endpoints) != 1 || loaded.Sync.Endpoints[0].Path != "$HOME/remote" {
+		t.Fatalf("endpoints = %+v", loaded.Sync.Endpoints)
 	}
 	if len(loaded.Sync.Callbacks) != 1 {
 		t.Fatalf("callbacks = %#v", loaded.Sync.Callbacks)
@@ -99,7 +101,7 @@ func TestLoadSyncCallbacks(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("version: 1\nsync:\n  transport: directory\n  directory:\n    path: $HOME/GoogleDrive/syncsh\n  callbacks:\n    - rclone copy $HOME/GoogleDrive/syncsh gdrive:/syncsh\n")
+	raw := []byte("version: 2\nsync:\n  enabled: true\n  endpoints:\n    - id: local\n      type: directory\n      path: $HOME/GoogleDrive/syncsh\n      enabled: true\n  callbacks:\n    - rclone copy $HOME/GoogleDrive/syncsh gdrive:/syncsh\n")
 	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestLoadIgnoresStaleIdentityInUserConfig(t *testing.T) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stale := []byte("version: 1\ndevice_id: stale-id\ndevice_name: stale\ndatabase:\n  path: /tmp/old.db\nsync:\n  transport: directory\n  directory:\n    path: /tmp/remote\n")
+	stale := []byte("version: 2\ndevice_id: stale-id\ndevice_name: stale\ndatabase:\n  path: /tmp/old.db\nsync:\n  enabled: true\n  endpoints:\n    - id: local\n      type: directory\n      path: /tmp/remote\n      enabled: true\n")
 	if err := os.WriteFile(ConfigPath(), stale, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +241,7 @@ func TestLoadSuggestAccept(t *testing.T) {
 	}
 }
 
-func TestLegacyDirectoryConfigStaysEnabled(t *testing.T) {
+func TestLoadRejectsLegacyTransport(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SYNCSH_CONFIG_DIR", dir)
 	t.Setenv("SYNCSH_DATA_DIR", dir)
@@ -250,39 +252,46 @@ func TestLegacyDirectoryConfigStaysEnabled(t *testing.T) {
 	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load()
-	if err != nil {
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("expected legacy rejection, got %v", err)
+	}
+}
+
+func TestLoadRejectsLegacyRclonePrimary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Sync.IsEnabled() {
-		t.Fatal("legacy config without enabled must stay enabled")
+	raw := []byte("version: 1\nsync:\n  transport: rclone\n  rclone:\n    primary: gdrive\n    remotes:\n      - id: gdrive\n        rclone_remote: gdrive\n        enabled: true\n")
+	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if cfg.Sync.Transport != "directory" {
-		t.Fatalf("transport = %q", cfg.Sync.Transport)
-	}
-	if cfg.Sync.Directory.Path != "$HOME/GoogleDrive/syncsh" {
-		t.Fatalf("path = %q", cfg.Sync.Directory.Path)
-	}
-	if cfg.Sync.Rclone != nil {
-		t.Fatal("rclone should be absent")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("expected legacy rejection, got %v", err)
 	}
 }
 
 func TestSyncEnabledFalseDisables(t *testing.T) {
+	ep := DirectoryEndpoint("local", "/tmp/x")
 	off := false
-	s := Sync{Enabled: &off, Transport: "rclone"}
+	s := Sync{Enabled: &off, Endpoints: []Endpoint{ep}}
 	if s.IsEnabled() {
 		t.Fatal("enabled: false")
 	}
 	on := true
-	if !(Sync{Enabled: &on}).IsEnabled() {
-		t.Fatal("enabled: true")
+	if !(Sync{Enabled: &on, Endpoints: []Endpoint{ep}}).IsEnabled() {
+		t.Fatal("enabled: true with endpoints")
 	}
-	if (Sync{Transport: "none"}).IsEnabled() {
-		t.Fatal("transport none")
+	if (Sync{Enabled: &on}).IsEnabled() {
+		t.Fatal("enabled true but no endpoints")
 	}
 	if (Sync{}).IsEnabled() {
-		t.Fatal("empty transport with nil enabled")
+		t.Fatal("empty sync")
+	}
+	if !(Sync{Endpoints: []Endpoint{ep}}).IsEnabled() {
+		t.Fatal("nil enabled with endpoints should be on")
 	}
 }
 
@@ -294,19 +303,16 @@ func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 	cfg := Default()
 	on := true
 	cfg.Sync.Enabled = &on
-	cfg.Sync.Transport = "rclone"
-	cfg.Sync.Rclone = &RcloneConfig{
-		Engine:  RcloneEngineEmbedded,
-		Primary: "personal-drive",
-		Remotes: []RemoteConfig{{
-			ID:           "personal-drive",
-			DisplayName:  "Google Drive",
-			RcloneRemote: "syncsh-personal",
-			Provider:     "google-drive",
-			Path:         "syncsh",
-			Enabled:      true,
-		}},
-	}
+	cfg.Sync.RcloneEngine = RcloneEngineEmbedded
+	cfg.Sync.Endpoints = []Endpoint{{
+		ID:           "personal-drive",
+		Type:         TypeRclone,
+		DisplayName:  "Google Drive",
+		RcloneRemote: "syncsh-personal",
+		Provider:     "google-drive",
+		Path:         "syncsh",
+		Enabled:      true,
+	}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -327,11 +333,50 @@ func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Sync.Rclone == nil || loaded.Sync.Rclone.Primary != "personal-drive" {
-		t.Fatalf("rclone = %+v", loaded.Sync.Rclone)
+	if len(loaded.Sync.Endpoints) != 1 || loaded.Sync.Endpoints[0].ID != "personal-drive" {
+		t.Fatalf("endpoints = %+v", loaded.Sync.Endpoints)
 	}
-	if loaded.Sync.Rclone.EngineOrDefault() != RcloneEngineEmbedded {
+	if loaded.Sync.RcloneEngineOrDefault() != RcloneEngineEmbedded {
 		t.Fatal("engine default")
+	}
+}
+
+func TestEndpointsRoundTripMixedTypes(t *testing.T) {
+	cfgDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
+	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	cfg := Default()
+	on := true
+	cfg.Sync.Enabled = &on
+	cfg.Sync.Endpoints = []Endpoint{
+		{ID: "gdrive", Type: TypeRclone, RcloneRemote: "syncsh-gdrive", Provider: "google-drive", Path: "syncsh", Enabled: true},
+		{ID: "s3", Type: TypeRclone, RcloneRemote: "syncsh-s3", Provider: "s3", Path: "syncsh", Enabled: false},
+		DirectoryEndpoint("nas", "/mnt/nas/syncsh"),
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Sync.EnabledEndpoints()) != 2 {
+		t.Fatalf("enabled = %+v", loaded.Sync.EnabledEndpoints())
+	}
+	if _, ok := loaded.Sync.Endpoint("s3"); !ok {
+		t.Fatal("missing s3")
+	}
+}
+
+func TestSaveRejectsDuplicateEndpointIDs(t *testing.T) {
+	cfg := Default()
+	cfg.Sync.Endpoints = []Endpoint{
+		DirectoryEndpoint("local", "/a"),
+		DirectoryEndpoint("local", "/b"),
+	}
+	if err := cfg.Save(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected duplicate error, got %v", err)
 	}
 }
 

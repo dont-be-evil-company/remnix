@@ -12,6 +12,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
 	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
 	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/mistweaverco/syncsh/internal/transport/directory"
 )
 
 func TestMain(m *testing.M) {
@@ -94,8 +95,9 @@ func TestSyncRunsCallbacksAndReleasesLock(t *testing.T) {
 	defer a.Close()
 	remote := filepath.Join(root, "remote")
 	a.Config.DeviceName = "test"
-	a.Config.Sync.Transport = "directory"
-	a.Config.Sync.Directory.Path = remote
+	on := true
+	a.Config.Sync.Enabled = &on
+	a.Config.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("local", remote)}
 	if err := a.Config.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -170,10 +172,13 @@ func TestSyncSkipsCallbacksWhenEngineFails(t *testing.T) {
 	if err := a.EnsureLocalDevice(); err != nil {
 		t.Fatal(err)
 	}
-	a.Config.Sync.Directory.Path = filepath.Join(root, "remote")
-	if err := os.MkdirAll(a.Config.Sync.Directory.Path, 0o700); err != nil {
+	remote := filepath.Join(root, "remote")
+	if err := os.MkdirAll(remote, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	on := true
+	a.Config.Sync.Enabled = &on
+	a.Config.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("local", remote)}
 	marker := filepath.Join(root, "should-not-exist")
 	a.Config.Sync.Callbacks = []string{"touch " + marker}
 	if err := a.Sync(context.Background(), nil, nil, nil); err == nil {
@@ -196,8 +201,9 @@ func TestEnqueueHistoryCreatedSkipsRemote(t *testing.T) {
 	if err := a.EnsureLocalDevice(); err != nil {
 		t.Fatal(err)
 	}
-	a.Config.Sync.Transport = "rclone"
-	a.Config.Sync.Rclone = &config.RcloneConfig{Primary: "missing"}
+	a.Config.Sync.Endpoints = []config.Endpoint{{
+		ID: "missing", Type: config.TypeRclone, RcloneRemote: "missing", Enabled: true,
+	}}
 	if err := a.EnqueueHistoryCreated(history.Entry{
 		ID: "h1", Command: "echo hi", DeviceID: a.Config.DeviceID,
 	}); err != nil {
@@ -224,8 +230,9 @@ func TestTombstoneEntriesSkipsRemote(t *testing.T) {
 	if _, err := store.Insert(e); err != nil {
 		t.Fatal(err)
 	}
-	a.Config.Sync.Transport = "rclone"
-	a.Config.Sync.Rclone = &config.RcloneConfig{Primary: "missing"}
+	a.Config.Sync.Endpoints = []config.Endpoint{{
+		ID: "missing", Type: config.TypeRclone, RcloneRemote: "missing", Enabled: true,
+	}}
 	if err := a.TombstoneEntries([]history.Entry{e}); err != nil {
 		t.Fatal(err)
 	}
@@ -235,5 +242,104 @@ func TestTombstoneEntriesSkipsRemote(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected tombstone, got %+v", got)
+	}
+}
+
+func TestSyncFansOutToTwoDirectoryEndpoints(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	a, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	aDir := filepath.Join(root, "a")
+	bDir := filepath.Join(root, "b")
+	a.Config.DeviceName = "test"
+	on := true
+	a.Config.Sync.Enabled = &on
+	a.Config.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("ep-a", aDir)}
+	if err := a.EnsureLocalDevice(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	m, smk, encoded, err := rotation.BootstrapGeneration(1, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := recovery.Decode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, err := a.EngineFor(a.Config.Sync.Endpoints[0], secret, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.InitializeRemote(ctx, m, smk); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyring.Set(a.Config.DeviceID, map[string][]byte{m.GenerationID: smk}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	a.Config.Sync.UpsertEndpoint(config.DirectoryEndpoint("ep-b", bDir))
+	if err := a.Sync(ctx, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	tr := directory.New(bDir)
+	if _, err := tr.Get(ctx, "metadata/manifest"); err != nil {
+		t.Fatalf("second endpoint not seeded: %v", err)
+	}
+}
+
+func TestSyncContinuesWhenOneEndpointFails(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	a, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	aDir := filepath.Join(root, "a")
+	a.Config.DeviceName = "test"
+	on := true
+	a.Config.Sync.Enabled = &on
+	a.Config.Sync.Endpoints = []config.Endpoint{config.DirectoryEndpoint("ep-a", aDir)}
+	if err := a.EnsureLocalDevice(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	m, smk, encoded, err := rotation.BootstrapGeneration(1, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := recovery.Decode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, err := a.EngineFor(a.Config.Sync.Endpoints[0], secret, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.InitializeRemote(ctx, m, smk); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyring.Set(a.Config.DeviceID, map[string][]byte{m.GenerationID: smk}); err != nil {
+		t.Fatal(err)
+	}
+	a.Config.Sync.UpsertEndpoint(config.Endpoint{
+		ID: "ep-b", Type: config.TypeRclone, RcloneRemote: "no-such-remote", Enabled: true,
+	})
+	err = a.Sync(ctx, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected partial failure")
+	}
+	tr := directory.New(aDir)
+	if _, err := tr.Get(ctx, "metadata/manifest"); err != nil {
+		t.Fatalf("healthy endpoint lost objects: %v", err)
 	}
 }

@@ -182,10 +182,11 @@ func classifyErr(err error, cfg *config.Config) (class, hint string) {
 	switch {
 	case errors.Is(err, transport.ErrAuthRequired):
 		hint = "run: syncsh remote reconnect <name>"
-		if cfg != nil && cfg.Sync.Rclone != nil {
-			for _, r := range cfg.Sync.Rclone.Remotes {
-				if r.ID == cfg.Sync.Rclone.Primary && r.Provider == "icloud-drive" {
+		if cfg != nil {
+			for _, r := range cfg.Sync.EnabledEndpoints() {
+				if r.Provider == "icloud-drive" && strings.Contains(err.Error(), r.ID) {
 					hint = "iCloud authentication expired; run: syncsh remote reconnect " + r.ID
+					break
 				}
 			}
 		}

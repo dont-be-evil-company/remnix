@@ -15,7 +15,7 @@ func RunConfig(ctx context.Context, cfg *config.Config) error {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Configuration").Options(
 				huh.NewOption("Enable or disable synchronization", "enable"),
-				huh.NewOption("Change transport / remote", "transport"),
+				huh.NewOption("Manage sync endpoints", "endpoints"),
 				huh.NewOption("Edit post-sync callbacks", "callbacks"),
 				huh.NewOption("Save and exit", "save"),
 				huh.NewOption("Cancel", "cancel"),
@@ -39,11 +39,8 @@ func RunConfig(ctx context.Context, cfg *config.Config) error {
 				return err
 			}
 			cfg.Sync.Enabled = &enable
-			if !enable {
-				cfg.Sync.Transport = "none"
-			}
-		case "transport":
-			if err := editTransport(ctx, cfg); err != nil {
+		case "endpoints":
+			if err := editEndpoints(ctx, cfg); err != nil {
 				return err
 			}
 		case "callbacks":
@@ -68,37 +65,42 @@ func RunConfig(ctx context.Context, cfg *config.Config) error {
 	}
 }
 
-func editTransport(ctx context.Context, cfg *config.Config) error {
-	tr, err := ChooseTransport(ctx)
-	if err != nil {
-		return err
-	}
-	on := true
-	cfg.Sync.Enabled = &on
-	cfg.Sync.Transport = tr
-	switch tr {
-	case "directory":
-		res, err := PickLocalDir(ctx, "Select syncsh storage folder", false)
-		if err != nil {
+func editEndpoints(ctx context.Context, cfg *config.Config) error {
+	for {
+		action := "back"
+		opts := []huh.Option[string]{
+			huh.NewOption("Add an endpoint", "add"),
+		}
+		for _, ep := range cfg.Sync.Endpoints {
+			label := ep.ID + " (" + ep.Type + ")"
+			if !ep.Enabled {
+				label += " disabled"
+			}
+			opts = append(opts, huh.NewOption("Remove "+label, "rm:"+ep.ID))
+		}
+		opts = append(opts, huh.NewOption("Back", "back"))
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().Title("Sync endpoints").Options(opts...).Value(&action),
+		))
+		if err := form.RunWithContext(ctx); err != nil {
 			return err
 		}
-		if res.Canceled {
-			return fmt.Errorf("cancelled")
+		switch {
+		case action == "back":
+			return nil
+		case action == "add":
+			ep, err := AddEndpoint(ctx, cfg, false)
+			if err != nil {
+				return err
+			}
+			if ep.ID == "" {
+				continue
+			}
+			on := true
+			cfg.Sync.Enabled = &on
+			cfg.Sync.UpsertEndpoint(ep)
+		case strings.HasPrefix(action, "rm:"):
+			cfg.Sync.RemoveEndpoint(strings.TrimPrefix(action, "rm:"))
 		}
-		cfg.Sync.Directory.Path = res.Path
-	case "rclone":
-		return ConfigureRcloneRemote(ctx, cfg)
-	case "rsync":
-		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&cfg.Sync.Rsync.Remote))).RunWithContext(ctx)
-	case "scp":
-		_ = huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Host").Value(&cfg.Sync.SCP.Host),
-			huh.NewInput().Title("User").Value(&cfg.Sync.SCP.User),
-			huh.NewInput().Title("Path").Value(&cfg.Sync.SCP.Path),
-		)).RunWithContext(ctx)
-	case "none":
-		off := false
-		cfg.Sync.Enabled = &off
 	}
-	return nil
 }

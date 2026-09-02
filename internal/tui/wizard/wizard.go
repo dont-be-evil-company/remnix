@@ -3,10 +3,12 @@ package wizard
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"charm.land/huh/v2"
 	"github.com/mistweaverco/syncsh/internal/app"
+	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/repository"
 	"github.com/mistweaverco/syncsh/internal/tui/picker"
 )
@@ -71,8 +73,73 @@ func PickLocalDir(ctx context.Context, title string, confirm bool) (picker.Resul
 	return picker.Run(picker.NewLocal(start), picker.Options{Title: title, Start: start, ConfirmDest: confirm, CreateMode: confirm})
 }
 
+func uniqueEndpointID(cfg *config.Config, want string) string {
+	if _, ok := cfg.Sync.Endpoint(want); !ok {
+		return want
+	}
+	for i := 2; ; i++ {
+		id := fmt.Sprintf("%s-%d", want, i)
+		if _, ok := cfg.Sync.Endpoint(id); !ok {
+			return id
+		}
+	}
+}
+
+func AddEndpoint(ctx context.Context, cfg *config.Config, join bool) (config.Endpoint, error) {
+	tr, err := ChooseTransport(ctx)
+	if err != nil {
+		return config.Endpoint{}, err
+	}
+	switch tr {
+	case "none":
+		return config.Endpoint{}, nil
+	case "directory":
+		title := "Select syncsh storage folder"
+		if join {
+			title = "Select existing syncsh folder"
+		}
+		res, err := PickLocalDir(ctx, title, !join)
+		if err != nil {
+			return config.Endpoint{}, err
+		}
+		if res.Canceled {
+			return config.Endpoint{}, fmt.Errorf("cancelled")
+		}
+		if !join && res.Join {
+			return config.Endpoint{}, fmt.Errorf("an existing repository was selected; use 'syncsh device add' to join")
+		}
+		ep := config.DirectoryEndpoint(uniqueEndpointID(cfg, "local"), res.Path)
+		return ep, nil
+	case "rclone":
+		return ConfigureRcloneRemoteMode(ctx, cfg, join)
+	case "rsync":
+		var remote string
+		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&remote))).RunWithContext(ctx)
+		return config.Endpoint{ID: uniqueEndpointID(cfg, "rsync"), Type: config.TypeRsync, Remote: remote, Enabled: true}, nil
+	case "scp":
+		ep := config.Endpoint{Type: config.TypeSCP, Enabled: true}
+		_ = huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Host").Value(&ep.Host),
+			huh.NewInput().Title("User").Value(&ep.User),
+			huh.NewInput().Title("Path").Value(&ep.Path),
+		)).RunWithContext(ctx)
+		id := ep.Host
+		if id == "" {
+			id = "scp"
+		}
+		ep.ID = uniqueEndpointID(cfg, id)
+		return ep, nil
+	default:
+		return config.Endpoint{}, fmt.Errorf("unknown endpoint type %q", tr)
+	}
+}
+
 func ProbeOrWarn(ctx context.Context, a *app.App) (repository.Report, error) {
-	tr, err := a.Transport()
+	eps := a.Config.Sync.EnabledEndpoints()
+	if len(eps) == 0 {
+		return repository.Report{}, fmt.Errorf("no endpoints configured")
+	}
+	tr, err := a.OpenTransport(eps[0])
 	if err != nil {
 		return repository.Report{}, err
 	}

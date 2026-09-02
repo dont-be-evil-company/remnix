@@ -86,49 +86,62 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 
 	if !a.Config.Sync.IsEnabled() {
 		check(true, "sync: disabled (local history only)")
-	} else if _, err := a.Transport(); err != nil {
-		check(false, "transport: "+err.Error())
 	} else {
-		check(true, "transport: "+a.Config.Sync.Transport)
-		if rc := a.Config.Sync.Rclone; rc != nil {
-			check(true, "rclone engine: "+string(rc.EngineOrDefault()))
-			check(true, "rclone primary: "+rc.Primary)
-			for _, rem := range rc.Remotes {
-				if rem.ID == rc.Primary {
-					check(true, "provider: "+rem.Provider+" path="+rem.Path)
+		check(true, "rclone engine: "+string(a.Config.Sync.RcloneEngineOrDefault()))
+		eps := a.Config.Sync.EnabledEndpoints()
+		if len(eps) == 0 {
+			check(false, "endpoints: none enabled")
+		}
+		for _, ep := range a.Config.Sync.Endpoints {
+			state := "disabled"
+			if ep.Enabled {
+				state = "enabled"
+			}
+			msg := fmt.Sprintf("endpoint %s type=%s %s", ep.ID, ep.Type, state)
+			if ep.Provider != "" {
+				msg += " provider=" + ep.Provider
+			}
+			if ep.Path != "" {
+				msg += " path=" + ep.Path
+			}
+			check(true, msg)
+		}
+		for _, ep := range eps {
+			tr, err := a.OpenTransport(ep)
+			if err != nil {
+				check(false, ep.ID+" transport: "+err.Error())
+				continue
+			}
+			st, _ := tr.HealthCheck(ctx)
+			check(st.State == transport.HealthOK || st.State == transport.HealthNotFound, ep.ID+" health: "+string(st.State)+" "+st.Message)
+			rep, err := repository.Probe(ctx, tr)
+			if err != nil {
+				check(false, ep.ID+" repository probe: "+err.Error())
+			} else {
+				check(rep.Result == repository.Valid || rep.Result == repository.Empty, ep.ID+" repository: "+rep.Result.String()+" "+rep.Message)
+			}
+			if tr.Capabilities().ListingExpensive {
+				check(true, ep.ID+" remote list: skipped (cloud folder listing is expensive)")
+			} else {
+				dirs, err := tr.ListDirs(ctx, "")
+				if err != nil {
+					check(false, ep.ID+" remote list: "+err.Error())
+				} else {
+					check(true, fmt.Sprintf("%s remote directories: %d", ep.ID, len(dirs)))
 				}
 			}
-		}
-		tr, _ := a.Transport()
-		st, _ := tr.HealthCheck(ctx)
-		check(st.State == transport.HealthOK || st.State == transport.HealthNotFound, "remote health: "+string(st.State)+" "+st.Message)
-		rep, err := repository.Probe(ctx, tr)
-		if err != nil {
-			check(false, "repository probe: "+err.Error())
-		} else {
-			check(rep.Result == repository.Valid || rep.Result == repository.Empty, "repository: "+rep.Result.String()+" "+rep.Message)
-		}
-		if tr.Capabilities().ListingExpensive {
-			check(true, "remote list: skipped (cloud folder listing is expensive)")
-		} else {
-			dirs, err := tr.ListDirs(ctx, "")
-			if err != nil {
-				check(false, "remote list: "+err.Error())
+			hid := uuid.NewString()
+			hkey := "metadata/health/" + a.Config.DeviceID + "/" + hid
+			if err := tr.PutAtomic(ctx, hkey, strings.NewReader("ok")); err != nil {
+				check(true, ep.ID+" write probe skipped: "+err.Error())
 			} else {
-				check(true, fmt.Sprintf("remote directories: %d", len(dirs)))
+				_ = tr.Remove(ctx, hkey)
+				check(true, ep.ID+" write probe: ok")
 			}
-		}
-		hid := uuid.NewString()
-		hkey := "metadata/health/" + a.Config.DeviceID + "/" + hid
-		if err := tr.PutAtomic(ctx, hkey, strings.NewReader("ok")); err != nil {
-			check(true, "write probe skipped: "+err.Error())
-		} else {
-			_ = tr.Remove(ctx, hkey)
-			check(true, "write probe: ok")
-		}
-		plan, err := gc.Evaluate(ctx, tr, gc.RequiredDevices(devs), "")
-		if err == nil {
-			check(true, fmt.Sprintf("gc eligible: %v blocked_by=%v", plan.Eligible, plan.BlockedBy))
+			plan, err := gc.Evaluate(ctx, tr, gc.RequiredDevices(devs), "")
+			if err == nil {
+				check(true, fmt.Sprintf("%s gc eligible: %v blocked_by=%v", ep.ID, plan.Eligible, plan.BlockedBy))
+			}
 		}
 	}
 	f, _ := merge.NewHeadStore(a.DB).Get()

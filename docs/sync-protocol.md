@@ -14,8 +14,16 @@ acks/<device-id>.ack
 ```
 
 `Engine.Sync` pulls metadata (with rollback detection on
-`metadata/manifest` counters), imports generations, merges event bundles,
-pushes local events, writes acks, and may checkpoint.
+`metadata/manifest` counters, namespaced per endpoint as `remote:<id>`),
+imports generations, merges event bundles, pushes local events, writes acks,
+and may checkpoint. `published_seq` is also per endpoint so a new mirror
+receives this device's history. Pulled bundle keys stay global.
+
+After every enabled endpoint has been synced, the coordinator equalizes
+objects (copy any layout key that exists on one remote and is missing on
+another). A `metadata/manifest` with a lower counter never overwrites a
+higher one. Partial failure continues: one cloud being down does not skip
+the others. Callbacks run if any endpoint succeeded.
 
 Writes use `Transport.PutAtomic`. Directory transport is tmp+rename. rclone
 writes a temp object then moves when the backend supports it; otherwise

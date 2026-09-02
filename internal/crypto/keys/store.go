@@ -145,11 +145,12 @@ func (s *Store) DeleteGeneration(id string) error {
 }
 
 func (s *Store) ClearUnpublished() error {
-	trusted, err := s.TrustedCounter("remote")
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM trusted_manifests WHERE kind = 'remote' OR kind LIKE 'remote:%'`).Scan(&n)
 	if err != nil {
 		return err
 	}
-	if trusted > 0 {
+	if n > 0 {
 		return nil
 	}
 	if _, err := s.db.Exec(`DELETE FROM key_slots`); err != nil {
@@ -157,6 +158,23 @@ func (s *Store) ClearUnpublished() error {
 	}
 	_, err = s.db.Exec(`DELETE FROM key_generations`)
 	return err
+}
+
+func (s *Store) TrustedKinds() ([]string, error) {
+	rows, err := s.db.Query(`SELECT kind FROM trusted_manifests`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return nil, err
+		}
+		out = append(out, kind)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) TrustedCounter(kind string) (int64, error) {

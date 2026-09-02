@@ -11,7 +11,11 @@ import (
 )
 
 func RequireValidRemote(ctx context.Context, a *app.App) error {
-	tr, err := a.Transport()
+	eps := a.Config.Sync.EnabledEndpoints()
+	if len(eps) == 0 {
+		return fmt.Errorf("join requires a remote")
+	}
+	tr, err := a.OpenTransport(eps[0])
 	if err != nil {
 		return err
 	}
@@ -30,38 +34,16 @@ func ConfigureJoin(ctx context.Context, a *app.App) error {
 	if cfg.DeviceName == "" {
 		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Device name").Value(&cfg.DeviceName))).RunWithContext(ctx)
 	}
-	tr, err := wizard.ChooseTransport(ctx)
+	ep, err := wizard.AddEndpoint(ctx, cfg, true)
 	if err != nil {
 		return err
 	}
+	if ep.ID == "" {
+		return fmt.Errorf("joining requires a remote")
+	}
 	on := true
 	cfg.Sync.Enabled = &on
-	cfg.Sync.Transport = tr
-	switch tr {
-	case "none":
-		return fmt.Errorf("joining requires a remote")
-	case "directory":
-		res, err := wizard.PickLocalDir(ctx, "Select existing syncsh folder", true)
-		if err != nil {
-			return err
-		}
-		if res.Canceled {
-			return fmt.Errorf("cancelled")
-		}
-		cfg.Sync.Directory.Path = res.Path
-	case "rclone":
-		if err := wizard.ConfigureRcloneRemoteMode(ctx, cfg, true); err != nil {
-			return err
-		}
-	case "rsync":
-		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&cfg.Sync.Rsync.Remote))).RunWithContext(ctx)
-	case "scp":
-		_ = huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Host").Value(&cfg.Sync.SCP.Host),
-			huh.NewInput().Title("User").Value(&cfg.Sync.SCP.User),
-			huh.NewInput().Title("Path").Value(&cfg.Sync.SCP.Path),
-		)).RunWithContext(ctx)
-	}
+	cfg.Sync.UpsertEndpoint(ep)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -73,18 +55,5 @@ func NeedsJoinWizard(a *app.App) bool {
 	if a == nil || a.Config == nil || !a.Config.Sync.IsEnabled() {
 		return true
 	}
-	switch a.Config.Sync.Transport {
-	case "", "none":
-		return true
-	case "directory":
-		return a.Config.Sync.Directory.Path == ""
-	case "rclone":
-		return a.Config.Sync.Rclone == nil || a.Config.Sync.Rclone.Primary == ""
-	case "rsync":
-		return a.Config.Sync.Rsync.Remote == ""
-	case "scp":
-		return a.Config.Sync.SCP.Host == ""
-	default:
-		return false
-	}
+	return len(a.Config.Sync.EnabledEndpoints()) == 0
 }

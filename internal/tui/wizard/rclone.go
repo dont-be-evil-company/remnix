@@ -19,16 +19,17 @@ import (
 )
 
 func ConfigureRcloneRemote(ctx context.Context, cfg *config.Config) error {
-	return ConfigureRcloneRemoteMode(ctx, cfg, false)
+	_, err := ConfigureRcloneRemoteMode(ctx, cfg, false)
+	return err
 }
 
-func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join bool) error {
+func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join bool) (config.Endpoint, error) {
 	if err := rclonetr.Init(config.RcloneConfigPath()); err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	imported, err := maybeImportRemote(ctx)
 	if err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	var (
 		def     providers.Definition
@@ -54,12 +55,12 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			huh.NewSelect[string]().Title("Provider").Description("Tokens live in the local data directory (next to local.yaml), not in config.yaml.").Options(opts...).Value(&id),
 		))
 		if err := form.RunWithContext(ctx); err != nil {
-			return err
+			return config.Endpoint{}, err
 		}
 		var ok bool
 		def, ok = providers.ByID(id)
 		if !ok {
-			return fmt.Errorf("unknown provider %s", id)
+			return config.Endpoint{}, fmt.Errorf("unknown provider %s", id)
 		}
 		fmt.Fprintln(os.Stderr, def.Intro())
 		for _, lim := range def.Limitations {
@@ -75,7 +76,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			}
 			form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Backend").Options(to...).Value(&t)))
 			if err := form.RunWithContext(ctx); err != nil {
-				return err
+				return config.Endpoint{}, err
 			}
 			backend = t
 		}
@@ -83,16 +84,16 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Remote name").Value(&logical))).RunWithContext(ctx)
 		params, err = collectProviderParams(ctx, def)
 		if err != nil {
-			return err
+			return config.Endpoint{}, err
 		}
 		sess := rclonetr.NewConfigSessionWith(backend, rclonetr.StagedName(), params)
 		if err := runConfigSession(ctx, sess); err != nil {
 			sess.Abort()
-			return err
+			return config.Endpoint{}, err
 		}
 		if err := sess.Commit(logical); err != nil {
 			sess.Abort()
-			return err
+			return config.Endpoint{}, err
 		}
 		section = sess.Name
 	}
@@ -100,41 +101,41 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 	fmt.Fprintln(os.Stderr, "Opening remote (quota check only; not listing Drive)...")
 	tr, err := rclonetr.Open(ctx, section, "")
 	if err != nil {
-		return fmt.Errorf("open remote: %w", err)
+		return config.Endpoint{}, fmt.Errorf("open remote: %w", err)
 	}
 	st, err := tr.HealthCheck(ctx)
 	if err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	fmt.Fprintln(os.Stderr, "connection test:", redact.String(st.Message))
 	if st.State != transport.HealthOK && !def.AllowSaveOnFailedTest() {
-		return fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
+		return config.Endpoint{}, fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
 	}
 	if st.State != transport.HealthOK && def.AllowSaveOnFailedTest() {
 		save := false
 		_ = huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Save even though the connection test failed?").Value(&save))).RunWithContext(ctx)
 		if !save {
 			rclonetr.DeleteSection(section)
-			return fmt.Errorf("cancelled")
+			return config.Endpoint{}, fmt.Errorf("cancelled")
 		}
 	}
 	path, err := pickRcloneFolder(ctx, tr, logical, join)
 	if err != nil {
 		rclonetr.DeleteSection(section)
-		return err
+		return config.Endpoint{}, err
 	}
 	rooted, err := rclonetr.Open(ctx, section, path)
 	if err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	fmt.Fprintln(os.Stderr, "Checking for syncsh metadata (not a full Drive scan)...")
 	rep, err := repository.Probe(ctx, rooted)
 	if err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	path, _, rep, err = resolveRcloneDest(ctx, section, path, rooted, rep, join)
 	if err != nil {
-		return err
+		return config.Endpoint{}, err
 	}
 	fmt.Fprintln(os.Stderr, "summary:")
 	fmt.Fprintln(os.Stderr, "  provider:", def.DisplayName)
@@ -142,31 +143,18 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 	fmt.Fprintln(os.Stderr, "  path:", path)
 	fmt.Fprintln(os.Stderr, "  probe:", rep.Result)
 	on := true
-	if cfg.Sync.Rclone == nil {
-		cfg.Sync.Rclone = &config.RcloneConfig{}
-	}
 	cfg.Sync.Enabled = &on
-	cfg.Sync.Transport = "rclone"
-	cfg.Sync.Rclone.Engine = config.RcloneEngineEmbedded
-	cfg.Sync.Rclone.Primary = logical
-	replaced := false
-	for i, r := range cfg.Sync.Rclone.Remotes {
-		if r.ID == logical {
-			cfg.Sync.Rclone.Remotes[i] = config.RemoteConfig{
-				ID: logical, DisplayName: def.DisplayName, RcloneRemote: section,
-				Provider: def.ID, Path: path, Enabled: true,
-			}
-			replaced = true
-			break
-		}
+	ep := config.Endpoint{
+		ID:           logical,
+		Type:         config.TypeRclone,
+		DisplayName:  def.DisplayName,
+		RcloneRemote: section,
+		Provider:     def.ID,
+		Path:         path,
+		Enabled:      true,
 	}
-	if !replaced {
-		cfg.Sync.Rclone.Remotes = append(cfg.Sync.Rclone.Remotes, config.RemoteConfig{
-			ID: logical, DisplayName: def.DisplayName, RcloneRemote: section,
-			Provider: def.ID, Path: path, Enabled: true,
-		})
-	}
-	return nil
+	cfg.Sync.UpsertEndpoint(ep)
+	return ep, nil
 }
 
 func maybeImportRemote(ctx context.Context) (string, error) {

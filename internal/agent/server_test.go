@@ -22,7 +22,6 @@ func testService(t *testing.T) *Service {
 	cfg := config.Default()
 	cfg.DeviceID = "dev1"
 	cfg.DeviceName = "test"
-	cfg.Sync.Transport = "none"
 	off := false
 	cfg.Sync.Enabled = &off
 	if err := cfg.Save(); err != nil {

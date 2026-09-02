@@ -45,14 +45,20 @@ func tokensFromHardware() []piv.Token {
 	return toks
 }
 
-func runSync(cmd *cobra.Command, _ []string) error {
+func runSync(cmd *cobra.Command, endpoint string) error {
 	a, err := openApp()
 	if err != nil {
 		return err
 	}
 	defer a.Close()
-	if err := a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
-		return err
+	var syncErr error
+	if endpoint != "" {
+		syncErr = a.SyncOnly(cmd.Context(), endpoint, recoverySecretFromEnv(), tokensFromHardware(), nil)
+	} else {
+		syncErr = a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil)
+	}
+	if syncErr != nil {
+		return syncErr
 	}
 	daemon.RecordOK()
 	return nil
@@ -67,38 +73,47 @@ func runSyncStatus(cmd *cobra.Command, _ []string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "device: %s (%s)\n", a.Config.DeviceID, a.Config.DeviceName)
 	fmt.Fprintf(out, "enabled: %v\n", a.Config.Sync.IsEnabled())
-	fmt.Fprintf(out, "transport: %s\n", a.Config.Sync.Transport)
-	if rc := a.Config.Sync.Rclone; rc != nil {
-		fmt.Fprintf(out, "engine: %s\n", rc.EngineOrDefault())
-		fmt.Fprintf(out, "primary: %s\n", rc.Primary)
-		for _, r := range rc.Remotes {
-			if r.ID == rc.Primary {
-				fmt.Fprintf(out, "provider: %s\n", r.Provider)
-				fmt.Fprintf(out, "path: %s\n", r.Path)
-			}
+	fmt.Fprintf(out, "rclone_engine: %s\n", a.Config.Sync.RcloneEngineOrDefault())
+	if len(a.Config.Sync.Endpoints) == 0 {
+		fmt.Fprintln(out, "endpoints: none")
+	}
+	for _, ep := range a.Config.Sync.Endpoints {
+		state := "disabled"
+		if ep.Enabled {
+			state = "enabled"
 		}
+		fmt.Fprintf(out, "endpoint %s type=%s %s", ep.ID, ep.Type, state)
+		if ep.Provider != "" {
+			fmt.Fprintf(out, " provider=%s", ep.Provider)
+		}
+		if ep.Path != "" {
+			fmt.Fprintf(out, " path=%s", ep.Path)
+		}
+		fmt.Fprintln(out)
 	}
 	if !a.Config.Sync.IsEnabled() {
 		fmt.Fprintln(out, "sync: disabled (local history only)")
 		return nil
 	}
-	tr, err := a.Transport()
-	if err != nil {
-		fmt.Fprintf(out, "transport error: %s\n", redact.String(err.Error()))
-		return nil
-	}
-	st, _ := tr.HealthCheck(cmd.Context())
-	fmt.Fprintf(out, "auth: %s %s\n", st.State, redact.String(st.Message))
-	rep, err := repository.Probe(cmd.Context(), tr)
-	if err != nil {
-		fmt.Fprintf(out, "probe: %s\n", redact.String(err.Error()))
-	} else {
-		fmt.Fprintf(out, "repository: %s %s\n", rep.Result, redact.String(rep.Message))
-	}
-	if _, err := tr.List(cmd.Context(), "metadata"); err != nil {
-		fmt.Fprintf(out, "read: %s\n", redact.String(err.Error()))
-	} else {
-		fmt.Fprintln(out, "read: ok")
+	for _, ep := range a.Config.Sync.EnabledEndpoints() {
+		tr, err := a.OpenTransport(ep)
+		if err != nil {
+			fmt.Fprintf(out, "%s transport error: %s\n", ep.ID, redact.String(err.Error()))
+			continue
+		}
+		st, _ := tr.HealthCheck(cmd.Context())
+		fmt.Fprintf(out, "%s auth: %s %s\n", ep.ID, st.State, redact.String(st.Message))
+		rep, err := repository.Probe(cmd.Context(), tr)
+		if err != nil {
+			fmt.Fprintf(out, "%s probe: %s\n", ep.ID, redact.String(err.Error()))
+		} else {
+			fmt.Fprintf(out, "%s repository: %s %s\n", ep.ID, rep.Result, redact.String(rep.Message))
+		}
+		if _, err := tr.List(cmd.Context(), "metadata"); err != nil {
+			fmt.Fprintf(out, "%s read: %s\n", ep.ID, redact.String(err.Error()))
+		} else {
+			fmt.Fprintf(out, "%s read: ok\n", ep.ID)
+		}
 	}
 	f, err := merge.NewHeadStore(a.DB).Get()
 	if err != nil {
@@ -175,7 +190,7 @@ func runDeviceAdd(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if !ranWizard {
-		fmt.Fprintln(cmd.ErrOrStderr(), "checking configured remote for syncsh metadata (not a Drive-wide scan)...")
+		fmt.Fprintln(cmd.ErrOrStderr(), "checking configured endpoint for syncsh metadata (not a Drive-wide scan)...")
 		if err := setup.RequireValidRemote(cmd.Context(), a); err != nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), err)
 			fmt.Fprintln(cmd.ErrOrStderr(), "re-running join wizard; pick the folder that already contains metadata/")
@@ -269,7 +284,7 @@ func runKeyYubiKeyAdd(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return eng.PublishGeneration(cmd.Context(), updated, smk)
+	return a.PublishGeneration(cmd.Context(), updated, smk, recoverySecretFromEnv(), []piv.Token{tok}, nil)
 }
 
 func runKeyYubiKeyRemove(cmd *cobra.Command, _ []string) error {
@@ -299,7 +314,7 @@ func runKeyYubiKeyRemove(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return eng.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID])
+	return a.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID], recoverySecretFromEnv(), tokensFromHardware(), nil)
 }
 
 func runKeyFIDOAdd(cmd *cobra.Command, _ []string) error {
@@ -330,7 +345,7 @@ func runKeyFIDOAdd(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return eng.PublishGeneration(cmd.Context(), updated, smk)
+	return a.PublishGeneration(cmd.Context(), updated, smk, recoverySecretFromEnv(), tokensFromHardware(), devs)
 }
 
 func runKeyFIDORemove(cmd *cobra.Command, _ []string) error {
@@ -360,7 +375,7 @@ func runKeyFIDORemove(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return eng.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID])
+	return a.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID], recoverySecretFromEnv(), tokensFromHardware(), nil)
 }
 
 func runKeyRecoveryRotate(cmd *cobra.Command, _ []string) error {
@@ -381,7 +396,7 @@ func runKeyRecoveryRotate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := eng.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID]); err != nil {
+	if err := a.PublishGeneration(cmd.Context(), updated, smks[active.GenerationID], recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
 		return err
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), encoded)
@@ -404,11 +419,7 @@ func runKeyRecover(cmd *cobra.Command, args []string) error {
 		fidoDevs = nil
 	}
 	defer fido2.CloseAll(fidoDevs)
-	eng, err := a.Engine(recoverySecretFromEnv(), tokensFromHardware(), fidoDevs)
-	if err != nil {
-		return err
-	}
-	active, err := eng.RecoverGeneration(cmd.Context(), generationID)
+	active, err := a.RecoverGeneration(cmd.Context(), generationID, recoverySecretFromEnv(), tokensFromHardware(), fidoDevs)
 	if err != nil {
 		return err
 	}
@@ -445,7 +456,7 @@ func runKeyRotate(cmd *cobra.Command, _ []string) error {
 	if err := keys.NewStore(a.DB).PutGeneration(active); err != nil {
 		return err
 	}
-	if err := eng.PublishGeneration(cmd.Context(), next, smk); err != nil {
+	if err := a.PublishGeneration(cmd.Context(), next, smk, secret, tokens, fidoDevs); err != nil {
 		return err
 	}
 	if encoded != "" {

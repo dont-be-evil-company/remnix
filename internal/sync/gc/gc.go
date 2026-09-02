@@ -53,7 +53,7 @@ func Evaluate(ctx context.Context, tr transport.Transport, required []string, ch
 	}
 	plan := Plan{BlockedBy: blocked, Eligible: len(blocked) == 0 && len(required) > 0}
 
-	objs, err := listLayoutObjects(ctx, tr)
+	objs, err := ListLayoutObjects(ctx, tr)
 	if err != nil {
 		return plan, err
 	}
@@ -313,7 +313,7 @@ func checkpointIDFromKey(key string) string {
 	return parts[1]
 }
 
-func listLayoutObjects(ctx context.Context, tr transport.Transport) ([]transport.Object, error) {
+func ListLayoutObjects(ctx context.Context, tr transport.Transport) ([]transport.Object, error) {
 	var out []transport.Object
 	seen := map[string]bool{}
 	add := func(objs []transport.Object) {
