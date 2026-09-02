@@ -10,3 +10,21 @@ func TestExtractURL(t *testing.T) {
 		t.Fatal("expected empty")
 	}
 }
+
+func TestSanitizeBucketAndJoin(t *testing.T) {
+	if got := sanitizeBucket(" s3://dont-be-evil-company/ "); got != "dont-be-evil-company" {
+		t.Fatalf("sanitize: %q", got)
+	}
+	if got := joinRemotePath("dont-be-evil-company", "syncsh"); got != "dont-be-evil-company/syncsh" {
+		t.Fatalf("join: %q", got)
+	}
+	if got := joinRemotePath("bucket/syncsh", ""); got != "bucket/syncsh" {
+		t.Fatalf("join empty pick: %q", got)
+	}
+	if got := joinRemotePath("bucket", "syncsh"); got != "bucket/syncsh" {
+		t.Fatalf("join pick: %q", got)
+	}
+	if got := joinRemotePath("bucket", ""); got != "bucket" {
+		t.Fatalf("join empty prefix: %q", got)
+	}
+}

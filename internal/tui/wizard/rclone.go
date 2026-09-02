@@ -98,31 +98,89 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 		section = sess.Name
 	}
 
-	fmt.Fprintln(os.Stderr, "Opening remote (quota check only; not listing Drive)...")
 	tr, err := rclonetr.Open(ctx, section, "")
 	if err != nil {
 		return config.Endpoint{}, fmt.Errorf("open remote: %w", err)
 	}
-	st, err := tr.HealthCheck(ctx)
-	if err != nil {
-		return config.Endpoint{}, err
+	start := ""
+	if tr.Capabilities().VirtualDirs && rclonetr.SectionValue(section, "bucket") == "" {
+		start, err = promptBucketPath(ctx)
+		if err != nil {
+			rclonetr.DeleteSection(section)
+			return config.Endpoint{}, err
+		}
 	}
-	fmt.Fprintln(os.Stderr, "connection test:", redact.String(st.Message))
-	if st.State != transport.HealthOK && !def.AllowSaveOnFailedTest() {
-		return config.Endpoint{}, fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
+	fmt.Fprintln(os.Stderr, "Testing connection...")
+	healthTr := tr
+	if start != "" {
+		healthTr, err = rclonetr.Open(ctx, section, start)
+		if err != nil {
+			return config.Endpoint{}, fmt.Errorf("open remote: %w", err)
+		}
 	}
-	if st.State != transport.HealthOK && def.AllowSaveOnFailedTest() {
+	for {
+		st, err := healthTr.HealthCheck(ctx)
+		if err != nil {
+			return config.Endpoint{}, err
+		}
+		fmt.Fprintln(os.Stderr, "connection test:", redact.String(st.Message))
+		if st.Action != "" {
+			fmt.Fprintln(os.Stderr, st.Action)
+		}
+		if st.State == transport.HealthOK {
+			break
+		}
+		if tr.Capabilities().VirtualDirs && st.State == transport.HealthPermissionDenied {
+			extra := ""
+			form := huh.NewForm(huh.NewGroup(
+				huh.NewInput().
+					Title("Prefix to list").
+					Description("ListBucket was denied at this path. If IAM uses s3:prefix, enter that prefix (for example syncsh). Leave empty to abort.").
+					Value(&extra),
+			))
+			if err := form.RunWithContext(ctx); err != nil {
+				return config.Endpoint{}, err
+			}
+			extra = strings.Trim(strings.TrimSpace(extra), "/")
+			if extra == "" {
+				return config.Endpoint{}, fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
+			}
+			start = joinRemotePath(start, extra)
+			healthTr, err = rclonetr.Open(ctx, section, start)
+			if err != nil {
+				return config.Endpoint{}, fmt.Errorf("open remote: %w", err)
+			}
+			fmt.Fprintln(os.Stderr, "Testing connection...")
+			continue
+		}
+		if !def.AllowSaveOnFailedTest() {
+			return config.Endpoint{}, fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
+		}
 		save := false
 		_ = huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Save even though the connection test failed?").Value(&save))).RunWithContext(ctx)
 		if !save {
 			rclonetr.DeleteSection(section)
 			return config.Endpoint{}, fmt.Errorf("cancelled")
 		}
+		break
 	}
-	path, err := pickRcloneFolder(ctx, tr, logical, join)
+	browse := tr
+	pickStart := start
+	if tr.Capabilities().VirtualDirs && start != "" {
+		// Stay inside the bucket/prefix. An unrooted S3 Fs lists all buckets
+		// (s3:ListAllMyBuckets) as soon as the picker is at "" or the user
+		// goes to parent.
+		browse = healthTr
+		pickStart = ""
+	}
+	rel, err := pickRcloneFolder(ctx, browse, logical, join, pickStart)
 	if err != nil {
 		rclonetr.DeleteSection(section)
 		return config.Endpoint{}, err
+	}
+	path := joinRemotePath(start, rel)
+	if path == "" {
+		return config.Endpoint{}, fmt.Errorf("a bucket or folder is required")
 	}
 	rooted, err := rclonetr.Open(ctx, section, path)
 	if err != nil {
@@ -188,13 +246,60 @@ func maybeImportRemote(ctx context.Context) (string, error) {
 	return dst, nil
 }
 
-func pickRcloneFolder(ctx context.Context, tr *rclonetr.Transport, logical string, join bool) (string, error) {
+func promptBucketPath(ctx context.Context) (string, error) {
+	bucket := ""
+	prefix := ""
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("Bucket").
+			Description("Bucket name only, for example dont-be-evil-company. Do not include s3://.").
+			Validate(func(s string) error {
+				if sanitizeBucket(s) == "" {
+					return fmt.Errorf("bucket is required")
+				}
+				return nil
+			}).
+			Value(&bucket),
+		huh.NewInput().
+			Title("Prefix").
+			Description("Optional. Required if IAM ListBucket is limited with s3:prefix (for example syncsh). You can still pick a subfolder next.").
+			Value(&prefix),
+	))
+	if err := form.RunWithContext(ctx); err != nil {
+		return "", err
+	}
+	return joinRemotePath(sanitizeBucket(bucket), prefix), nil
+}
+
+func sanitizeBucket(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "s3://")
+	s = strings.TrimPrefix(s, "S3://")
+	return strings.Trim(s, "/")
+}
+
+func joinRemotePath(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "/")
+}
+
+func pickRcloneFolder(ctx context.Context, tr *rclonetr.Transport, logical string, join bool, start string) (string, error) {
 	title := "Choose folder / prefix on " + logical + "  (Enter opens, Space/Ctrl+Enter selects, n creates a folder)"
+	if root := strings.Trim(tr.Root(), "/"); root != "" {
+		title = "Choose folder / prefix in " + root + " on " + logical + "  (Enter opens, Space/Ctrl+Enter selects, n creates a folder)"
+	}
 	if join {
 		title += " - pick the existing syncsh folder"
 	}
 	res, err := picker.Run(rclonetr.NewBrowser(tr), picker.Options{
 		Title:       title,
+		Start:       start,
 		CreateMode:  true,
 		ConfirmDest: false,
 	})
@@ -215,7 +320,10 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 		case !join && (rep.Result == repository.Valid || rep.Result == repository.Partial || rep.Result == repository.UnsupportedVersion):
 			return path, rooted, rep, fmt.Errorf("this folder already looks like a syncsh repository (%s); use 'syncsh device add' to join", rep.Result)
 		case !join && rep.Result == repository.Empty && path != "":
-			return path, rooted, rep, nil
+			// A bare S3/GCS bucket (no prefix) is not a dedicated repo folder.
+			if strings.Contains(strings.Trim(path, "/"), "/") || !rooted.Capabilities().VirtualDirs {
+				return path, rooted, rep, nil
+			}
 		}
 		action := "subfolder"
 		desc := fmt.Sprintf("This path is %s (%s).", rep.Result, redact.String(rep.Message))

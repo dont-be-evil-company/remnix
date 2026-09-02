@@ -23,6 +23,12 @@ TUI / wizard / picker / shell agent
 rclone is a **filesystem adapter**. syncsh never calls `rclone sync` or
 `rclone bisync` on the native path. Merge, encryption, and GC stay in syncsh.
 
+The encrypted repository is the endpoint path on the provider (for example
+`gdrive:syncsh` on Google Drive). This device keeps SQLite history,
+`local.yaml`, and `rclone.conf` under `$XDG_DATA_HOME/syncsh`. A folder such
+as `~/GoogleDrive/syncsh` is **not** the repository unless it is a
+`type: directory` endpoint in `config.yaml`.
+
 A device may have unlimited enabled endpoints (Google Drive, S3, Dropbox, a
 local folder, ...). Each is a mirror of the same encrypted repository. Sync
 pulls and publishes per endpoint, then equalizes missing objects so a

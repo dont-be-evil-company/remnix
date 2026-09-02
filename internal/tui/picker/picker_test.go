@@ -173,6 +173,9 @@ func TestModelMkdirSelectAndEsc(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "foo")); err != nil {
 		t.Fatal(err)
 	}
+	if gm.fs.Current() != filepath.Join(root, "foo") {
+		t.Fatalf("should enter new folder, current %q", gm.fs.Current())
+	}
 	got, _ = gm.Update(tea.KeyPressMsg{Code: ' '})
 	gm = got.(Model)
 	if gm.Selected().Canceled || gm.Selected().Path == "" {

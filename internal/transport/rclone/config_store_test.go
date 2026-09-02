@@ -43,6 +43,9 @@ func TestImportUserRemote(t *testing.T) {
 	if !ok {
 		t.Fatalf("imported section missing: %v", ListSections())
 	}
+	if got := SectionValue("copied", "type"); got != "local" {
+		t.Fatalf("SectionValue type=%q", got)
+	}
 }
 
 func TestHardenDriveRemote(t *testing.T) {
@@ -65,6 +68,26 @@ func TestHardenDriveRemote(t *testing.T) {
 	}
 	if v, _ := config.FileGetValue("gdrive", "use_trash"); v != "false" {
 		t.Fatalf("use_trash=%q", v)
+	}
+}
+
+func TestHardenS3Remote(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(filepath.Join(dir, "syncsh-rclone.conf")); err != nil {
+		t.Fatal(err)
+	}
+	Lock()
+	config.FileSetValue("s3remote", "type", "s3")
+	config.SaveConfig()
+	Unlock()
+	HardenRemote("s3remote")
+	Lock()
+	defer Unlock()
+	if v, _ := config.FileGetValue("s3remote", "no_check_bucket"); v != "true" {
+		t.Fatalf("no_check_bucket=%q", v)
+	}
+	if v, _ := config.FileGetValue("s3remote", "directory_markers"); v != "true" {
+		t.Fatalf("directory_markers=%q", v)
 	}
 }
 

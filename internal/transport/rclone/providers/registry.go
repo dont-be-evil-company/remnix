@@ -32,8 +32,8 @@ type Definition struct {
 
 func All() []Definition {
 	return []Definition{
-		{ID: "s3", DisplayName: "AWS S3 / S3-compatible", RcloneType: "s3", Description: "Amazon S3 and compatible object storage", Category: CategoryCloud, AuthKind: AuthKeys, Featured: true, Limitations: []string{"directories are prefixes; rename can be expensive"}},
-		{ID: "gcs", DisplayName: "Google Cloud Storage", RcloneType: "gcs", Description: "Google Cloud Storage buckets", Category: CategoryCloud, AuthKind: AuthMixed, Featured: true, Limitations: []string{"directories are prefixes; rename can be expensive"}},
+		{ID: "s3", DisplayName: "AWS S3 / S3-compatible", RcloneType: "s3", Description: "Amazon S3 and compatible object storage", Category: CategoryCloud, AuthKind: AuthKeys, Featured: true, Limitations: []string{"directories are prefixes; rename can be expensive", "scoped IAM cannot list all buckets; enter the bucket name"}},
+		{ID: "gcs", DisplayName: "Google Cloud Storage", RcloneType: "gcs", Description: "Google Cloud Storage buckets", Category: CategoryCloud, AuthKind: AuthMixed, Featured: true, Limitations: []string{"directories are prefixes; rename can be expensive", "identities without storage.buckets.list must enter the bucket name"}},
 		{ID: "dropbox", DisplayName: "Dropbox", RcloneType: "dropbox", Description: "Dropbox via OAuth", Category: CategoryCloud, AuthKind: AuthOAuth, Featured: true},
 		{ID: "azure-files", DisplayName: "Microsoft Azure Files", RcloneType: "azurefiles", Description: "Azure Files shares", Category: CategoryCloud, AuthKind: AuthKeys, Featured: true},
 		{ID: "icloud-drive", DisplayName: "iCloud Drive", RcloneType: "iclouddrive", Description: "iCloud Drive (Apple ID + 2FA)", Category: CategoryCloud, AuthKind: AuthPassword, Featured: true, Reconnect: true, Limitations: []string{"authentication may expire and require reconnection", "interactive 2FA is required to reconnect"}},

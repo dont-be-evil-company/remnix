@@ -30,6 +30,14 @@ func ListSections() []string {
 	return config.FileSections()
 }
 
+// SectionValue returns a key from the embedded rclone.conf section.
+func SectionValue(name, key string) string {
+	mu.Lock()
+	defer mu.Unlock()
+	v, _ := config.FileGetValue(name, key)
+	return v
+}
+
 func DeleteSection(name string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -121,22 +129,32 @@ func HardenRemote(name string) {
 
 func hardenRemoteLocked(name string) bool {
 	typ, _ := config.FileGetValue(name, "type")
-	if typ != "drive" {
-		return false
-	}
 	changed := false
-	if v, _ := config.FileGetValue(name, "skip_gdocs"); v != "true" {
-		config.FileSetValue(name, "skip_gdocs", "true")
-		changed = true
-	}
-	if v, _ := config.FileGetValue(name, "skip_dangling_shortcuts"); v != "true" {
-		config.FileSetValue(name, "skip_dangling_shortcuts", "true")
-		changed = true
-	}
-	// Permanent deletes so overwrite/GC can actually drop duplicate Drive files.
-	if v, _ := config.FileGetValue(name, "use_trash"); v != "false" {
-		config.FileSetValue(name, "use_trash", "false")
-		changed = true
+	switch typ {
+	case "drive":
+		if v, _ := config.FileGetValue(name, "skip_gdocs"); v != "true" {
+			config.FileSetValue(name, "skip_gdocs", "true")
+			changed = true
+		}
+		if v, _ := config.FileGetValue(name, "skip_dangling_shortcuts"); v != "true" {
+			config.FileSetValue(name, "skip_dangling_shortcuts", "true")
+			changed = true
+		}
+		// Permanent deletes so overwrite/GC can actually drop duplicate Drive files.
+		if v, _ := config.FileGetValue(name, "use_trash"); v != "false" {
+			config.FileSetValue(name, "use_trash", "false")
+			changed = true
+		}
+	case "s3":
+		// CreateBucket / Head-as-file probes fail for bucket-scoped IAM.
+		if v, _ := config.FileGetValue(name, "no_check_bucket"); v != "true" {
+			config.FileSetValue(name, "no_check_bucket", "true")
+			changed = true
+		}
+		if v, _ := config.FileGetValue(name, "directory_markers"); v != "true" {
+			config.FileSetValue(name, "directory_markers", "true")
+			changed = true
+		}
 	}
 	return changed
 }

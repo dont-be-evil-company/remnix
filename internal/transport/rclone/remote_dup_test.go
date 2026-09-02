@@ -3,6 +3,7 @@ package rclone
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mistweaverco/syncsh/internal/transport"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/object"
@@ -23,6 +25,7 @@ type dupFs struct {
 	dirs       []*dupDir
 	mkdirCalls []string
 	features   *fs.Features
+	rootID     string
 }
 
 func newDupFs() *dupFs {
@@ -49,7 +52,7 @@ func (f *dupFs) Rmdir(context.Context, string) error { return nil }
 
 func (f *dupFs) dirID(remote string) string {
 	if remote == "" {
-		return ""
+		return f.rootID
 	}
 	for _, d := range f.dirs {
 		if d.remote == remote {
@@ -137,6 +140,43 @@ func (f *dupFs) Put(_ context.Context, in io.Reader, src fs.ObjectInfo, _ ...fs.
 	return o, nil
 }
 
+func (f *dupFs) Command(_ context.Context, name string, arg []string, _ map[string]string) (any, error) {
+	if name != "query" || len(arg) != 1 {
+		return nil, fs.ErrorCommandNotFound
+	}
+	want := driveQueryName(arg[0])
+	var out []map[string]any
+	for _, d := range f.dirs {
+		if path.Base(d.remote) != want {
+			continue
+		}
+		parents := []string{}
+		if d.parent != "" {
+			parents = []string{d.parent}
+		}
+		out = append(out, map[string]any{
+			"id":      d.id,
+			"name":    path.Base(d.remote),
+			"parents": parents,
+		})
+	}
+	return out, nil
+}
+
+func driveQueryName(q string) string {
+	const p = "name='"
+	i := strings.Index(q, p)
+	if i < 0 {
+		return ""
+	}
+	q = q[i+len(p):]
+	j := strings.IndexByte(q, '\'')
+	if j < 0 {
+		return ""
+	}
+	return q[:j]
+}
+
 func (f *dupFs) MergeDirs(_ context.Context, dirs []fs.Directory) error {
 	if len(dirs) < 2 {
 		return nil
@@ -180,6 +220,7 @@ func (d *dupDir) ModTime(context.Context) time.Time { return time.Time{} }
 func (d *dupDir) Size() int64                       { return -1 }
 func (d *dupDir) Items() int64                      { return -1 }
 func (d *dupDir) ID() string                        { return d.id }
+func (d *dupDir) ParentID() string                  { return d.parent }
 
 func (f *dupFs) Move(_ context.Context, src fs.Object, remote string) (fs.Object, error) {
 	o, ok := src.(*dupObj)
@@ -204,6 +245,7 @@ func (o *dupObj) Fs() fs.Info                       { return o.f }
 func (o *dupObj) String() string                    { return o.remote }
 func (o *dupObj) Remote() string                    { return o.remote }
 func (o *dupObj) ID() string                        { return o.id }
+func (o *dupObj) ParentID() string                  { return o.parent }
 func (o *dupObj) ModTime(context.Context) time.Time { return o.modTime }
 func (o *dupObj) Size() int64                       { return int64(len(o.data)) }
 func (o *dupObj) Storable() bool                    { return true }
@@ -237,11 +279,155 @@ func (o *dupObj) Remove(context.Context) error {
 	return nil
 }
 
-var (
-	_ fs.Fs        = (*dupFs)(nil)
-	_ fs.Object    = (*dupObj)(nil)
-	_ fs.Directory = (*dupDir)(nil)
-)
+func TestMkdirBucketBasedCreatesKeepObject(t *testing.T) {
+	f := newDupFs()
+	f.features.BucketBased = true
+	tr := &Transport{fs: f, remote: "s3"}
+	if err := tr.Mkdir(context.Background(), "syncsh"); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, o := range f.files {
+		if o.remote == "syncsh/"+dirKeepName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("keep object missing, files=%v", f.files)
+	}
+	dirs, err := tr.ListDirs(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := false
+	for _, d := range dirs {
+		if d == "syncsh" || strings.HasSuffix(d, "/syncsh") {
+			ok = true
+		}
+	}
+	if !ok {
+		t.Fatalf("prefix not listable: %v", dirs)
+	}
+}
+
+func TestHealthCheckBucketBasedListsRoot(t *testing.T) {
+	inner := newDupFs()
+	f := &bucketHealthFs{dupFs: inner}
+	inner.features.BucketBased = true
+	tr := &Transport{fs: f, remote: "s3"}
+	st, err := tr.HealthCheck(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != transport.HealthOK {
+		t.Fatalf("health %+v", st)
+	}
+	if f.newObject != 0 {
+		t.Fatalf("NewObject called %d times (S3 empty-key HeadObject)", f.newObject)
+	}
+	if f.listRoot != 1 {
+		t.Fatalf("List root called %d times", f.listRoot)
+	}
+}
+
+func TestHealthCheckEmptyRootListAllMyBucketsDenied(t *testing.T) {
+	inner := newDupFs()
+	f := &bucketHealthFs{
+		dupFs:   inner,
+		listErr: fmt.Errorf("operation error S3: ListBuckets, https response error StatusCode: 403, api error AccessDenied: User: arn:aws:iam::1:user/x is not authorized to perform: s3:ListAllMyBuckets"),
+	}
+	inner.features.BucketBased = true
+	tr := &Transport{fs: f, remote: "s3"}
+	st, err := tr.HealthCheck(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != transport.HealthOK {
+		t.Fatalf("scoped IAM should not fail account ListBuckets: %+v", st)
+	}
+	if f.newObject != 0 {
+		t.Fatalf("NewObject called %d times", f.newObject)
+	}
+}
+
+func TestHealthCheckRootedAccessDeniedStillFails(t *testing.T) {
+	inner := newDupFs()
+	f := &bucketHealthFs{
+		dupFs:   inner,
+		listErr: fmt.Errorf("operation error S3: ListObjectsV2, api error AccessDenied: Access Denied"),
+	}
+	inner.features.BucketBased = true
+	tr := &Transport{fs: f, remote: "s3", root: "my-bucket"}
+	st, err := tr.HealthCheck(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != transport.HealthPermissionDenied {
+		t.Fatalf("ListObjects denial inside a bucket: %+v", st)
+	}
+	if st.Action == "" {
+		t.Fatal("expected IAM prefix hint")
+	}
+}
+
+func TestListBucketDenied(t *testing.T) {
+	err := fmt.Errorf("operation error S3: ListObjectsV2, api error AccessDenied: User: arn:aws:iam::1:user/x is not authorized to perform: s3:ListBucket on resource: \"arn:aws:s3:::bucket\"")
+	if !listBucketDenied(err) {
+		t.Fatal("expected ListBucket denial")
+	}
+	if listBucketDenied(fmt.Errorf("s3:ListAllMyBuckets")) {
+		t.Fatal("account listing is not a bucket ListObjects denial")
+	}
+}
+
+func TestMapErrAccessDenied(t *testing.T) {
+	err := mapErr(fmt.Errorf("operation error S3: ListObjectsV2, api error AccessDenied: not authorized to perform: s3:ListBucket"))
+	if !errors.Is(err, transport.ErrPermissionDenied) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestListAllBucketsDenied(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{fmt.Errorf("s3:ListAllMyBuckets"), true},
+		{fmt.Errorf("does not have storage.buckets.list access"), true},
+		{fmt.Errorf("operation error S3: ListBuckets, api error AccessDenied"), true},
+		{fmt.Errorf("operation error S3: ListObjectsV2, api error AccessDenied"), false},
+		{fmt.Errorf("connection refused"), false},
+	}
+	for _, tc := range cases {
+		if got := listAllBucketsDenied(tc.err); got != tc.want {
+			t.Errorf("listAllBucketsDenied(%v)=%v want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+type bucketHealthFs struct {
+	*dupFs
+	newObject int
+	listRoot  int
+	listErr   error
+}
+
+func (f *bucketHealthFs) List(ctx context.Context, dir string) (fs.DirEntries, error) {
+	if dir == "" {
+		f.listRoot++
+		if f.listErr != nil {
+			return nil, f.listErr
+		}
+	}
+	return f.dupFs.List(ctx, dir)
+}
+
+func (f *bucketHealthFs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	f.newObject++
+	return nil, fmt.Errorf("operation error S3: HeadObject, serialization failed: serialization failed: input member Key must not be empty")
+}
 
 func TestPutAtomicOverwritesDuplicateNames(t *testing.T) {
 	f := newDupFs()
@@ -471,5 +657,59 @@ func TestPutAtomicSkipsMkdirOnDuplicateNameBackend(t *testing.T) {
 	}
 	if len(f.mkdirCalls) != 0 {
 		t.Fatalf("Mkdir on Drive-like backend: %v", f.mkdirCalls)
+	}
+}
+
+func TestDedupeMergesDuplicateRepoRootFolders(t *testing.T) {
+	f := newDupFs()
+	f.rootID = "live"
+	f.features.Command = f.Command
+	live := &dupDir{f: f, id: "live", remote: "syncsh", parent: "drive-root"}
+	stale := &dupDir{f: f, id: "stale", remote: "syncsh", parent: "drive-root"}
+	ckLive := &dupDir{f: f, id: "ck-live", remote: "checkpoints", parent: "live"}
+	ckStale := &dupDir{f: f, id: "ck-stale", remote: "checkpoints", parent: "stale"}
+	old := &dupDir{f: f, id: "old", remote: "checkpoints/old", parent: "ck-stale"}
+	neu := &dupDir{f: f, id: "new", remote: "checkpoints/new", parent: "ck-live"}
+	f.dirs = []*dupDir{live, stale, ckLive, ckStale, old, neu}
+	tr := &Transport{fs: f, remote: "dup", root: "syncsh"}
+
+	root, err := f.List(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	root.ForDir(func(d fs.Directory) {
+		if d.Remote() == "checkpoints" {
+			n++
+		}
+	})
+	if n != 1 {
+		t.Fatalf("live repo should hide sibling checkpoints: %d", n)
+	}
+
+	if err := tr.Dedupe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	nSyncsh := 0
+	for _, d := range f.dirs {
+		if d.remote == "syncsh" {
+			nSyncsh++
+		}
+	}
+	if nSyncsh != 1 {
+		t.Fatalf("syncsh folders after dedupe: %d", nSyncsh)
+	}
+
+	children, err := f.List(context.Background(), "checkpoints")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	children.ForDir(func(d fs.Directory) {
+		got[path.Base(d.Remote())] = true
+	})
+	if !got["old"] || !got["new"] {
+		t.Fatalf("merged checkpoint dirs %v", got)
 	}
 }

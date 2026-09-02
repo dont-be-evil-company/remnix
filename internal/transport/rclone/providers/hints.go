@@ -4,9 +4,9 @@ package providers
 func (d Definition) Intro() string {
 	switch d.ID {
 	case "s3":
-		return "Amazon S3 and compatible stores (MinIO, R2, B2, Wasabi). Directories are prefixes; rename can copy every object."
+		return "Amazon S3 and compatible stores (MinIO, R2, B2, Wasabi). Directories are prefixes; rename can copy every object. You will be asked for a bucket; listing every bucket in the account is not required."
 	case "gcs":
-		return "Google Cloud Storage. Prefer Application Default Credentials on this machine, or a service-account JSON file (the path is stored in the local rclone.conf, not in config.yaml)."
+		return "Google Cloud Storage. Prefer Application Default Credentials on this machine, or a service-account JSON file (the path is stored in the local rclone.conf, not in config.yaml). You will be asked for a bucket."
 	case "dropbox":
 		return "Dropbox via OAuth. A browser window will open; if it does not, paste the URL shown in the wizard."
 	case "azure-files":

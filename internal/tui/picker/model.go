@@ -328,10 +328,11 @@ func (m Model) createDir(name string) (tea.Model, tea.Cmd) {
 		m.status = err.Error()
 		return m, nil
 	}
-	cmd := m.reload()
-	m.focusNamed(name)
-	m.status = "created " + name
-	return m, cmd
+	m.fs.SetCurrent(p)
+	m.path.SetValue(p)
+	m.cursor = 0
+	m.status = "created " + name + " (now inside it; Space selects this folder)"
+	return m, m.reload()
 }
 
 func (m *Model) focusNamed(name string) {

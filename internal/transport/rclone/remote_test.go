@@ -3,6 +3,7 @@ package rclone
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -94,6 +95,31 @@ func TestPutAtomicOverwrites(t *testing.T) {
 func TestVersionPinned(t *testing.T) {
 	if Version() == "" {
 		t.Fatal("empty rclone version")
+	}
+}
+
+func TestFsSpecTrailingSlashForBucketBackends(t *testing.T) {
+	if got := fsSpec("syncsh-s3", "dont-be-evil-company/syncsh", "s3"); got != "syncsh-s3:dont-be-evil-company/syncsh/" {
+		t.Fatalf("s3 spec: %q", got)
+	}
+	if got := fsSpec("syncsh-s3", "my-bucket", "s3"); got != "syncsh-s3:my-bucket/" {
+		t.Fatalf("s3 bucket spec: %q", got)
+	}
+	if got := fsSpec("syncsh-s3", "", "s3"); got != "syncsh-s3:" {
+		t.Fatalf("s3 empty spec: %q", got)
+	}
+	if got := fsSpec("gdrive", "syncsh", "drive"); got != "gdrive:syncsh" {
+		t.Fatalf("drive must not get a trailing slash: %q", got)
+	}
+}
+
+func TestIsHeadObjectForbidden(t *testing.T) {
+	err := fmt.Errorf("operation error S3: HeadObject, https response error StatusCode: 403, api error Forbidden: Forbidden")
+	if !isHeadObjectForbidden(err) {
+		t.Fatal("expected HeadObject 403 to match")
+	}
+	if isHeadObjectForbidden(fmt.Errorf("operation error S3: ListObjectsV2, api error AccessDenied")) {
+		t.Fatal("ListObjects denial is not the NewFs file probe")
 	}
 }
 

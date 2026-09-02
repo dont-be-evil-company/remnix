@@ -3,6 +3,7 @@ package rclone
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mistweaverco/syncsh/internal/transport"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fs/operations"
 )
@@ -27,19 +29,66 @@ type Transport struct {
 	root   string
 }
 
+// dirKeepName is a placeholder object so S3/GCS prefixes are listable.
+const dirKeepName = ".syncsh-dir"
+
 func Open(ctx context.Context, remoteName, root string) (*Transport, error) {
 	mu.Lock()
 	defer mu.Unlock()
-	spec := remoteName + ":"
-	root = strings.Trim(root, "/")
-	if root != "" {
-		spec += root
-	}
+	typ, _ := config.FileGetValue(remoteName, "type")
+	spec := fsSpec(remoteName, root, typ)
 	f, err := fs.NewFs(ctx, spec)
+	if err != nil && isHeadObjectForbidden(err) {
+		// Scoped IAM often 403s rclone's "is this path a file?" HEAD.
+		alt := remoteName + ",no_head_object,no_check_bucket:" + strings.Trim(root, "/")
+		if isBucketType(typ) && !strings.HasSuffix(alt, "/") {
+			alt += "/"
+		}
+		f, err = fs.NewFs(ctx, alt)
+	}
+	if errors.Is(err, fs.ErrorIsFile) {
+		return nil, fmt.Errorf("remote path %q is a file, not a directory", root)
+	}
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return &Transport{fs: f, remote: remoteName, root: root}, nil
+	return &Transport{fs: f, remote: remoteName, root: strings.Trim(root, "/")}, nil
+}
+
+// fsSpec builds the rclone path. Bucket backends get a trailing slash so S3
+// NewFs does not HEAD the last component (missing keys return 403 for many
+// least-privilege IAM policies).
+func fsSpec(remoteName, root, typ string) string {
+	spec := remoteName + ":"
+	root = strings.Trim(root, "/")
+	if root == "" {
+		return spec
+	}
+	spec += root
+	if isBucketType(typ) {
+		spec += "/"
+	}
+	return spec
+}
+
+func isBucketType(typ string) bool {
+	switch typ {
+	case "s3", "gcs", "azureblob", "b2", "swift":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHeadObjectForbidden(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "headobject") {
+		return false
+	}
+	return strings.Contains(msg, "403") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied")
 }
 
 func OpenLocal(ctx context.Context, dir string) (*Transport, error) {
@@ -228,9 +277,21 @@ func (t *Transport) rename(ctx context.Context, obj fs.Object, final string, dat
 // once; rclone Feature Move only renames, so acks and device metadata used
 // to accumulate copies, and Mkdir after a dir-cache flush used to spawn a
 // second `checkpoints/` folder that GC could not see.
+//
+// Duplicate folders can also appear one level up (`syncsh` next to the live
+// repo). rclone `gdrive:syncsh` is bound to one folder ID, so List never
+// sees those siblings; a Drive name query (or a parent listing) merges them
+// into the live root before layout dirs are collapsed.
 func (t *Transport) Dedupe(ctx context.Context) error {
 	t.flushDirCache()
+	if err := t.mergeRootDuplicates(ctx); err != nil {
+		return err
+	}
+	t.flushDirCache()
 	if err := t.mergeDuplicateDirs(ctx, ""); err != nil {
+		return err
+	}
+	if err := t.mergeLayoutDuplicates(ctx); err != nil {
 		return err
 	}
 	t.flushDirCache()
@@ -251,6 +312,184 @@ func (t *Transport) flushDirCache() {
 		flush()
 	}
 }
+
+func (t *Transport) currentDirID(ctx context.Context, dir string) string {
+	entries, err := t.fs.List(ctx, dir)
+	if err != nil {
+		return ""
+	}
+	var id string
+	take := func(e fs.DirEntry) {
+		if id != "" {
+			return
+		}
+		p, ok := e.(fs.ParentIDer)
+		if !ok {
+			return
+		}
+		if pid := p.ParentID(); pid != "" {
+			id = pid
+		}
+	}
+	entries.ForDir(func(d fs.Directory) { take(d) })
+	if id == "" {
+		entries.ForObject(func(o fs.Object) { take(o) })
+	}
+	return id
+}
+
+func (t *Transport) mergeRootDuplicates(ctx context.Context) error {
+	if t.root == "" || t.fs.Features().MergeDirs == nil {
+		return nil
+	}
+	leaf := path.Base(t.root)
+	keepID := t.currentDirID(ctx, "")
+	if err := t.mergeQueryNamed(ctx, leaf, keepID); err != nil {
+		return err
+	}
+	if t.fs.Features().Command != nil && keepID != "" {
+		return nil
+	}
+	return t.mergeRootDuplicatesViaParent(ctx, leaf, keepID)
+}
+
+func (t *Transport) mergeRootDuplicatesViaParent(ctx context.Context, leaf, keepID string) error {
+	parent := path.Dir(t.root)
+	spec := t.remote + ":"
+	if parent != "." && parent != "" {
+		spec += parent
+	}
+	mu.Lock()
+	parentFs, err := fs.NewFs(ctx, spec)
+	mu.Unlock()
+	if err != nil {
+		return nil
+	}
+	entries, err := parentFs.List(ctx, "")
+	if err != nil {
+		if errors.Is(err, fs.ErrorDirNotFound) {
+			return nil
+		}
+		return mapErr(err)
+	}
+	var ds []fs.Directory
+	entries.ForDir(func(d fs.Directory) {
+		if path.Base(d.Remote()) == leaf {
+			ds = append(ds, d)
+		}
+	})
+	return mergeDirSlice(ctx, parentFs, ds, keepID)
+}
+
+func (t *Transport) mergeLayoutDuplicates(ctx context.Context) error {
+	rootID := t.currentDirID(ctx, "")
+	if rootID == "" {
+		return nil
+	}
+	for _, name := range []string{"acks", "metadata", "keys", "events", "checkpoints"} {
+		if err := t.mergeQueryNamed(ctx, name, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type driveQueryFolder struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Parents []string `json:"parents"`
+}
+
+func (t *Transport) mergeQueryNamed(ctx context.Context, name, keepID string) error {
+	cmd := t.fs.Features().Command
+	if cmd == nil || name == "" {
+		return nil
+	}
+	q := fmt.Sprintf("name='%s' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+		strings.ReplaceAll(name, `'`, `\'`))
+	out, err := cmd(ctx, "query", []string{q}, nil)
+	if err != nil {
+		if errors.Is(err, fs.ErrorCommandNotFound) {
+			return nil
+		}
+		return mapErr(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	var files []driveQueryFolder
+	if err := json.Unmarshal(raw, &files); err != nil || len(files) < 2 {
+		return nil
+	}
+	keepParent := ""
+	if keepID != "" {
+		for _, f := range files {
+			if f.ID == keepID && len(f.Parents) > 0 {
+				keepParent = f.Parents[0]
+				break
+			}
+		}
+		if keepParent == "" {
+			return nil
+		}
+	} else if rootID := t.currentDirID(ctx, ""); rootID != "" {
+		keepParent = rootID
+	} else {
+		return nil
+	}
+	var ds []fs.Directory
+	for _, f := range files {
+		if len(f.Parents) == 0 || f.Parents[0] != keepParent {
+			continue
+		}
+		ds = append(ds, idDir{info: t.fs, id: f.ID, remote: name})
+	}
+	return mergeDirSlice(ctx, t.fs, ds, keepID)
+}
+
+func mergeDirSlice(ctx context.Context, f fs.Fs, ds []fs.Directory, keepID string) error {
+	merge := f.Features().MergeDirs
+	if merge == nil || len(ds) < 2 {
+		return nil
+	}
+	if keepID != "" {
+		found := false
+		for i, d := range ds {
+			if d.ID() == keepID {
+				ds[0], ds[i] = ds[i], ds[0]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+	}
+	if err := merge(ctx, ds); err != nil {
+		return mapErr(err)
+	}
+	if flush := f.Features().DirCacheFlush; flush != nil {
+		flush()
+	}
+	return nil
+}
+
+type idDir struct {
+	info   fs.Info
+	id     string
+	remote string
+}
+
+func (d idDir) Fs() fs.Info                       { return d.info }
+func (d idDir) String() string                    { return d.remote }
+func (d idDir) Remote() string                    { return d.remote }
+func (d idDir) ModTime(context.Context) time.Time { return time.Time{} }
+func (d idDir) Size() int64                       { return -1 }
+func (d idDir) Items() int64                      { return -1 }
+func (d idDir) ID() string                        { return d.id }
+
+var _ fs.Directory = idDir{}
 
 func (t *Transport) mergeDuplicateDirs(ctx context.Context, dir string) error {
 	merge := t.fs.Features().MergeDirs
@@ -400,7 +639,16 @@ func (t *Transport) removeTempsFor(ctx context.Context, key string) {
 }
 
 func (t *Transport) Mkdir(ctx context.Context, key string) error {
-	return mapErr(operations.Mkdir(ctx, t.fs, strings.Trim(key, "/")))
+	key = strings.Trim(key, "/")
+	if err := operations.Mkdir(ctx, t.fs, key); err != nil {
+		return mapErr(err)
+	}
+	if key == "" || !t.fs.Features().BucketBased {
+		return nil
+	}
+	// S3/GCS prefixes are virtual. rclone Mkdir is a no-op unless
+	// directory_markers is on, so write a keep object the listing can see.
+	return t.Put(ctx, key+"/"+dirKeepName, bytes.NewReader([]byte("dir\n")))
 }
 
 func (t *Transport) Remove(ctx context.Context, key string) error {
@@ -447,8 +695,31 @@ func (t *Transport) Remove(ctx context.Context, key string) error {
 }
 
 func (t *Transport) HealthCheck(ctx context.Context) (transport.HealthStatus, error) {
-	// Never List the remote root - Drive listings of My Drive look like a hang.
-	if about := t.fs.Features().About; about != nil {
+	feat := t.fs.Features()
+	// S3/GCS: a root listing lists buckets (or the prefix). NewObject on a
+	// single path component at the remote root is HeadObject with an empty
+	// Key, which AWS SDK v2 rejects ("input member Key must not be empty").
+	if feat.BucketBased {
+		_, err := t.fs.List(ctx, "")
+		if err != nil && !errors.Is(err, fs.ErrorDirNotFound) {
+			// Empty root is ListBuckets / storage.buckets.list. Scoped IAM
+			// often denies that while still allowing a named bucket.
+			if t.root == "" && listAllBucketsDenied(err) {
+				return transport.HealthStatus{
+					State:   transport.HealthOK,
+					Message: "credentials accepted; listing all buckets is not permitted - enter a bucket name",
+				}, nil
+			}
+			st := transport.ClassifyHealth(mapErr(err))
+			if listBucketDenied(err) {
+				st.Action = "Grant s3:ListBucket on this bucket. If the policy sets s3:prefix, enter that prefix (listing the bucket root is denied)."
+			}
+			return st, nil
+		}
+		return transport.HealthStatus{State: transport.HealthOK, Message: "ok"}, nil
+	}
+	// Never List the remote root on Drive - a listing of My Drive looks like a hang.
+	if about := feat.About; about != nil {
 		if _, err := about(ctx); err != nil {
 			return transport.ClassifyHealth(mapErr(err)), nil
 		}
@@ -502,7 +773,7 @@ func skipObject(o fs.Object) bool {
 	if o.Size() < 0 {
 		return true
 	}
-	return false
+	return path.Base(o.Remote()) == dirKeepName
 }
 
 func isTempName(key string) bool {
@@ -570,6 +841,34 @@ func walkRemove(ctx context.Context, f fs.Fs, dir string) error {
 	return remErr
 }
 
+// listAllBucketsDenied reports account-wide bucket listing denials (AWS
+// s3:ListAllMyBuckets, GCS storage.buckets.list). It must not match a
+// ListObjects denial inside an already-chosen bucket.
+func listAllBucketsDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "listallmybuckets") || strings.Contains(msg, "storage.buckets.list") {
+		return true
+	}
+	if strings.Contains(msg, "listbuckets") && (strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied") || strings.Contains(msg, "forbidden")) {
+		return true
+	}
+	return false
+}
+
+func listBucketDenied(err error) bool {
+	if err == nil || listAllBucketsDenied(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "listbucket") && !strings.Contains(msg, "listobject") {
+		return false
+	}
+	return strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "not authorized")
+}
+
 func mapErr(err error) error {
 	if err == nil {
 		return nil
@@ -581,6 +880,9 @@ func mapErr(err error) error {
 		return fmt.Errorf("%w: %v", transport.ErrPermissionDenied, err)
 	default:
 		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied") || strings.Contains(msg, "not authorized to perform") || strings.Contains(msg, "forbidden") && strings.Contains(msg, "403") {
+			return fmt.Errorf("%w: %v", transport.ErrPermissionDenied, err)
+		}
 		if strings.Contains(msg, "unauthenticated") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "oauth") || strings.Contains(msg, "expired") && strings.Contains(msg, "token") {
 			return fmt.Errorf("%w: %v", transport.ErrAuthRequired, err)
 		}
