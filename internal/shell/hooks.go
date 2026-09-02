@@ -421,26 +421,82 @@ __syncsh_compadd() {
   fi
   (( $#__syncsh_comp_values >= 512 )) && return
   local -a matches descrs
-  integer i
-  # Let builtin compadd parse flags; -O keeps each match as its own array
-  # element. Quoted argv slices join on IFS and cram every word into one row.
-  builtin compadd -O matches "$@" 2>/dev/null
+  local dvar="" avar="" m d
+  integer i probe=0 j
   i=1
   while (( i <= $# )); do
     case "${argv[i]}" in
-      -d|-ld)
+      -O|-A)
+        probe=1
         (( i++ ))
-        [[ -n ${argv[i]:-} ]] && descrs=("${(P)argv[i]}")
         ;;
-      --) break ;;
+      -d|-ld|-D)
+        (( i++ ))
+        dvar="${argv[i]}"
+        ;;
+      -a)
+        (( i++ ))
+        avar="${argv[i]}"
+        ;;
+      --)
+        (( i++ ))
+        (( !probe )) && matches+=("${(@)argv[i,-1]}")
+        break
+        ;;
+      -o|-J|-V|-X|-x|-P|-S|-p|-s|-W|-F|-M|-E|-C|-r|-R)
+        (( i++ ))
+        ;;
+      -*)
+        ;;
+      *)
+        (( !probe )) && matches+=("${(@)argv[i,-1]}")
+        break
+        ;;
     esac
     (( i++ ))
   done
+  # _describe probes with -O/-A; those must reach the builtin so later
+  # -d/-a calls get real per-match descriptions.
+  if (( probe )); then
+    builtin compadd "$@"
+    return
+  fi
+  if [[ -n $avar ]]; then
+    matches=("${(@P)avar}")
+  fi
+  if [[ -n $dvar ]]; then
+    descrs=("${(@P)dvar}")
+  fi
+  if (( $#matches == 0 )); then
+    builtin compadd -O matches "$@" 2>/dev/null
+  fi
   for (( i=1; i<=$#matches; i++ )); do
-    [[ -n ${matches[i]} ]] || continue
+    m="${matches[i]}"
+    d="${descrs[i]:-}"
+    [[ -n $m ]] || continue
+    if [[ -z $d && $m == *:* && $m != *://* ]]; then
+      d="${m#*:}"
+      m="${m%%:*}"
+    fi
+    if [[ $d == "$m"[[:space:]]#--[[:space:]]* ]]; then
+      d="${d#*"-- "}"
+    elif [[ $d == [[:space:]]#--[[:space:]]* ]]; then
+      d="${d##[[:space:]]#--[[:space:]]#}"
+    fi
     (( $#__syncsh_comp_values >= 512 )) && break
-    __syncsh_comp_values+=("${matches[i]}")
-    __syncsh_comp_descrs+=("${descrs[i]:-}")
+    j=0
+    for (( j=1; j<=$#__syncsh_comp_values; j++ )); do
+      if [[ ${__syncsh_comp_values[j]} == "$m" ]]; then
+        if [[ -n $d && -z ${__syncsh_comp_descrs[j]} ]]; then
+          __syncsh_comp_descrs[j]="$d"
+        fi
+        j=-1
+        break
+      fi
+    done
+    (( j < 0 )) && continue
+    __syncsh_comp_values+=("$m")
+    __syncsh_comp_descrs+=("$d")
   done
 }
 
@@ -838,13 +894,6 @@ __syncsh_suggest_rebuild() {
   __syncsh_suggest_kinds=(typed)
   __syncsh_suggest_descrs=("")
   __syncsh_suggest_lines=("$typed")
-  for s in "${hist[@]}"; do
-    __syncsh_suggest_items+=("$s")
-    __syncsh_suggest_kinds+=(history)
-    __syncsh_suggest_descrs+=("")
-    __syncsh_suggest_lines+=("$s")
-    [[ -z $__syncsh_suggest_ghost ]] && __syncsh_suggest_ghost="$s"
-  done
   for (( i=1; i<=$#cvals; i++ )); do
     m="${cvals[i]}"
     [[ -n $m ]] || continue
@@ -867,6 +916,13 @@ __syncsh_suggest_rebuild() {
     __syncsh_suggest_kinds+=(completion)
     __syncsh_suggest_descrs+=("$d")
     __syncsh_suggest_lines+=("$applied")
+  done
+  for s in "${hist[@]}"; do
+    __syncsh_suggest_items+=("$s")
+    __syncsh_suggest_kinds+=(history)
+    __syncsh_suggest_descrs+=("")
+    __syncsh_suggest_lines+=("$s")
+    [[ -z $__syncsh_suggest_ghost ]] && __syncsh_suggest_ghost="$s"
   done
   __syncsh_suggest_scroll
   __syncsh_suggest_apply

@@ -108,17 +108,18 @@ Set `enabled: false` to keep Ctrl+R without ghost text. Set `menu: true` to show
 small list under the prompt while typing. The first row is always the text you
 typed (no item is selected until you navigate). Ghost text still previews the
 best history match; accept keys (Right, Tab, ...) insert only that ghost suffix.
-Up/Down (and Ctrl-P/N) start at the first history or completion row and rewrite
+Up/Down (and Ctrl-P/N) start at the first completion or history row and rewrite
 the line to that suggestion; Enter runs it. Esc restores the typed line and
 dismisses the list. `menu_max` is the number of suggestion rows shown at once
 (the typed row stays pinned). Set `completions: true` to also list the shell’s
 own completers (carapace, git, and anything else registered with compsys), with
-descriptions when the completer provides them. Typing only queries history;
-press Tab to load completions into the float (Tab again cycles; results are
-cached until the line changes). The full completion list is scrollable; a thumb
-on the right edge of the box shows where you are. Capture stops at 512 matches
-so a huge path completion cannot freeze the prompt. Icons are configurable so
-history and completions stay distinguishable.
+descriptions when the completer provides them. Completions sit directly under
+the typed row; history follows. Typing only queries history; press Tab to load
+completions into the float (Tab again cycles; results are cached until the line
+changes). The full completion list is scrollable; a thumb on the right edge of
+the box shows where you are. Capture stops at 512 matches so a huge path
+completion cannot freeze the prompt. Icons are configurable so history and
+completions stay distinguishable.
 
 ## Search / suggestions
 

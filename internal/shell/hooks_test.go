@@ -189,17 +189,18 @@ func TestZshSuggestCompletions(t *testing.T) {
 		"__syncsh_suggest_off",
 		"█",
 		"bindkey $'\\t' syncsh-suggest-complete",
-		"builtin compadd -O matches",
+		"${(@P)avar}",
+		"${(@P)dvar}",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	if strings.Contains(on, `__syncsh_comp_values >= 64`) {
+	if strings.Contains(on, "__syncsh_comp_values >= 64") {
 		t.Fatal("compsys capture must not stop at 64")
 	}
-	if strings.Contains(on, `matches+=("${argv[i,-1]}")`) {
-		t.Fatal("quoted argv slices join matches into one row")
+	if strings.Contains(on, `matches+=("${argv[i,-1]}")`) || strings.Contains(on, `descrs=("${(P)argv[i]}")`) {
+		t.Fatal("quoted array slices join matches/descriptions into one row")
 	}
 	if !strings.Contains(on, "syncsh-suggest-complete") {
 		t.Fatal("Tab must request compsys completions")
