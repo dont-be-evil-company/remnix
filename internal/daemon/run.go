@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mistweaverco/syncsh/internal/app"
@@ -26,6 +27,30 @@ type Status struct {
 	Hint       string `json:"hint,omitempty"`
 	GCDeleted  int    `json:"gc_deleted,omitempty"`
 	GCEligible bool   `json:"gc_eligible,omitempty"`
+	SyncMs     int64  `json:"sync_ms,omitempty"`
+	GCMs       int64  `json:"gc_ms,omitempty"`
+}
+
+// FormatElapsed renders milliseconds as a Go duration (1m6s, 12ms). Empty if ms <= 0.
+func FormatElapsed(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return (time.Duration(ms) * time.Millisecond).String()
+}
+
+// FormatTiming returns a leading-space key=value fragment, e.g. " sync=1m6s gc=12ms".
+func (st Status) FormatTiming() string {
+	var b strings.Builder
+	if s := FormatElapsed(st.SyncMs); s != "" {
+		b.WriteString(" sync=")
+		b.WriteString(s)
+	}
+	if s := FormatElapsed(st.GCMs); s != "" {
+		b.WriteString(" gc=")
+		b.WriteString(s)
+	}
+	return b.String()
 }
 
 func Run(ctx context.Context) error {
@@ -81,37 +106,49 @@ func runOnce(ctx context.Context) string {
 		slog.Warn(msg)
 		return ""
 	}
-	if err := a.SyncEngine(ctx, nil, nil, []fido2.Device{}); err != nil {
+	syncStart := time.Now()
+	err = a.SyncEngine(ctx, nil, nil, []fido2.Device{})
+	syncMs := time.Since(syncStart).Milliseconds()
+	if err != nil {
 		if interrupted(ctx, err) {
 			slog.Info("syncsh daemon: sync interrupted", "err", err)
 			return ""
 		}
 		class, hint := classifyErr(err, a.Config)
-		writeStatus(failStatus(err, class, hint))
-		slog.Error("syncsh daemon: sync", "err", err, "class", class)
+		st := failStatus(err, class, hint)
+		st.SyncMs = syncMs
+		writeStatus(st)
+		slog.Error("syncsh daemon: sync", "err", err, "class", class, "sync", FormatElapsed(syncMs))
 		return class
 	}
 	if err := a.MaybeCheckpoint(ctx); err != nil {
 		slog.Warn("syncsh daemon: checkpoint", "err", err)
 	}
+	gcStart := time.Now()
 	plan, err := a.GarbageCollect(ctx, false)
+	gcMs := time.Since(gcStart).Milliseconds()
 	if err != nil {
 		if interrupted(ctx, err) {
 			slog.Info("syncsh daemon: gc interrupted", "err", err)
 			return ""
 		}
-		writeStatus(failStatus(fmt.Errorf("gc: %w", err), ""))
-		slog.Error("syncsh daemon: gc", "err", err)
+		st := failStatus(fmt.Errorf("gc: %w", err), "")
+		st.SyncMs = syncMs
+		st.GCMs = gcMs
+		writeStatus(st)
+		slog.Error("syncsh daemon: gc", "err", err, "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
 		return ""
 	}
 	if n := plan.DeletedCount(); n > 0 {
-		slog.Info("syncsh daemon: gc", "deleted", n, "checkpoint", plan.Checkpoint)
+		slog.Info("syncsh daemon: gc", "deleted", n, "checkpoint", plan.Checkpoint, "gc", FormatElapsed(gcMs))
 	}
 	lock, err := app.AcquireLock()
 	if err != nil {
 		st := failStatus(err, "")
 		st.GCDeleted = plan.DeletedCount()
 		st.GCEligible = plan.Eligible
+		st.SyncMs = syncMs
+		st.GCMs = gcMs
 		writeStatus(st)
 		slog.Error("syncsh daemon: callback lock", "err", err)
 		return ""
@@ -122,11 +159,22 @@ func runOnce(ctx context.Context) string {
 		st := failStatus(cbErr, "")
 		st.GCDeleted = plan.DeletedCount()
 		st.GCEligible = plan.Eligible
+		st.SyncMs = syncMs
+		st.GCMs = gcMs
 		writeStatus(st)
 		slog.Error("syncsh daemon: callback", "err", cbErr)
 		return ""
 	}
-	writeStatus(Status{OK: true, At: time.Now().Unix(), GCDeleted: plan.DeletedCount(), GCEligible: plan.Eligible, HumanAt: time.Now().Format(time.RFC3339)})
+	writeStatus(Status{
+		OK:         true,
+		At:         time.Now().Unix(),
+		GCDeleted:  plan.DeletedCount(),
+		GCEligible: plan.Eligible,
+		HumanAt:    time.Now().Format(time.RFC3339),
+		SyncMs:     syncMs,
+		GCMs:       gcMs,
+	})
+	slog.Info("syncsh daemon: tick", "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
 	return ""
 }
 

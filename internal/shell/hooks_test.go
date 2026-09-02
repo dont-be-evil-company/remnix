@@ -125,6 +125,12 @@ func TestZshSuggestMenu(t *testing.T) {
 		"__syncsh_suggest_menu_box",
 		"┌",
 		"__syncsh_suggest_suffix",
+		"__syncsh_suggest_typed",
+		"__syncsh_suggest_idx=0",
+		"__syncsh_suggest_off=2",
+		"__syncsh_suggest_scroll",
+		"__syncsh_suggest_commit_selection",
+		"__syncsh_suggest_icon_typed",
 		"syncsh-suggest-next",
 		"syncsh-suggest-prev",
 		"syncsh-suggest-dismiss",
@@ -134,19 +140,74 @@ func TestZshSuggestMenu(t *testing.T) {
 		"__syncsh_rpc_list",
 		"[0-9]##",
 		"__syncsh_menu_hl_sel",
+		"__syncsh_menu_hl_desc",
 		"fg=#F5C2E7",
 		"bg=#313244",
 		"fg=#CDD6F4",
 		"--list",
+		"█",
+		"░",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
 		}
+	}
+	if strings.Contains(on, "_main_complete") || strings.Contains(on, "__syncsh_compadd") || strings.Contains(on, "zle -C __syncsh_comp_list") {
+		t.Fatal("compsys capture must be omitted when completions are off")
 	}
 	if strings.Contains(on, "zle -M") {
 		t.Fatal("menu must not use zle -M status dumps")
 	}
 	if strings.Contains(on, "]10;?") || strings.Contains(on, "suggest_pick_hl") {
 		t.Fatal("menu must not query the terminal for colors")
+	}
+}
+
+func TestZshSuggestCompletions(t *testing.T) {
+	on, err := Integration("zsh", "syncsh", Options{
+		SuggestEnabled:     true,
+		SuggestMenu:        true,
+		SuggestCompletions: true,
+		SuggestAccept:      []string{"Right"},
+		IconTyped:          "›",
+		IconHistory:        "*",
+		IconCompletion:     "+",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"__syncsh_suggest_completions",
+		"syncsh-suggest-complete",
+		"_main_complete",
+		"__syncsh_compadd",
+		"list-choices",
+		"__syncsh_suggest_kinds+=(completion)",
+		"__syncsh_suggest_icon_completion",
+		"__syncsh_comp_values >= 512",
+		"__syncsh_comp_cache_key",
+		"__syncsh_suggest_off",
+		"█",
+		"bindkey $'\\t' syncsh-suggest-complete",
+		"builtin compadd -O matches",
+	} {
+		if !strings.Contains(on, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(on, `__syncsh_comp_values >= 64`) {
+		t.Fatal("compsys capture must not stop at 64")
+	}
+	if strings.Contains(on, `matches+=("${argv[i,-1]}")`) {
+		t.Fatal("quoted argv slices join matches into one row")
+	}
+	if !strings.Contains(on, "syncsh-suggest-complete") {
+		t.Fatal("Tab must request compsys completions")
+	}
+	if strings.Contains(on, "if (( ${+functions[__syncsh_suggest_completions]} )); then") {
+		t.Fatal("typing must not capture compsys on every redraw")
+	}
+	if strings.Contains(on, "zle -M") {
+		t.Fatal("menu must not use zle -M status dumps")
 	}
 }

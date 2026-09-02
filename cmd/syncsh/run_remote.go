@@ -540,7 +540,7 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		if when == "" {
 			when = fmt.Sprintf("%d", last.At)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%s gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, when, last.GCDeleted, last.GCEligible, last.Error)
+		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%s%s gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, when, last.FormatTiming(), last.GCDeleted, last.GCEligible, last.Error)
 		if !last.OK && strings.Contains(last.Error, "context canceled") {
 			fmt.Fprintln(cmd.OutOrStdout(), "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart syncsh-daemon")
 		}

@@ -212,6 +212,7 @@ func reportKeyringAndDaemon(check func(bool, string), deviceID string) {
 		if last.Error != "" {
 			msg += " err=" + last.Error
 		}
+		msg += last.FormatTiming()
 		if last.GCDeleted > 0 || last.GCEligible {
 			msg += fmt.Sprintf(" gc_deleted=%d eligible=%v", last.GCDeleted, last.GCEligible)
 		}

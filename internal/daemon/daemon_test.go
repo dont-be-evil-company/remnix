@@ -21,13 +21,37 @@ func TestStatusRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SYNCSH_DATA_DIR", dir)
 	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
-	writeStatus(Status{OK: true, At: time.Now().Unix()})
+	writeStatus(Status{OK: true, At: time.Now().Unix(), SyncMs: 66000, GCMs: 12})
 	st, err := ReadStatus()
 	if err != nil || !st.OK {
 		t.Fatalf("got %+v err=%v", st, err)
 	}
+	if st.SyncMs != 66000 || st.GCMs != 12 {
+		t.Fatalf("timing fields: %+v", st)
+	}
+	if got := st.FormatTiming(); got != " sync=1m6s gc=12ms" {
+		t.Fatalf("FormatTiming=%q", got)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "daemon-status.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFormatElapsed(t *testing.T) {
+	if got := FormatElapsed(0); got != "" {
+		t.Fatalf("zero: %q", got)
+	}
+	if got := FormatElapsed(-1); got != "" {
+		t.Fatalf("neg: %q", got)
+	}
+	if got := FormatElapsed(12); got != "12ms" {
+		t.Fatalf("12ms: %q", got)
+	}
+	if got := FormatElapsed(66000); got != "1m6s" {
+		t.Fatalf("1m6s: %q", got)
+	}
+	if got := (Status{}).FormatTiming(); got != "" {
+		t.Fatalf("empty status timing: %q", got)
 	}
 }
 

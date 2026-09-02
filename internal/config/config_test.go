@@ -466,3 +466,35 @@ func TestLoadSuggestMenu(t *testing.T) {
 		t.Fatalf("cap 32, got %d", cfg.Suggest.MenuLimit())
 	}
 }
+
+func TestLoadSuggestCompletions(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Suggest.CompletionsEnabled() {
+		t.Fatal("completions should default off")
+	}
+	if cfg.Suggest.IconTyped() != "›" || cfg.Suggest.IconHistory() != "*" || cfg.Suggest.IconCompletion() != "+" {
+		t.Fatalf("default icons typed=%q history=%q completion=%q", cfg.Suggest.IconTyped(), cfg.Suggest.IconHistory(), cfg.Suggest.IconCompletion())
+	}
+	if err := os.WriteFile(ConfigPath(), []byte("version: 1\nsuggest:\n  menu: true\n  completions: true\n  icons:\n    typed: \">\"\n    history: H\n    completion: C\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Suggest.CompletionsEnabled() {
+		t.Fatal("completions should be on")
+	}
+	if cfg.Suggest.IconTyped() != ">" || cfg.Suggest.IconHistory() != "H" || cfg.Suggest.IconCompletion() != "C" {
+		t.Fatalf("custom icons typed=%q history=%q completion=%q", cfg.Suggest.IconTyped(), cfg.Suggest.IconHistory(), cfg.Suggest.IconCompletion())
+	}
+}

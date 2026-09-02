@@ -95,12 +95,21 @@ type SCPTransport struct {
 	Port int    `yaml:"port,omitempty"`
 }
 
+// SuggestIcons labels rows in the zsh LSP-style menu.
+type SuggestIcons struct {
+	Typed      string `yaml:"typed,omitempty"`
+	History    string `yaml:"history,omitempty"`
+	Completion string `yaml:"completion,omitempty"`
+}
+
 // Suggest is inline history completion (zsh ghost text).
 type Suggest struct {
-	Enabled *bool    `yaml:"enabled,omitempty"`
-	Menu    *bool    `yaml:"menu,omitempty"`
-	MenuMax int      `yaml:"menu_max,omitempty"`
-	Accept  []string `yaml:"accept,omitempty"`
+	Enabled     *bool        `yaml:"enabled,omitempty"`
+	Menu        *bool        `yaml:"menu,omitempty"`
+	MenuMax     int          `yaml:"menu_max,omitempty"`
+	Completions *bool        `yaml:"completions,omitempty"`
+	Icons       SuggestIcons `yaml:"icons,omitempty"`
+	Accept      []string     `yaml:"accept,omitempty"`
 }
 
 func (s Suggest) IsEnabled() bool {
@@ -112,6 +121,31 @@ func (s Suggest) IsEnabled() bool {
 
 func (s Suggest) MenuEnabled() bool {
 	return s.Menu != nil && *s.Menu
+}
+
+func (s Suggest) CompletionsEnabled() bool {
+	return s.Completions != nil && *s.Completions
+}
+
+func (s Suggest) IconTyped() string {
+	if strings.TrimSpace(s.Icons.Typed) == "" {
+		return "›"
+	}
+	return s.Icons.Typed
+}
+
+func (s Suggest) IconHistory() string {
+	if strings.TrimSpace(s.Icons.History) == "" {
+		return "*"
+	}
+	return s.Icons.History
+}
+
+func (s Suggest) IconCompletion() string {
+	if strings.TrimSpace(s.Icons.Completion) == "" {
+		return "+"
+	}
+	return s.Icons.Completion
 }
 
 func (s Suggest) MenuLimit() int {

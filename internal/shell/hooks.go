@@ -6,9 +6,14 @@ import (
 )
 
 type Options struct {
-	SuggestEnabled bool
-	SuggestAccept  []string
-	SuggestMenu    bool
+	SuggestEnabled     bool
+	SuggestAccept      []string
+	SuggestMenu        bool
+	SuggestCompletions bool
+	SuggestMenuMax     int
+	IconTyped          string
+	IconHistory        string
+	IconCompletion     string
 }
 
 func Integration(shellName, binary string, opts Options) (string, error) {
@@ -217,6 +222,7 @@ __syncsh_suggest_update() {
 }
 
 __syncsh_suggest_redraw() {
+  [[ -n ${__syncsh_in_comp:-} ]] && return
   case $WIDGET in
     accept-line|accept-and-hold|accept-line-and-down-history|accept-and-infer-next-history)
       __syncsh_suggest_clear
@@ -343,25 +349,190 @@ else
 fi
 `, strings.Join(quoted, " "))
 	if opts.SuggestMenu {
-		out += zshSuggestMenu()
+		out += zshSuggestMenu(opts)
 	}
 	return out
 }
 
-func zshSuggestMenu() string {
-	return `
+func zshSuggestMenu(opts Options) string {
+	typed := opts.IconTyped
+	if strings.TrimSpace(typed) == "" {
+		typed = "›"
+	}
+	histIcon := opts.IconHistory
+	if strings.TrimSpace(histIcon) == "" {
+		histIcon = "*"
+	}
+	compIcon := opts.IconCompletion
+	if strings.TrimSpace(compIcon) == "" {
+		compIcon = "+"
+	}
+	max := opts.SuggestMenuMax
+	if max <= 0 {
+		max = 8
+	}
+	if max > 32 {
+		max = 32
+	}
+	out := fmt.Sprintf(`
 # LSP-style suggestion menu (dropdown under the line via POSTDISPLAY)
 typeset -ga __syncsh_suggest_items
-typeset -gi __syncsh_suggest_idx=1
+typeset -ga __syncsh_suggest_kinds
+typeset -ga __syncsh_suggest_descrs
+typeset -ga __syncsh_suggest_lines
+typeset -gi __syncsh_suggest_idx=0
+typeset -gi __syncsh_suggest_off=2
+typeset -gi __syncsh_suggest_view=0
+typeset -gi __syncsh_suggest_bar=0
 typeset -ga __syncsh_rpc_items
 typeset -g __syncsh_suggest_suffix=""
+typeset -g __syncsh_suggest_typed=""
+typeset -g __syncsh_suggest_ghost=""
 typeset -gi __syncsh_suggest_inner=0
+typeset -gi __syncsh_suggest_desc_col=0
+typeset -ga __syncsh_suggest_hist
+typeset -gi __syncsh_suggest_menu_max=%d
+typeset -g __syncsh_suggest_icon_typed=%s
+typeset -g __syncsh_suggest_icon_history=%s
+typeset -g __syncsh_suggest_icon_completion=%s
+`, max, zshQuote(typed), zshQuote(histIcon), zshQuote(compIcon))
+	out += zshSuggestMenuBody()
+	if opts.SuggestCompletions {
+		out += zshSuggestCompletions()
+	}
+	return out
+}
 
+func zshSuggestCompletions() string {
+	return `
+typeset -ga __syncsh_comp_values
+typeset -ga __syncsh_comp_descrs
+typeset -g __syncsh_comp_cache_key=""
+typeset -ga __syncsh_comp_cache_values
+typeset -ga __syncsh_comp_cache_descrs
+
+__syncsh_compadd() {
+  if ! (( ${+__syncsh_comp_ctx} )); then
+    typeset -g __syncsh_comp_ctx=1
+    typeset -g __syncsh_comp_prefix="$PREFIX"
+    typeset -g __syncsh_comp_suffix="$SUFFIX"
+    typeset -g __syncsh_comp_lbuffer="$LBUFFER"
+    typeset -g __syncsh_comp_rbuffer="$RBUFFER"
+  fi
+  (( $#__syncsh_comp_values >= 512 )) && return
+  local -a matches descrs
+  integer i
+  # Let builtin compadd parse flags; -O keeps each match as its own array
+  # element. Quoted argv slices join on IFS and cram every word into one row.
+  builtin compadd -O matches "$@" 2>/dev/null
+  i=1
+  while (( i <= $# )); do
+    case "${argv[i]}" in
+      -d|-ld)
+        (( i++ ))
+        [[ -n ${argv[i]:-} ]] && descrs=("${(P)argv[i]}")
+        ;;
+      --) break ;;
+    esac
+    (( i++ ))
+  done
+  for (( i=1; i<=$#matches; i++ )); do
+    [[ -n ${matches[i]} ]] || continue
+    (( $#__syncsh_comp_values >= 512 )) && break
+    __syncsh_comp_values+=("${matches[i]}")
+    __syncsh_comp_descrs+=("${descrs[i]:-}")
+  done
+}
+
+__syncsh_comp_list_fn() {
+  __syncsh_comp_values=()
+  __syncsh_comp_descrs=()
+  unset __syncsh_comp_ctx __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_lbuffer __syncsh_comp_rbuffer
+  integer had_compadd=0
+  if (( ${+functions[compadd]} )); then
+    had_compadd=1
+    functions -c compadd __syncsh_compadd_prev
+  fi
+  function compadd { __syncsh_compadd "$@" }
+  {
+    autoload -Uz _main_complete 2>/dev/null
+    (( ${+functions[_main_complete]} )) && _main_complete
+  } always {
+    unfunction compadd 2>/dev/null
+    if (( had_compadd )); then
+      functions -c __syncsh_compadd_prev compadd
+      unfunction __syncsh_compadd_prev 2>/dev/null
+    fi
+  }
+}
+
+zle -C __syncsh_comp_list list-choices __syncsh_comp_list_fn
+
+__syncsh_suggest_completions() {
+  emulate -L zsh
+  __syncsh_comp_values=()
+  __syncsh_comp_descrs=()
+  unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
+  [[ -n ${__syncsh_in_comp:-} ]] && return
+  (( ${+_comps} )) || return
+  __syncsh_in_comp=1
+  zle __syncsh_comp_list >/dev/null 2>&1 || true
+  unset __syncsh_in_comp
+}
+
+__syncsh_comp_cache_store() {
+  emulate -L zsh
+  __syncsh_comp_cache_key="$BUFFER"
+  __syncsh_comp_cache_values=("${__syncsh_comp_values[@]}")
+  __syncsh_comp_cache_descrs=("${__syncsh_comp_descrs[@]}")
+}
+
+__syncsh_comp_cache_clear() {
+  __syncsh_comp_cache_key=""
+  __syncsh_comp_cache_values=()
+  __syncsh_comp_cache_descrs=()
+  unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
+}
+
+syncsh-suggest-complete() {
+  emulate -L zsh
+  if (( __syncsh_suggest_idx > 0 )); then
+    syncsh-suggest-next
+    return
+  fi
+  if [[ ${__syncsh_comp_cache_key:-} == "$BUFFER" && ${#__syncsh_comp_cache_values} -gt 0 ]]; then
+    syncsh-suggest-next
+    return
+  fi
+  __syncsh_suggest_completions
+  if (( ${#__syncsh_comp_values} == 0 )); then
+    zle expand-or-complete
+    return
+  fi
+  __syncsh_comp_cache_store
+  __syncsh_suggest_last="$BUFFER"
+  __syncsh_suggest_typed="$BUFFER"
+  __syncsh_suggest_idx=0
+  __syncsh_suggest_off=2
+  __syncsh_suggest_fetch_hist
+  __syncsh_suggest_rebuild
+  zle redisplay
+}
+
+zle -N syncsh-suggest-complete
+bindkey $'\t' syncsh-suggest-complete
+bindkey -M viins $'\t' syncsh-suggest-complete
+`
+}
+
+func zshSuggestMenuBody() string {
+	return `
 # Match internal/tui Catppuccin: accent #F5C2E7, text #CDD6F4, muted #585B70,
 # rule/surface #313244, base #1E1E2E.
 typeset -g __syncsh_menu_hl_border='fg=#585B70,bg=#1E1E2E'
 typeset -g __syncsh_menu_hl_row='fg=#CDD6F4,bg=#1E1E2E'
 typeset -g __syncsh_menu_hl_sel='fg=#F5C2E7,bold,bg=#313244'
+typeset -g __syncsh_menu_hl_desc='fg=#585B70,bg=#1E1E2E'
 
 __syncsh_rpc_list() {
   emulate -L zsh
@@ -394,7 +565,7 @@ __syncsh_rpc_list() {
 __syncsh_suggest_highlight() {
   region_highlight=(${region_highlight:#*memo=syncsh-suggest*})
   local suf="${__syncsh_suggest_suffix:-}"
-  local -i b=${#BUFFER} p w i n
+  local -i b=${#BUFFER} p w i n dcol off view bar
   p=b
   if [[ -n $suf ]]; then
     region_highlight+=("$p $(( p + $#suf )) ${__syncsh_suggest_hl} memo=syncsh-suggest")
@@ -403,14 +574,32 @@ __syncsh_suggest_highlight() {
   n=${#__syncsh_suggest_items}
   (( n < 2 || __syncsh_suggest_inner < 1 )) && return
   w=$(( __syncsh_suggest_inner + 2 ))
+  dcol=${__syncsh_suggest_desc_col:-0}
+  off=${__syncsh_suggest_off:-2}
+  view=${__syncsh_suggest_view:-0}
+  bar=${__syncsh_suggest_bar:-0}
+  (( off < 2 )) && off=2
+  (( view < 1 )) && view=$(( n - 1 ))
   p+=1
   region_highlight+=("$p $(( p + w )) ${__syncsh_menu_hl_border} memo=syncsh-suggest")
   p+=$(( w + 1 ))
-  for (( i=1; i<=n; i++ )); do
-    if (( i == __syncsh_suggest_idx )); then
+  if (( __syncsh_suggest_idx == 1 )); then
+    region_highlight+=("$p $(( p + w )) ${__syncsh_menu_hl_sel} memo=syncsh-suggest")
+  else
+    region_highlight+=("$p $(( p + w )) ${__syncsh_menu_hl_row} memo=syncsh-suggest")
+  fi
+  p+=$(( w + 1 ))
+  for (( i=off; i<off+view && i<=n; i++ )); do
+    if (( __syncsh_suggest_idx > 0 && i == __syncsh_suggest_idx )); then
       region_highlight+=("$p $(( p + w )) ${__syncsh_menu_hl_sel} memo=syncsh-suggest")
     else
       region_highlight+=("$p $(( p + w )) ${__syncsh_menu_hl_row} memo=syncsh-suggest")
+    fi
+    if (( dcol > 0 )) && [[ -n ${__syncsh_suggest_descrs[i]:-} ]]; then
+      region_highlight+=("$(( p + 1 + dcol )) $(( p + 1 + __syncsh_suggest_inner )) ${__syncsh_menu_hl_desc} memo=syncsh-suggest")
+    fi
+    if (( bar )); then
+      region_highlight+=("$(( p + w - 1 )) $(( p + w )) ${__syncsh_menu_hl_desc} memo=syncsh-suggest")
     fi
     p+=$(( w + 1 ))
   done
@@ -418,42 +607,168 @@ __syncsh_suggest_highlight() {
 }
 
 __syncsh_suggest_clear() {
-  unset POSTDISPLAY __syncsh_suggest_suffix
+  unset POSTDISPLAY __syncsh_suggest_suffix __syncsh_suggest_typed __syncsh_suggest_ghost
   __syncsh_suggest_items=()
-  __syncsh_suggest_idx=1
+  __syncsh_suggest_kinds=()
+  __syncsh_suggest_descrs=()
+  __syncsh_suggest_lines=()
+  __syncsh_suggest_hist=()
+  __syncsh_suggest_idx=0
+  __syncsh_suggest_off=2
+  __syncsh_suggest_view=0
+  __syncsh_suggest_bar=0
+  (( ${+functions[__syncsh_comp_cache_clear]} )) && __syncsh_comp_cache_clear
   __syncsh_suggest_highlight
+}
+
+__syncsh_suggest_scroll() {
+  emulate -L zsh
+  local -i n=${#__syncsh_suggest_items}
+  local -i max=$__syncsh_suggest_menu_max
+  local -i nsug=$(( n - 1 ))
+  local -i idx=$__syncsh_suggest_idx
+  (( max < 1 )) && max=1
+  __syncsh_suggest_off=2
+  (( nsug < 1 )) && return
+  if (( nsug <= max )); then
+    return
+  fi
+  if (( idx <= 1 )); then
+    return
+  fi
+  if (( idx < __syncsh_suggest_off )); then
+    __syncsh_suggest_off=$idx
+  elif (( idx > __syncsh_suggest_off + max - 1 )); then
+    __syncsh_suggest_off=$(( idx - max + 1 ))
+  fi
+  local -i maxoff=$(( n - max + 1 ))
+  (( __syncsh_suggest_off < 2 )) && __syncsh_suggest_off=2
+  (( __syncsh_suggest_off > maxoff )) && __syncsh_suggest_off=$maxoff
+}
+
+__syncsh_suggest_kind_icon() {
+  case "$1" in
+    typed) REPLY="${__syncsh_suggest_icon_typed}" ;;
+    history) REPLY="${__syncsh_suggest_icon_history}" ;;
+    *) REPLY="${__syncsh_suggest_icon_completion}" ;;
+  esac
+}
+
+__syncsh_suggest_fmt_row() {
+  emulate -L zsh
+  local -i i=$1 valw=$2 descw=$3 iconw=$4
+  local s kind icon marker descr
+  kind="${__syncsh_suggest_kinds[i]:-history}"
+  __syncsh_suggest_kind_icon "$kind"
+  icon="$REPLY"
+  icon="${(r:iconw:)icon}"
+  if (( __syncsh_suggest_idx > 0 && i == __syncsh_suggest_idx )); then
+    marker='❯ '
+  else
+    marker='  '
+  fi
+  s="${__syncsh_suggest_items[i]}"
+  if (( $#s > valw )); then
+    s="${s[1,$(( valw - 1 ))]}..."
+  fi
+  s="${(r:valw:)s}"
+  descr="${__syncsh_suggest_descrs[i]:-}"
+  if (( descw > 0 )) && [[ -n $descr ]]; then
+    if (( $#descr > descw )); then
+      descr="${descr[1,$(( descw - 1 ))]}..."
+    fi
+    s="${marker}${icon} ${s}  ${descr}"
+  else
+    s="${marker}${icon} ${s}"
+  fi
+  s="${(r:__syncsh_suggest_inner:)s}"
+  REPLY=$s
 }
 
 __syncsh_suggest_menu_box() {
   emulate -L zsh
-  local -i i n maxw inner cols
-  local s marker pad line="" fill=""
+  local -i i n maxv maxd inner cols iconw valw descw markerw=2 overflow off view nsug maxr bar t0 thumb track span rel vis
+  local s kind pad line="" fill="" descr rb
   n=${#__syncsh_suggest_items}
-  maxw=20
-  for s in "${__syncsh_suggest_items[@]}"; do
-    (( $#s > maxw )) && maxw=$#s
+  maxr=$__syncsh_suggest_menu_max
+  (( maxr < 1 )) && maxr=1
+  __syncsh_suggest_scroll
+  off=${__syncsh_suggest_off:-2}
+  (( off < 2 )) && off=2
+  nsug=$(( n - 1 ))
+  view=$nsug
+  (( view > maxr )) && view=$maxr
+  __syncsh_suggest_view=$view
+  bar=0
+  (( nsug > maxr )) && bar=1
+  __syncsh_suggest_bar=$bar
+  iconw=1
+  (( $#__syncsh_suggest_icon_typed > iconw )) && iconw=$#__syncsh_suggest_icon_typed
+  (( $#__syncsh_suggest_icon_history > iconw )) && iconw=$#__syncsh_suggest_icon_history
+  (( $#__syncsh_suggest_icon_completion > iconw )) && iconw=$#__syncsh_suggest_icon_completion
+  maxv=4
+  maxd=0
+  s="${__syncsh_suggest_items[1]}"
+  (( $#s > maxv )) && maxv=$#s
+  for (( i=off; i<off+view && i<=n; i++ )); do
+    s="${__syncsh_suggest_items[i]}"
+    (( $#s > maxv )) && maxv=$#s
+    descr="${__syncsh_suggest_descrs[i]:-}"
+    (( $#descr > maxd )) && maxd=$#descr
   done
   cols=${COLUMNS:-80}
-  inner=$(( maxw + 2 ))
-  (( inner > cols - 4 )) && inner=$(( cols - 4 ))
+  valw=$maxv
+  descw=$maxd
+  inner=$(( markerw + iconw + 1 + valw ))
+  (( descw > 0 )) && inner=$(( inner + 2 + descw ))
+  if (( inner > cols - 4 )); then
+    overflow=$(( inner - (cols - 4) ))
+    if (( descw > overflow )); then
+      descw=$(( descw - overflow ))
+    else
+      overflow=$(( overflow - descw ))
+      descw=0
+      valw=$(( valw - overflow ))
+      (( valw < 4 )) && valw=4
+    fi
+    inner=$(( markerw + iconw + 1 + valw ))
+    (( descw > 0 )) && inner=$(( inner + 2 + descw ))
+  fi
   (( inner < 24 )) && inner=24
   (( inner < 4 )) && inner=4
-  (( __syncsh_suggest_inner = inner ))
+  __syncsh_suggest_inner=$inner
+  __syncsh_suggest_desc_col=0
+  (( descw > 0 )) && __syncsh_suggest_desc_col=$(( markerw + iconw + 1 + valw + 2 ))
+  thumb=1
+  t0=0
+  if (( bar )); then
+    track=$view
+    thumb=$(( track * track / nsug ))
+    (( thumb < 1 )) && thumb=1
+    (( thumb > track )) && thumb=$track
+    span=$(( nsug - track ))
+    rel=$(( off - 2 ))
+    if (( span > 0 )); then
+      t0=$(( rel * (track - thumb) / span ))
+    fi
+  fi
   pad="${(l:inner::─:)fill}"
   line+="┌${pad}┐"$'\n'
-  for (( i=1; i<=n; i++ )); do
-    s="${__syncsh_suggest_items[i]}"
-    if (( i == __syncsh_suggest_idx )); then
-      marker='❯ '
-    else
-      marker='  '
+  __syncsh_suggest_fmt_row 1 $valw $descw $iconw
+  line+="│$REPLY│"$'\n'
+  vis=0
+  for (( i=off; i<off+view && i<=n; i++ )); do
+    __syncsh_suggest_fmt_row $i $valw $descw $iconw
+    rb='│'
+    if (( bar )); then
+      if (( vis >= t0 && vis < t0 + thumb )); then
+        rb='█'
+      else
+        rb='░'
+      fi
     fi
-    if (( $#s > inner - 2 )); then
-      s="${s[1,$(( inner - 3 ))]}..."
-    fi
-    s="${marker}${s}"
-    s="${(r:inner:)s}"
-    line+="│${s}│"$'\n'
+    line+="│$REPLY$rb"$'\n'
+    (( vis++ ))
   done
   line+="└${pad}┘"
   REPLY=$line
@@ -461,14 +776,9 @@ __syncsh_suggest_menu_box() {
 
 __syncsh_suggest_apply() {
   emulate -L zsh
-  local s=""
-  if (( ${#__syncsh_suggest_items} >= 1 && __syncsh_suggest_idx >= 1 && __syncsh_suggest_idx <= ${#__syncsh_suggest_items} )); then
-    s="${__syncsh_suggest_items[__syncsh_suggest_idx]}"
-  fi
-  if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
-    __syncsh_suggest_suffix="${s#"$BUFFER"}"
-  else
-    __syncsh_suggest_suffix=""
+  __syncsh_suggest_suffix=""
+  if [[ -n ${__syncsh_suggest_ghost:-} && $BUFFER == "$__syncsh_suggest_typed" && ${__syncsh_suggest_ghost} == "$BUFFER"* && ${__syncsh_suggest_ghost} != "$BUFFER" ]]; then
+    __syncsh_suggest_suffix="${__syncsh_suggest_ghost#"$BUFFER"}"
   fi
   if (( ${#__syncsh_suggest_items} >= 2 )); then
     __syncsh_suggest_menu_box
@@ -481,8 +791,91 @@ __syncsh_suggest_apply() {
   __syncsh_suggest_highlight
 }
 
+__syncsh_suggest_fetch_hist() {
+  emulate -L zsh
+  local -a hist filtered
+  local s line
+  hist=()
+  if __syncsh_rpc_list suggest-list "$BUFFER" "$PWD"; then
+    hist=("${__syncsh_rpc_items[@]}")
+  else
+    while IFS= read -r line; do
+      [[ -n $line ]] && hist+=("$line")
+    done < <("$__syncsh_bin" suggest --prefix "$BUFFER" --cwd "$PWD" --list 2>/dev/null)
+  fi
+  filtered=()
+  for s in "${hist[@]}"; do
+    if [[ $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
+      filtered+=("$s")
+    fi
+  done
+  __syncsh_suggest_hist=("${filtered[@]}")
+}
+
+__syncsh_suggest_rebuild() {
+  emulate -L zsh
+  local -a hist cvals cdescrs
+  local typed s m d hs applied
+  local -i i dup
+  hist=("${__syncsh_suggest_hist[@]}")
+  cvals=()
+  cdescrs=()
+  if [[ ${__syncsh_comp_cache_key:-} == "$__syncsh_suggest_typed" ]]; then
+    cvals=("${__syncsh_comp_cache_values[@]}")
+    cdescrs=("${__syncsh_comp_cache_descrs[@]}")
+  fi
+  __syncsh_suggest_items=()
+  __syncsh_suggest_kinds=()
+  __syncsh_suggest_descrs=()
+  __syncsh_suggest_lines=()
+  __syncsh_suggest_ghost=""
+  if (( $#hist == 0 && $#cvals == 0 )); then
+    __syncsh_suggest_apply
+    return
+  fi
+  typed="$__syncsh_suggest_typed"
+  __syncsh_suggest_items=("$typed")
+  __syncsh_suggest_kinds=(typed)
+  __syncsh_suggest_descrs=("")
+  __syncsh_suggest_lines=("$typed")
+  for s in "${hist[@]}"; do
+    __syncsh_suggest_items+=("$s")
+    __syncsh_suggest_kinds+=(history)
+    __syncsh_suggest_descrs+=("")
+    __syncsh_suggest_lines+=("$s")
+    [[ -z $__syncsh_suggest_ghost ]] && __syncsh_suggest_ghost="$s"
+  done
+  for (( i=1; i<=$#cvals; i++ )); do
+    m="${cvals[i]}"
+    [[ -n $m ]] || continue
+    if (( ${+__syncsh_comp_lbuffer} )); then
+      applied="${__syncsh_comp_lbuffer%$__syncsh_comp_prefix}${m}${__syncsh_comp_rbuffer#$__syncsh_comp_suffix}"
+    else
+      applied="$m"
+    fi
+    [[ -n $applied && $applied != "$typed" ]] || continue
+    dup=0
+    for hs in "${hist[@]}"; do
+      if [[ $applied == "$hs" ]]; then
+        dup=1
+        break
+      fi
+    done
+    (( dup )) && continue
+    d="${cdescrs[i]:-}"
+    __syncsh_suggest_items+=("$m")
+    __syncsh_suggest_kinds+=(completion)
+    __syncsh_suggest_descrs+=("$d")
+    __syncsh_suggest_lines+=("$applied")
+  done
+  __syncsh_suggest_scroll
+  __syncsh_suggest_apply
+}
+
 __syncsh_suggest_update() {
   emulate -L zsh
+  [[ -n ${__syncsh_in_comp:-} ]] && return
+  [[ $WIDGET == __syncsh_comp_list ]] && return
   if [[ -z $BUFFER ]]; then
     __syncsh_suggest_clear
     __syncsh_suggest_last=""
@@ -493,24 +886,28 @@ __syncsh_suggest_update() {
     return
   fi
   __syncsh_suggest_last="$BUFFER"
-  __syncsh_suggest_items=()
-  __syncsh_suggest_idx=1
-  if __syncsh_rpc_list suggest-list "$BUFFER" "$PWD"; then
-    __syncsh_suggest_items=("${__syncsh_rpc_items[@]}")
-  else
-    local line
-    while IFS= read -r line; do
-      [[ -n $line ]] && __syncsh_suggest_items+=("$line")
-    done < <("$__syncsh_bin" suggest --prefix "$BUFFER" --cwd "$PWD" --list 2>/dev/null)
+  __syncsh_suggest_typed="$BUFFER"
+  __syncsh_suggest_idx=0
+  __syncsh_suggest_off=2
+  if [[ ${__syncsh_comp_cache_key:-} != "$BUFFER" ]]; then
+    (( ${+functions[__syncsh_comp_cache_clear]} )) && __syncsh_comp_cache_clear
   fi
-  local filtered=() s
-  for s in "${__syncsh_suggest_items[@]}"; do
-    if [[ $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
-      filtered+=("$s")
-    fi
-  done
-  __syncsh_suggest_items=("${filtered[@]}")
+  __syncsh_suggest_fetch_hist
+  __syncsh_suggest_rebuild
+}
+
+__syncsh_suggest_commit_selection() {
+  emulate -L zsh
+  local s="${__syncsh_suggest_typed:-}"
+  if (( __syncsh_suggest_idx >= 1 && __syncsh_suggest_idx <= ${#__syncsh_suggest_lines} )); then
+    s="${__syncsh_suggest_lines[__syncsh_suggest_idx]}"
+  fi
+  BUFFER="$s"
+  CURSOR=$#BUFFER
+  __syncsh_suggest_last="$BUFFER"
+  __syncsh_suggest_scroll
   __syncsh_suggest_apply
+  zle redisplay
 }
 
 syncsh-suggest-accept() {
@@ -534,32 +931,47 @@ syncsh-suggest-accept() {
 
 syncsh-suggest-next() {
   emulate -L zsh
-  if (( ${#__syncsh_suggest_items} < 2 )); then
+  local -i n=${#__syncsh_suggest_items}
+  if (( n < 2 )); then
     zle down-line-or-history 2>/dev/null || zle .down-line-or-history
     return
   fi
-  (( __syncsh_suggest_idx++ ))
-  (( __syncsh_suggest_idx > ${#__syncsh_suggest_items} )) && __syncsh_suggest_idx=1
-  __syncsh_suggest_apply
-  zle redisplay
+  if (( __syncsh_suggest_idx == 0 )); then
+    __syncsh_suggest_idx=2
+  elif (( __syncsh_suggest_idx >= n )); then
+    __syncsh_suggest_idx=1
+  else
+    (( __syncsh_suggest_idx++ ))
+  fi
+  __syncsh_suggest_commit_selection
 }
 
 syncsh-suggest-prev() {
   emulate -L zsh
-  if (( ${#__syncsh_suggest_items} < 2 )); then
+  local -i n=${#__syncsh_suggest_items}
+  if (( n < 2 )); then
     zle up-line-or-history 2>/dev/null || zle .up-line-or-history
     return
   fi
-  (( __syncsh_suggest_idx-- ))
-  (( __syncsh_suggest_idx < 1 )) && __syncsh_suggest_idx=${#__syncsh_suggest_items}
-  __syncsh_suggest_apply
-  zle redisplay
+  if (( __syncsh_suggest_idx == 0 )); then
+    __syncsh_suggest_idx=n
+  elif (( __syncsh_suggest_idx == 1 )); then
+    __syncsh_suggest_idx=0
+  else
+    (( __syncsh_suggest_idx-- ))
+  fi
+  __syncsh_suggest_commit_selection
 }
 
 syncsh-suggest-dismiss() {
   emulate -L zsh
   if (( ${#__syncsh_suggest_items} == 0 )) && [[ -z ${__syncsh_suggest_suffix:-} ]]; then
     return
+  fi
+  if [[ -n ${__syncsh_suggest_typed:-} ]]; then
+    BUFFER="$__syncsh_suggest_typed"
+    CURSOR=$#BUFFER
+    __syncsh_suggest_last="$BUFFER"
   fi
   __syncsh_suggest_clear
   zle redisplay

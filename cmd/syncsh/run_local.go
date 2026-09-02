@@ -227,9 +227,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	out, err := shell.Integration(args[0], bin, shell.Options{
-		SuggestEnabled: cfg.Suggest.IsEnabled(),
-		SuggestAccept:  cfg.Suggest.AcceptKeys(),
-		SuggestMenu:    cfg.Suggest.MenuEnabled(),
+		SuggestEnabled:     cfg.Suggest.IsEnabled(),
+		SuggestAccept:      cfg.Suggest.AcceptKeys(),
+		SuggestMenu:        cfg.Suggest.MenuEnabled(),
+		SuggestCompletions: cfg.Suggest.MenuEnabled() && cfg.Suggest.CompletionsEnabled(),
+		SuggestMenuMax:     cfg.Suggest.MenuLimit(),
+		IconTyped:          cfg.Suggest.IconTyped(),
+		IconHistory:        cfg.Suggest.IconHistory(),
+		IconCompletion:     cfg.Suggest.IconCompletion(),
 	})
 	if err != nil {
 		return err
