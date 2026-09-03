@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -186,11 +188,16 @@ func TestZshSuggestCompletions(t *testing.T) {
 		"__syncsh_suggest_icon_completion",
 		"__syncsh_comp_values >= 512",
 		"__syncsh_comp_cache_key",
+		"__syncsh_comp_inserts",
+		"__syncsh_comp_cache_inserts",
 		"__syncsh_suggest_off",
 		"█",
 		"bindkey $'\\t' syncsh-suggest-complete",
 		"${(@P)avar}",
 		"${(@P)dvar}",
+		"builtin compadd -O matches",
+		"opt_p",
+		"opt_P",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
@@ -199,8 +206,24 @@ func TestZshSuggestCompletions(t *testing.T) {
 	if strings.Contains(on, "__syncsh_comp_values >= 64") {
 		t.Fatal("compsys capture must not stop at 64")
 	}
-	if strings.Contains(on, `matches+=("${argv[i,-1]}")`) || strings.Contains(on, `descrs=("${(P)argv[i]}")`) {
+	if strings.Contains(on, `matches+=("${argv[i,-1]}")`) || strings.Contains(on, `matches+=("${(@)argv[i,-1]}")`) || strings.Contains(on, `descrs=("${(P)argv[i]}")`) {
 		t.Fatal("quoted array slices join matches/descriptions into one row")
+	}
+	if strings.Contains(on, `applied="${__syncsh_comp_lbuffer%$__syncsh_comp_prefix}${m}${__syncsh_comp_rbuffer#$__syncsh_comp_suffix}"`) {
+		t.Fatal("accept must insert -p/-P affixes, not the listed match alone")
+	}
+	if !strings.Contains(on, "k|o|J|V|X|x|W|F|M|E|r|R") {
+		t.Fatal("-k must consume the array name, not treat it as a match")
+	}
+	listAt := strings.Index(on, "__syncsh_comp_list_fn()")
+	if listAt < 0 {
+		t.Fatal("missing __syncsh_comp_list_fn")
+	}
+	listFn := on[listAt:]
+	mainOff := strings.Index(listFn, "_main_complete")
+	snapOff := strings.Index(listFn, `typeset -g __syncsh_comp_prefix="$PREFIX"`)
+	if mainOff < 0 || snapOff < 0 || snapOff > mainOff {
+		t.Fatal("PREFIX must be snapshotted before _main_complete so _path_files cannot shrink it to the last component")
 	}
 	if !strings.Contains(on, "syncsh-suggest-complete") {
 		t.Fatal("Tab must request compsys completions")
@@ -210,5 +233,23 @@ func TestZshSuggestCompletions(t *testing.T) {
 	}
 	if strings.Contains(on, "zle -M") {
 		t.Fatal("menu must not use zle -M status dumps")
+	}
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh not installed")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "syncsh-init-*.zsh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(on); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(zsh, "-n", f.Name()).CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh -n: %v\n%s", err, out)
 	}
 }

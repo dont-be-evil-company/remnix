@@ -406,11 +406,19 @@ typeset -g __syncsh_suggest_icon_completion=%s
 func zshSuggestCompletions() string {
 	return `
 typeset -ga __syncsh_comp_values
+typeset -ga __syncsh_comp_inserts
 typeset -ga __syncsh_comp_descrs
 typeset -g __syncsh_comp_cache_key=""
 typeset -ga __syncsh_comp_cache_values
+typeset -ga __syncsh_comp_cache_inserts
 typeset -ga __syncsh_comp_cache_descrs
 
+# Capture compsys matches as they would be inserted. builtin -O expands
+# -k/-a and applies PREFIX; -p/-P/-s/-S are restored when rewriting the
+# line (e.g. ./ from _path_files). PREFIX/LBUFFER are snapshotted in
+# the completion widget before completers run: _path_files rewrites
+# PREFIX to the last component, and capturing that then prepending -p
+# duplicated ./ (cat ./T + Taskfile.yml → cat ././Taskfile.yml).
 __syncsh_compadd() {
   if ! (( ${+__syncsh_comp_ctx} )); then
     typeset -g __syncsh_comp_ctx=1
@@ -419,61 +427,146 @@ __syncsh_compadd() {
     typeset -g __syncsh_comp_lbuffer="$LBUFFER"
     typeset -g __syncsh_comp_rbuffer="$RBUFFER"
   fi
-  (( $#__syncsh_comp_values >= 512 )) && return
-  local -a matches descrs
-  local dvar="" avar="" m d
-  integer i probe=0 j
+  local -a matches descrs src
+  local dvar="" avar="" m d insert flags c rest
+  local opt_i="" opt_P="" opt_p="" opt_s="" opt_S="" opt_I=""
+  integer i probe=0 j fidx si
   i=1
   while (( i <= $# )); do
     case "${argv[i]}" in
-      -O|-A)
-        probe=1
-        (( i++ ))
-        ;;
-      -d|-ld|-D)
-        (( i++ ))
-        dvar="${argv[i]}"
-        ;;
-      -a)
-        (( i++ ))
-        avar="${argv[i]}"
-        ;;
-      --)
-        (( i++ ))
-        (( !probe )) && matches+=("${(@)argv[i,-1]}")
-        break
-        ;;
-      -o|-J|-V|-X|-x|-P|-S|-p|-s|-W|-F|-M|-E|-C|-r|-R)
-        (( i++ ))
-        ;;
+      --) break ;;
       -*)
+        flags="${argv[i]#-}"
+        fidx=1
+        while (( fidx <= $#flags )); do
+          c="${flags[fidx]}"
+          rest="${flags[fidx+1,-1]}"
+          case "$c" in
+            O|A|D)
+              probe=1
+              if [[ -z $rest ]]; then
+                (( i++ ))
+              fi
+              fidx=$#flags
+              ;;
+            P)
+              if [[ -n $rest ]]; then
+                opt_P="$rest"
+              else
+                (( i++ ))
+                opt_P="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            p)
+              if [[ -n $rest ]]; then
+                opt_p="$rest"
+              else
+                (( i++ ))
+                opt_p="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            S)
+              if [[ -n $rest ]]; then
+                opt_S="$rest"
+              else
+                (( i++ ))
+                opt_S="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            s)
+              if [[ -n $rest ]]; then
+                opt_s="$rest"
+              else
+                (( i++ ))
+                opt_s="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            i)
+              if [[ -n $rest ]]; then
+                opt_i="$rest"
+              else
+                (( i++ ))
+                opt_i="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            I)
+              if [[ -n $rest ]]; then
+                opt_I="$rest"
+              else
+                (( i++ ))
+                opt_I="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            d)
+              if [[ -n $rest ]]; then
+                dvar="$rest"
+              else
+                (( i++ ))
+                dvar="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            a)
+              if [[ -n $rest ]]; then
+                avar="$rest"
+              else
+                (( i++ ))
+                avar="${argv[i]}"
+              fi
+              fidx=$#flags
+              ;;
+            k|o|J|V|X|x|W|F|M|E|r|R)
+              if [[ -z $rest ]]; then
+                (( i++ ))
+              fi
+              fidx=$#flags
+              ;;
+            *)
+              (( fidx++ ))
+              continue
+              ;;
+          esac
+          (( fidx++ ))
+        done
         ;;
-      *)
-        (( !probe )) && matches+=("${(@)argv[i,-1]}")
-        break
-        ;;
+      *) break ;;
     esac
     (( i++ ))
   done
-  # _describe probes with -O/-A; those must reach the builtin so later
+  # _describe probes with -O/-A/-D; those must reach the builtin so later
   # -d/-a calls get real per-match descriptions.
   if (( probe )); then
     builtin compadd "$@"
     return
   fi
-  if [[ -n $avar ]]; then
-    matches=("${(@P)avar}")
-  fi
+  (( $#__syncsh_comp_values >= 512 )) && return
+  builtin compadd -O matches "$@" 2>/dev/null
   if [[ -n $dvar ]]; then
     descrs=("${(@P)dvar}")
   fi
-  if (( $#matches == 0 )); then
-    builtin compadd -O matches "$@" 2>/dev/null
+  if [[ -n $avar ]]; then
+    src=("${(@P)avar}")
   fi
   for (( i=1; i<=$#matches; i++ )); do
     m="${matches[i]}"
-    d="${descrs[i]:-}"
+    d=""
     [[ -n $m ]] || continue
+    if (( $#descrs == $#matches )); then
+      d="${descrs[i]:-}"
+    elif (( $#src == $#descrs && $#descrs > 0 )); then
+      for (( si=1; si<=$#src; si++ )); do
+        if [[ ${src[si]} == "$m" || ${src[si]} == "$m":* ]]; then
+          d="${descrs[si]:-}"
+          break
+        fi
+      done
+    fi
     if [[ -z $d && $m == *:* && $m != *://* ]]; then
       d="${m#*:}"
       m="${m%%:*}"
@@ -495,15 +588,22 @@ __syncsh_compadd() {
       fi
     done
     (( j < 0 )) && continue
+    insert="${opt_i}${opt_P}${opt_p}${m}${opt_s}${opt_S}${opt_I}"
     __syncsh_comp_values+=("$m")
+    __syncsh_comp_inserts+=("$insert")
     __syncsh_comp_descrs+=("$d")
   done
 }
 
 __syncsh_comp_list_fn() {
   __syncsh_comp_values=()
+  __syncsh_comp_inserts=()
   __syncsh_comp_descrs=()
-  unset __syncsh_comp_ctx __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_lbuffer __syncsh_comp_rbuffer
+  typeset -g __syncsh_comp_ctx=1
+  typeset -g __syncsh_comp_prefix="$PREFIX"
+  typeset -g __syncsh_comp_suffix="$SUFFIX"
+  typeset -g __syncsh_comp_lbuffer="$LBUFFER"
+  typeset -g __syncsh_comp_rbuffer="$RBUFFER"
   integer had_compadd=0
   if (( ${+functions[compadd]} )); then
     had_compadd=1
@@ -527,6 +627,7 @@ zle -C __syncsh_comp_list list-choices __syncsh_comp_list_fn
 __syncsh_suggest_completions() {
   emulate -L zsh
   __syncsh_comp_values=()
+  __syncsh_comp_inserts=()
   __syncsh_comp_descrs=()
   unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
   [[ -n ${__syncsh_in_comp:-} ]] && return
@@ -540,12 +641,14 @@ __syncsh_comp_cache_store() {
   emulate -L zsh
   __syncsh_comp_cache_key="$BUFFER"
   __syncsh_comp_cache_values=("${__syncsh_comp_values[@]}")
+  __syncsh_comp_cache_inserts=("${__syncsh_comp_inserts[@]}")
   __syncsh_comp_cache_descrs=("${__syncsh_comp_descrs[@]}")
 }
 
 __syncsh_comp_cache_clear() {
   __syncsh_comp_cache_key=""
   __syncsh_comp_cache_values=()
+  __syncsh_comp_cache_inserts=()
   __syncsh_comp_cache_descrs=()
   unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
 }
@@ -870,15 +973,17 @@ __syncsh_suggest_fetch_hist() {
 
 __syncsh_suggest_rebuild() {
   emulate -L zsh
-  local -a hist cvals cdescrs
-  local typed s m d hs applied
+  local -a hist cvals cdescrs cinserts
+  local typed s m d hs applied insert
   local -i i dup
   hist=("${__syncsh_suggest_hist[@]}")
   cvals=()
   cdescrs=()
+  cinserts=()
   if [[ ${__syncsh_comp_cache_key:-} == "$__syncsh_suggest_typed" ]]; then
     cvals=("${__syncsh_comp_cache_values[@]}")
     cdescrs=("${__syncsh_comp_cache_descrs[@]}")
+    cinserts=("${__syncsh_comp_cache_inserts[@]}")
   fi
   __syncsh_suggest_items=()
   __syncsh_suggest_kinds=()
@@ -897,10 +1002,11 @@ __syncsh_suggest_rebuild() {
   for (( i=1; i<=$#cvals; i++ )); do
     m="${cvals[i]}"
     [[ -n $m ]] || continue
+    insert="${cinserts[i]:-$m}"
     if (( ${+__syncsh_comp_lbuffer} )); then
-      applied="${__syncsh_comp_lbuffer%$__syncsh_comp_prefix}${m}${__syncsh_comp_rbuffer#$__syncsh_comp_suffix}"
+      applied="${__syncsh_comp_lbuffer%$__syncsh_comp_prefix}${insert}${__syncsh_comp_rbuffer#$__syncsh_comp_suffix}"
     else
-      applied="$m"
+      applied="$insert"
     fi
     [[ -n $applied && $applied != "$typed" ]] || continue
     dup=0
