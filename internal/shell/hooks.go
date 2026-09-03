@@ -121,6 +121,11 @@ __syncsh_preexec() {
 
 __syncsh_precmd() {
   local code=$?
+  # Drop accept-time suppress after the command finishes so the next line can
+  # show ghost text again. Must outlive accept-line: oh-my-posh's
+  # zle-line-init runs reset-prompt after recursive-edit returns, and clearing
+  # suppress earlier lets the ghost be painted back into the frozen line.
+  (( ${+__syncsh_suggest_suppress} )) && __syncsh_suggest_suppress=0
   if [[ -n "${__syncsh_id:-}" ]]; then
     __syncsh_rpc end "$__syncsh_id" "$code" || "$__syncsh_bin" history end --id "$__syncsh_id" --exit "$code" >/dev/null 2>&1 || true
     unset __syncsh_id
@@ -129,39 +134,44 @@ __syncsh_precmd() {
 
 syncsh-search() {
   local selected run=0
-  # Block suggest redraw/update for the whole widget. oh-my-posh and friends
-  # invoke reset-prompt under their own WIDGET names, which bypass the
-  # accept-line/redisplay case and would rebuild the multi-line menu.
-  typeset -gi __syncsh_suggest_suppress=1
-  {
-    if (( ${+functions[__syncsh_suggest_clear]} )); then
-      __syncsh_suggest_clear
-      zle redisplay
-    fi
-    zle -I
-    selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || return
-    if [[ "$selected" == __syncsh_accept__:* ]]; then
-      selected="${selected#__syncsh_accept__:}"
-      run=1
-    fi
-    if [[ -n "$selected" ]]; then
-      LBUFFER="$selected"
-      RBUFFER=""
-    fi
-    if (( ${+functions[__syncsh_suggest_clear]} )); then
-      __syncsh_suggest_clear
-      # Redisplay first (known cursor), then clear below - reverse order misses
-      # rows restored by alt-screen.
-      zle redisplay
-      [[ -n ${terminfo[ed]:-} ]] && echoti ed
-    fi
-    zle reset-prompt
-    # Use the builtin. Nested "zle accept-line" runs the suggest wrapper with
-    # WIDGET still set to syncsh-search, so orig lookup is empty → "No such widget".
-    (( run )) && zle .accept-line
-  } always {
+  # Block suggest redraw/update for the whole widget and until precmd.
+  # oh-my-posh runs reset-prompt after recursive-edit returns; clearing
+  # suppress in an always-block would let the ghost be painted back into the
+  # frozen command line (e.g. "jj f" when only "jj" ran).
+  __syncsh_suggest_suppress=1
+  if (( ${+functions[__syncsh_suggest_clear]} )); then
+    __syncsh_suggest_clear
+    zle redisplay
+  fi
+  zle -I
+  selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || {
     __syncsh_suggest_suppress=0
+    return
   }
+  if [[ "$selected" == __syncsh_accept__:* ]]; then
+    selected="${selected#__syncsh_accept__:}"
+    run=1
+  fi
+  if [[ -n "$selected" ]]; then
+    LBUFFER="$selected"
+    RBUFFER=""
+  fi
+  if (( ${+functions[__syncsh_suggest_clear]} )); then
+    __syncsh_suggest_clear
+    # Redisplay first (known cursor), then clear below - reverse order misses
+    # rows restored by alt-screen.
+    zle redisplay
+    [[ -n ${terminfo[ed]:-} ]] && echoti ed
+  fi
+  zle reset-prompt
+  # Use the builtin. Nested "zle accept-line" runs the suggest wrapper with
+  # WIDGET still set to syncsh-search, so orig lookup is empty → "No such widget".
+  if (( run )); then
+    zle .accept-line
+    # suppress stays 1 until __syncsh_precmd
+  else
+    __syncsh_suggest_suppress=0
+  fi
 }
 
 zle -N syncsh-search
@@ -191,6 +201,7 @@ __syncsh_suggest_accept=(%s)
 typeset -gA __syncsh_suggest_fallback
 typeset -g __syncsh_suggest_last=""
 typeset -gi __syncsh_suggest_suppress=0
+typeset -gi __syncsh_suggest_clearing=0
 # zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes
 typeset -g __syncsh_suggest_hl=fg=238
 zle_highlight=(${zle_highlight:#suffix:*})
@@ -286,19 +297,16 @@ __syncsh_suggest_bind_clear() {
     fi
     # One wrapper per widget. A shared wrapper keyed on $WIDGET breaks when
     # another widget (syncsh-search) invokes accept-line: $WIDGET stays the caller.
-    # Suppress + clear + redisplay so multi-line POSTDISPLAY is erased even when
-    # the prompt theme's WIDGET name would otherwise rebuild the menu.
+    # Suppress until precmd (not an always-block): oh-my-posh's zle-line-init
+    # does reset-prompt after recursive-edit returns from accept-line. Clearing
+    # suppress there rebuilds POSTDISPLAY into the frozen "jj f" line.
     eval "__syncsh_suggest_clear_then_$w() {
       emulate -L zsh
-      typeset -gi __syncsh_suggest_suppress=1
-      {
-        __syncsh_suggest_clear
-        zle redisplay
-        [[ -n ${terminfo[ed]:-} ]] && echoti ed
-        zle $orig
-      } always {
-        __syncsh_suggest_suppress=0
-      }
+      # Assign the global (do not typeset: that would shadow it).
+      __syncsh_suggest_suppress=1
+      __syncsh_suggest_clear
+      zle -R
+      zle $orig
     }"
     zle -N "$w" "__syncsh_suggest_clear_then_$w"
   done
@@ -813,7 +821,7 @@ __syncsh_suggest_highlight() {
 __syncsh_suggest_clear() {
   # Re-entrancy guard: line-pre-redraw can nest into clear while we unset state.
   (( ${+__syncsh_suggest_clearing} )) && (( __syncsh_suggest_clearing )) && return
-  typeset -gi __syncsh_suggest_clearing=1
+  __syncsh_suggest_clearing=1
   unset POSTDISPLAY __syncsh_suggest_suffix __syncsh_suggest_typed __syncsh_suggest_ghost
   __syncsh_suggest_last=""
   __syncsh_suggest_items=()

@@ -72,6 +72,17 @@ func TestCtrlRBindings(t *testing.T) {
 	if !strings.Contains(zsh, "__syncsh_suggest_suppress") {
 		t.Fatal("syncsh-search must suppress suggest redraw during ctrl+r/accept")
 	}
+	if strings.Contains(zsh, `} always {
+    __syncsh_suggest_suppress=0
+  }`) || strings.Contains(zsh, `} always {
+        __syncsh_suggest_suppress=0
+      }`) {
+		t.Fatal("suppress must stay set until precmd; clearing in always-block restores ghost under oh-my-posh")
+	}
+	if !strings.Contains(zsh, `__syncsh_suggest_suppress} )) && __syncsh_suggest_suppress=0`) &&
+		!strings.Contains(zsh, "suggest_suppress=0") {
+		t.Fatal("precmd must clear suggest suppress after the command")
+	}
 	menu, _ := Integration("zsh", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true, SuggestAccept: []string{"Right"}})
 	if !strings.Contains(menu, `__syncsh_suggest_idx > 0`) {
 		t.Fatal("multi-line suggest menu must only paint while navigating (idx>0)")
@@ -130,8 +141,26 @@ func TestZshInlineSuggest(t *testing.T) {
 	if !strings.Contains(on, "__syncsh_suggest_clear") || strings.Count(on, `BUFFER="$BUFFER$POSTDISPLAY"`) != 1 {
 		t.Fatal("Enter must drop ghost text; only the accept widget may merge POSTDISPLAY")
 	}
+	if strings.Contains(on, "typeset -gi __syncsh_suggest_suppress=1") {
+		t.Fatal("suppress must be assigned globally; typeset inside a widget shadows it")
+	}
 	if strings.Contains(on, `[[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_$w ]] && continue`) {
 		t.Fatal("accept-line wrapper must be refreshed on re-eval, not skipped when already bound")
+	}
+	if strings.Contains(on, `__syncsh_suggest_clear
+        zle redisplay
+        zle $orig`) {
+		t.Fatal("accept-line must use zle -R after clear, not zle redisplay")
+	}
+	if !strings.Contains(on, `__syncsh_suggest_clear
+      zle -R
+      zle $orig`) {
+		t.Fatal("accept-line must clear then zle -R so ghost POSTDISPLAY is not frozen into scrollback")
+	}
+	if strings.Contains(on, `} always {
+        __syncsh_suggest_suppress=0
+      }`) {
+		t.Fatal("accept-line must not clear suppress in always; oh-my-posh reset-prompt would restore ghost")
 	}
 	if !strings.Contains(on, "re-eval") && !strings.Contains(on, "always refresh the wrapper body") {
 		t.Fatal("accept-line wrapper must be redefined on every init")
