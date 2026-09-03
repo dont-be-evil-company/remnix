@@ -18,6 +18,20 @@ task build
 
 `task test` runs unit tests. `task ci` also runs `golangci-lint`.
 
+### Scale test
+
+`go test ./...` skips the million-command timing test. To measure **Ctrl+R**
+unique search, **ghost text** / **LSP-style suggest menu**, and **sync
+encrypt** (checkpoint snapshot + event bundle) against 1 000 000 unique
+commands:
+
+```sh
+SYNCSH_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
+```
+
+Use `SYNCSH_SCALE_N=10000` for a shorter dry run. `-short` skips the test.
+Timings print with `-v`. See [docs/architecture.md](docs/architecture.md#scale-test).
+
 ## Quick start
 
 ### New history
@@ -218,13 +232,15 @@ syncsh device prune <device-id>
 
 ```sh
 syncsh doctor
+syncsh database compact
 syncsh sync status
 syncsh daemon status
 syncsh version --verbose    # includes pinned rclone engine
 ```
 
-`doctor` reports config, SQLite, keys, transport, repository probe, and partial
-setup. The daemon never opens a browser; auth failures back off and suggest
+`doctor` reports config, SQLite size and b-tree usage, keys, transport, repository probe, and partial
+setup. `syncsh database compact` checkpoints the WAL and vacuums the local history database.
+The daemon never opens a browser; auth failures back off and suggest
 `syncsh remote reconnect`. `syncsh daemon status` (and `doctor`) include human
 durations for the last tick, for example `sync=1m6s gc=12ms`.
 
@@ -232,7 +248,7 @@ durations for the last tick, for example `sync=1m6s gc=12ms`.
 
 Protocol, threat model, wizard keys, and rclone internals:
 
-- [docs/architecture.md](docs/architecture.md)
+- [docs/architecture.md](docs/architecture.md) (includes the 1M-command scale test)
 - [docs/sync-protocol.md](docs/sync-protocol.md)
 - [docs/cryptography.md](docs/cryptography.md)
 - [docs/threat-model.md](docs/threat-model.md)
@@ -254,6 +270,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh key ...` | Slots, rotation, recover |
 | `syncsh search` / `suggest` / `stats` / `inspect` / `import` | Local history |
 | `syncsh gc` | Compact remote objects |
+| `syncsh database compact` | Checkpoint WAL and vacuum local SQLite |
 | `syncsh doctor` | Read-only diagnostics |
 | `syncsh init zsh\|bash\|fish` | Shell integration |
 | `syncsh version` | Version (`-v` includes rclone) |

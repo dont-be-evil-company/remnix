@@ -40,6 +40,28 @@ the cloud directly.
 The exclusive mutator for remote writes is `internal/app`’s file lock
 (`syncsh.lock`), used by daemon, manual sync, GC, and key/device ops.
 
+## Scale test
+
+`TestScaleMillionUniqueCommands` in `internal/history` seeds unique commands
+into a temp SQLite file and reports wall time for the interactive paths:
+
+| Step | What it exercises |
+| --- | --- |
+| `ctrl+r unique list (limit 5000)` | Widget load (`history.Filter{Unique: true, Limit: 5000}`) |
+| `ctrl+r rank fuzzy query` | In-memory ranking used after Ctrl+R / `syncsh search --interactive` |
+| `ctrl+r unique list + cwd` | Same unique scan filtered by working directory |
+| `ghost-text end-to-end` | Prefix SQL + `search.BestSuggestion` (inline completion) |
+| `lsp-style menu end-to-end` | Prefix SQL + `search.Suggestions` with `suggest.menu_max` |
+| `sync encrypt checkpoint snapshot` | gzip + AEAD snapshot of all rows |
+| `sync encrypt event bundle` | CBOR event encode + `bundle.Pack` / unpack |
+
+Skipped unless `SYNCSH_SCALE=1` is set (`go test ./...` and `-short` skip it).
+Default size is 1 000 000 unique commands; override with `SYNCSH_SCALE_N`.
+
+```sh
+SYNCSH_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
+```
+
 Further reading: [sync-protocol.md](sync-protocol.md),
 [cryptography.md](cryptography.md), [rclone.md](rclone.md),
 [threat-model.md](threat-model.md).

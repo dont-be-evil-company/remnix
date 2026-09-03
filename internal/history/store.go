@@ -17,17 +17,45 @@ func NewStore(d *db.DB) *Store {
 	return &Store{db: d.SQL}
 }
 
+func NewSQLStore(sqlDB *sql.DB) *Store {
+	return &Store{db: sqlDB}
+}
+
 func (s *Store) Insert(e Entry) (bool, error) {
+	return InsertExec(s.db, e)
+}
+
+func InsertTx(tx *sql.Tx, e Entry) (bool, error) {
+	return InsertExec(tx, e)
+}
+
+func InsertExec(eq dbExec, e Entry) (bool, error) {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	res, err := s.db.Exec(`
+	cwdID, err := internID(eq, "intern_cwd", e.Cwd)
+	if err != nil {
+		return false, err
+	}
+	sessID, err := internID(eq, "intern_session", e.SessionID)
+	if err != nil {
+		return false, err
+	}
+	hostID, err := internID(eq, "intern_hostname", e.Hostname)
+	if err != nil {
+		return false, err
+	}
+	shellID, err := internID(eq, "intern_shell", e.Shell)
+	if err != nil {
+		return false, err
+	}
+	res, err := eq.Exec(`
 INSERT OR IGNORE INTO history (
-    id, command, start_ts, end_ts, duration_ms, exit_status, cwd, session_id,
-    hostname, device_id, shell, deleted, origin_device_id, origin_seq, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.Command, e.StartTS.UnixMilli(), unixMilliPtr(e.EndTS), e.DurationMs, e.ExitStatus,
-		nullString(e.Cwd), nullString(e.SessionID), nullString(e.Hostname), e.DeviceID, nullString(e.Shell),
+    id, command, command_hash, start_ts, end_ts, duration_ms, exit_status, cwd_id, session_id,
+    hostname_id, device_id, shell_id, deleted, origin_device_id, origin_seq, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.Command, HashCommand(e.Command), e.StartTS.UnixMilli(), unixMilliPtr(e.EndTS), e.DurationMs, e.ExitStatus,
+		cwdID, sessID, hostID, e.DeviceID, shellID,
 		boolToInt(e.Deleted), nullString(e.OriginDeviceID), e.OriginSeq, e.CreatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -40,11 +68,65 @@ INSERT OR IGNORE INTO history (
 	return n > 0, nil
 }
 
+func historySelect(alias string) string {
+	p := alias
+	if p == "" {
+		p = "h"
+	}
+	return strings.Join([]string{
+		p + ".id",
+		p + ".command",
+		p + ".start_ts",
+		p + ".end_ts",
+		p + ".duration_ms",
+		p + ".exit_status",
+		p + "_cwd.value",
+		p + "_session.value",
+		p + "_host.value",
+		p + ".device_id",
+		p + "_shell.value",
+		p + ".deleted",
+		p + ".origin_device_id",
+		p + ".origin_seq",
+		p + ".created_at",
+	}, ", ")
+}
+
+func historyFrom(alias string) string {
+	p := alias
+	if p == "" {
+		p = "h"
+	}
+	return `history ` + p + `
+LEFT JOIN intern_cwd ` + p + `_cwd ON ` + p + `_cwd.id = ` + p + `.cwd_id
+LEFT JOIN intern_session ` + p + `_session ON ` + p + `_session.id = ` + p + `.session_id
+LEFT JOIN intern_hostname ` + p + `_host ON ` + p + `_host.id = ` + p + `.hostname_id
+LEFT JOIN intern_shell ` + p + `_shell ON ` + p + `_shell.id = ` + p + `.shell_id`
+}
+
 func (s *Store) Get(id string) (Entry, bool, error) {
-	row := s.db.QueryRow(`
-SELECT id, command, start_ts, end_ts, duration_ms, exit_status, cwd, session_id,
-       hostname, device_id, shell, deleted, origin_device_id, origin_seq, created_at
-FROM history WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT `+historySelect("h")+` FROM `+historyFrom("h")+` WHERE h.id = ?`, id)
+	return scanFound(row)
+}
+
+func (s *Store) ByOrigin(deviceID string, seq int64) (Entry, bool, error) {
+	row := s.db.QueryRow(`SELECT `+historySelect("h")+` FROM `+historyFrom("h")+`
+WHERE h.origin_device_id = ? AND h.origin_seq = ?`, deviceID, seq)
+	return scanFound(row)
+}
+
+func (s *Store) ListByOriginRange(deviceID string, start, end int64) ([]Entry, error) {
+	rows, err := s.db.Query(`SELECT `+historySelect("h")+` FROM `+historyFrom("h")+`
+WHERE h.origin_device_id = ? AND h.origin_seq >= ? AND h.origin_seq <= ?
+ORDER BY h.origin_seq`, deviceID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEntries(rows)
+}
+
+func scanFound(row *sql.Row) (Entry, bool, error) {
 	e, err := scanEntry(row)
 	if err == sql.ErrNoRows {
 		return Entry{}, false, nil
@@ -91,22 +173,6 @@ type Filter struct {
 	Limit          int
 }
 
-var historyColumnNames = []string{
-	"id", "command", "start_ts", "end_ts", "duration_ms", "exit_status", "cwd", "session_id",
-	"hostname", "device_id", "shell", "deleted", "origin_device_id", "origin_seq", "created_at",
-}
-
-func historySelect(alias string) string {
-	if alias == "" {
-		return strings.Join(historyColumnNames, ", ")
-	}
-	out := make([]string, len(historyColumnNames))
-	for i, c := range historyColumnNames {
-		out[i] = alias + "." + c
-	}
-	return strings.Join(out, ", ")
-}
-
 func (s *Store) List(f Filter) ([]Entry, error) {
 	var b strings.Builder
 	var args []any
@@ -115,17 +181,19 @@ func (s *Store) List(f Filter) ([]Entry, error) {
 		predH2, argsH2 := f.predicates("h2")
 		b.WriteString("SELECT ")
 		b.WriteString(historySelect("h"))
-		b.WriteString(`
-FROM history h
-WHERE 1=1`)
+		b.WriteString("\nFROM ")
+		b.WriteString(historyFrom("h"))
+		b.WriteString("\nWHERE 1=1")
 		b.WriteString(predH)
 		b.WriteString(`
 AND NOT EXISTS (
-  SELECT 1 FROM history h2
+  SELECT 1 FROM `)
+		b.WriteString(historyFrom("h2"))
+		b.WriteString(`
   WHERE 1=1`)
 		b.WriteString(predH2)
 		b.WriteString(`
-  AND h2.command = h.command
+  AND h2.command_hash = h.command_hash
   AND (h2.start_ts, h2.id) > (h.start_ts, h.id)
 )
 ORDER BY h.start_ts DESC`)
@@ -133,13 +201,14 @@ ORDER BY h.start_ts DESC`)
 		args = append(args, argsH2...)
 	} else {
 		b.WriteString("SELECT ")
-		b.WriteString(historySelect(""))
-		b.WriteString(`
-FROM history WHERE 1=1`)
-		pred, predArgs := f.predicates("")
+		b.WriteString(historySelect("h"))
+		b.WriteString("\nFROM ")
+		b.WriteString(historyFrom("h"))
+		b.WriteString("\nWHERE 1=1")
+		pred, predArgs := f.predicates("h")
 		b.WriteString(pred)
 		args = append(args, predArgs...)
-		b.WriteString(` ORDER BY start_ts DESC`)
+		b.WriteString(` ORDER BY h.start_ts DESC`)
 	}
 	if f.Limit > 0 {
 		b.WriteString(` LIMIT ?`)
@@ -169,10 +238,10 @@ func (s *Store) SuggestPrefixCandidates(prefix string, limit int) ([]Entry, erro
 		limit = 32
 	}
 	rows, err := s.db.Query(`
-SELECT `+historySelect("")+`
-FROM history
-WHERE deleted = 0 AND command LIKE ? ESCAPE '\' AND command != ?
-ORDER BY start_ts DESC, id DESC
+SELECT `+historySelect("h")+`
+FROM `+historyFrom("h")+`
+WHERE h.deleted = 0 AND h.command LIKE ? ESCAPE '\' AND h.command != ?
+ORDER BY h.start_ts DESC, h.id DESC
 LIMIT ?`, likePrefix(prefix), prefix, limit)
 	if err != nil {
 		return nil, err
@@ -189,9 +258,9 @@ func likePrefix(s string) string {
 }
 
 func (s *Store) ListByCommand(command string) ([]Entry, error) {
-	rows, err := s.db.Query(`SELECT `+historySelect("")+`
-FROM history WHERE deleted = 0 AND command = ?
-ORDER BY start_ts DESC, id DESC`, command)
+	rows, err := s.db.Query(`SELECT `+historySelect("h")+`
+FROM `+historyFrom("h")+` WHERE h.deleted = 0 AND h.command = ?
+ORDER BY h.start_ts DESC, h.id DESC`, command)
 	if err != nil {
 		return nil, err
 	}
@@ -242,13 +311,15 @@ SELECT
     agg.first_ts,
     agg.last_ts,
     h.exit_status,
-    h.cwd,
-    h.hostname,
+    h_cwd.value,
+    h_host.value,
     h.duration_ms
-FROM history h
+FROM `)
+	b.WriteString(historyFrom("h"))
+	b.WriteString(`
 INNER JOIN (
     SELECT
-        command,
+        command_hash,
         COUNT(*) AS runs,
         COUNT(*) FILTER (WHERE exit_status = 0) AS success,
         COUNT(*) FILTER (WHERE exit_status IS NOT NULL AND exit_status != 0) AS failed,
@@ -262,18 +333,18 @@ INNER JOIN (
 		args = append(args, f.Query)
 	}
 	b.WriteString(`
-    GROUP BY command`)
+    GROUP BY command_hash`)
 	if f.Sort == SortFailed {
 		b.WriteString(`
     HAVING COUNT(*) FILTER (WHERE exit_status IS NOT NULL AND exit_status != 0) > 0`)
 	}
 	b.WriteString(`
-) agg ON agg.command = h.command
+) agg ON agg.command_hash = h.command_hash
 WHERE h.deleted = 0
 AND NOT EXISTS (
     SELECT 1 FROM history h2
     WHERE h2.deleted = 0
-    AND h2.command = h.command
+    AND h2.command_hash = h.command_hash
     AND (h2.start_ts, h2.id) > (h.start_ts, h.id)
 )`)
 	switch f.Sort {
@@ -341,11 +412,12 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 }
 
 func (f Filter) predicates(alias string) (string, []any) {
+	p := alias
+	if p == "" {
+		p = "h"
+	}
 	col := func(name string) string {
-		if alias == "" {
-			return name
-		}
-		return alias + "." + name
+		return p + "." + name
 	}
 	var b strings.Builder
 	var args []any
@@ -353,19 +425,19 @@ func (f Filter) predicates(alias string) (string, []any) {
 		b.WriteString(" AND " + col("deleted") + " = 0")
 	}
 	if f.Cwd != "" {
-		b.WriteString(" AND " + col("cwd") + " = ?")
+		b.WriteString(" AND " + col("cwd_id") + " = (SELECT id FROM intern_cwd WHERE value = ?)")
 		args = append(args, f.Cwd)
 	}
 	if f.Host != "" {
-		b.WriteString(" AND " + col("hostname") + " = ?")
+		b.WriteString(" AND " + col("hostname_id") + " = (SELECT id FROM intern_hostname WHERE value = ?)")
 		args = append(args, f.Host)
 	}
 	if f.Shell != "" {
-		b.WriteString(" AND " + col("shell") + " = ?")
+		b.WriteString(" AND " + col("shell_id") + " = (SELECT id FROM intern_shell WHERE value = ?)")
 		args = append(args, f.Shell)
 	}
 	if f.Session != "" {
-		b.WriteString(" AND " + col("session_id") + " = ?")
+		b.WriteString(" AND " + col("session_id") + " = (SELECT id FROM intern_session WHERE value = ?)")
 		args = append(args, f.Session)
 	}
 	if f.DeviceID != "" {

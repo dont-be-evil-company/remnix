@@ -86,6 +86,12 @@ func Migrate(sqlDB *sql.DB) error {
 				return fmt.Errorf("apply migration %s: %w", m.ID, err)
 			}
 		}
+		if hook := postHooks[m.ID]; hook != nil {
+			if err := hook(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("apply migration %s: %w", m.ID, err)
+			}
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_migrations (id, checksum, applied_at) VALUES (?, ?, ?)`,
 			m.ID, m.Checksum, time.Now().Unix(),

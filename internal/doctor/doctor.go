@@ -56,12 +56,40 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	if err != nil {
 		check(false, "migrations: "+err.Error())
 	} else {
+		thinApplied := false
 		for _, s := range st {
 			if !s.Applied || s.Mismatch {
 				check(false, "migration issue: "+s.ID)
 			}
+			if s.ID == "0003_thin_events" && s.Applied {
+				thinApplied = true
+			}
 		}
 		check(true, fmt.Sprintf("migrations: %d applied", len(st)))
+		if thinApplied {
+			n, err := db.HistoryEventPayloads(a.DB.SQL)
+			if err != nil {
+				check(false, "sync_events payloads: "+err.Error())
+			} else if n > 0 {
+				check(false, fmt.Sprintf("sync_events still stores %d history payloads", n))
+			} else {
+				check(true, "sync_events: history payloads stripped")
+			}
+		}
+	}
+	if info, err := db.PageInfoOf(a.DB.SQL); err != nil {
+		check(false, "db size: "+err.Error())
+	} else {
+		check(true, fmt.Sprintf("db size: %s (%d pages, freelist %d)", db.FormatBytes(info.Bytes), info.PageCount, info.Freelist))
+	}
+	if btrees, err := db.BTreeStats(a.DB.SQL); err == nil {
+		limit := 8
+		if len(btrees) < limit {
+			limit = len(btrees)
+		}
+		for _, s := range btrees[:limit] {
+			check(true, fmt.Sprintf("  db %s %s", s.Name, db.FormatBytes(s.Size)))
+		}
 	}
 
 	devs, _ := device.NewStore(a.DB).List()

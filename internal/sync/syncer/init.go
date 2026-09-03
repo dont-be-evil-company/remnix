@@ -99,7 +99,10 @@ func (e *Engine) EnqueueHistoryCreated(entry history.Entry) error {
 	if err := e.events.MarkApplied(e.opts.DeviceID, seq); err != nil {
 		return err
 	}
-	return e.heads.Set(e.opts.DeviceID, seq)
+	if err := e.heads.Set(e.opts.DeviceID, seq); err != nil {
+		return err
+	}
+	return e.events.CompactUpToHeads()
 }
 
 func (e *Engine) EnqueueHistoryTombstoned(entry history.Entry) error {
@@ -124,7 +127,10 @@ func (e *Engine) EnqueueHistoryTombstoned(entry history.Entry) error {
 	if err := e.events.MarkApplied(e.opts.DeviceID, seq); err != nil {
 		return err
 	}
-	return e.heads.Set(e.opts.DeviceID, seq)
+	if err := e.heads.Set(e.opts.DeviceID, seq); err != nil {
+		return err
+	}
+	return e.events.CompactUpToHeads()
 }
 
 func (e *Engine) withRemote(ctx context.Context, fn func() error) error {

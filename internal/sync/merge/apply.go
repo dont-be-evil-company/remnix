@@ -59,15 +59,7 @@ func applyCreated(tx *sql.Tx, ev event.Event) error {
 		d := p.DurationMs
 		e.DurationMs = &d
 	}
-	_, err = tx.Exec(`
-INSERT OR IGNORE INTO history (
-    id, command, start_ts, end_ts, duration_ms, exit_status, cwd, session_id,
-    hostname, device_id, shell, deleted, origin_device_id, origin_seq, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		e.ID, e.Command, e.StartTS.UnixMilli(), unixMilliPtr(e.EndTS), e.DurationMs, e.ExitStatus,
-		nullString(e.Cwd), nullString(e.SessionID), nullString(e.Hostname), e.DeviceID, nullString(e.Shell),
-		e.OriginDeviceID, ev.Seq, time.Now().UnixMilli(),
-	)
+	_, err = history.InsertTx(tx, e)
 	return err
 }
 
@@ -92,10 +84,15 @@ func applyTombstone(tx *sql.Tx, ev event.Event) error {
 			if id == "" {
 				id = fmt.Sprintf("tombstone:%s:%d", p.OriginDeviceID, p.OriginSeq)
 			}
-			_, err = tx.Exec(`
-INSERT OR IGNORE INTO history (
-    id, command, start_ts, device_id, deleted, origin_device_id, origin_seq, created_at
-) VALUES (?, '', 0, ?, 1, ?, ?, ?)`, id, p.OriginDeviceID, p.OriginDeviceID, p.OriginSeq, time.Now().UnixMilli())
+			seq := p.OriginSeq
+			_, err = history.InsertTx(tx, history.Entry{
+				ID:             id,
+				StartTS:        time.UnixMilli(0).UTC(),
+				DeviceID:       p.OriginDeviceID,
+				Deleted:        true,
+				OriginDeviceID: p.OriginDeviceID,
+				OriginSeq:      &seq,
+			})
 			if err != nil {
 				return err
 			}
@@ -124,13 +121,6 @@ ON CONFLICT(id) DO UPDATE SET
 		ev.DeviceID, p.Name, nullString(p.Hostname), status, time.Now().UnixMilli(),
 	)
 	return err
-}
-
-func unixMilliPtr(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return t.UnixMilli()
 }
 
 func nullString(s string) any {

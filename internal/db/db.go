@@ -9,6 +9,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const walAutocheckpointPages = 256
+
 type DB struct {
 	SQL *sql.DB
 }
@@ -31,6 +33,10 @@ func Open(path string) (*DB, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("set synchronous: %w", err)
 	}
+	if _, err := sqlDB.Exec(fmt.Sprintf(`PRAGMA wal_autocheckpoint=%d`, walAutocheckpointPages)); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("set wal_autocheckpoint: %w", err)
+	}
 	return &DB{SQL: sqlDB}, nil
 }
 
@@ -50,7 +56,13 @@ func (d *DB) Close() error {
 	if d == nil || d.SQL == nil {
 		return nil
 	}
+	_ = CheckpointWAL(d.SQL)
 	return d.SQL.Close()
+}
+
+func CheckpointWAL(sqlDB *sql.DB) error {
+	_, err := sqlDB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
 }
 
 func IntegrityCheck(sqlDB *sql.DB) (string, error) {

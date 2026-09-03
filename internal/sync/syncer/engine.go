@@ -374,7 +374,7 @@ func (e *Engine) pullBundles(ctx context.Context, smks map[string][]byte) error 
 			return err
 		}
 	}
-	return nil
+	return e.events.CompactUpToHeads()
 }
 
 func (e *Engine) applyEvents(evs []event.Event) error {
@@ -391,18 +391,18 @@ func (e *Engine) applyEvents(evs []event.Event) error {
 		if exists {
 			continue
 		}
-		raw, err := event.Encode(ev)
-		if err != nil {
-			return err
+		var head int64
+		_ = tx.QueryRow(`SELECT seq FROM sync_heads WHERE device_id = ?`, ev.DeviceID).Scan(&head)
+		if ev.Seq <= head {
+			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO sync_events (device_id, seq, event_type, payload, applied, created_at) VALUES (?, ?, ?, ?, 0, ?)`,
-			ev.DeviceID, ev.Seq, ev.Type, raw, ev.TimeUnix); err != nil {
+		if err := event.AppendTx(tx, ev); err != nil {
 			return err
 		}
 		if err := merge.Apply(tx, ev); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE sync_events SET applied = 1 WHERE device_id = ? AND seq = ?`, ev.DeviceID, ev.Seq); err != nil {
+		if err := event.MarkAppliedTx(tx, ev.DeviceID, ev.Seq); err != nil {
 			return err
 		}
 	}
@@ -415,11 +415,9 @@ func (e *Engine) publishLocal(ctx context.Context, smk []byte, active generation
 	if err := e.db.SQL.QueryRow(`SELECT value FROM transport_state WHERE key = ?`, e.publishedSeqKey()).Scan(&lastPubStr); err == nil {
 		lastPub, _ = strconv.ParseInt(lastPubStr, 10, 64)
 	}
-	var maxSeq int64
-	var maxSeqN sql.NullInt64
-	_ = e.db.SQL.QueryRow(`SELECT MAX(seq) FROM sync_events WHERE device_id = ?`, e.opts.DeviceID).Scan(&maxSeqN)
-	if maxSeqN.Valid {
-		maxSeq = maxSeqN.Int64
+	maxSeq, err := e.localMaxSeq()
+	if err != nil {
+		return err
 	}
 	if maxSeq <= lastPub {
 		return nil
@@ -445,7 +443,26 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value`, e.publishedSeqKey(), fmt
 	if err != nil {
 		return err
 	}
-	return e.heads.Set(e.opts.DeviceID, maxSeq)
+	if err := e.heads.Set(e.opts.DeviceID, maxSeq); err != nil {
+		return err
+	}
+	return e.events.CompactUpToHeads()
+}
+
+func (e *Engine) localMaxSeq() (int64, error) {
+	var eventMax, headMax, histMax sql.NullInt64
+	if err := e.db.SQL.QueryRow(`SELECT MAX(seq) FROM sync_events WHERE device_id = ?`, e.opts.DeviceID).Scan(&eventMax); err != nil {
+		return 0, err
+	}
+	_ = e.db.SQL.QueryRow(`SELECT seq FROM sync_heads WHERE device_id = ?`, e.opts.DeviceID).Scan(&headMax)
+	_ = e.db.SQL.QueryRow(`SELECT MAX(origin_seq) FROM history WHERE origin_device_id = ?`, e.opts.DeviceID).Scan(&histMax)
+	n := int64(0)
+	for _, v := range []sql.NullInt64{eventMax, headMax, histMax} {
+		if v.Valid && v.Int64 > n {
+			n = v.Int64
+		}
+	}
+	return n, nil
 }
 
 func (e *Engine) PublishAck(ctx context.Context, checkpointID string) error {

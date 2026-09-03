@@ -88,6 +88,27 @@ func TestListFilters(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("query got %+v", got)
 	}
+	got, err = s.List(Filter{Cwd: "/a", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Command != "git status" || got[0].Cwd != "/a" {
+		t.Fatalf("cwd %+v", got)
+	}
+	got, err = s.List(Filter{Cwd: "/missing", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("missing cwd %+v", got)
+	}
+	var internN int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM intern_cwd`).Scan(&internN); err != nil {
+		t.Fatal(err)
+	}
+	if internN != 2 {
+		t.Fatalf("filter must not intern unknown cwd, got %d", internN)
+	}
 }
 
 func TestListUniqueKeepsNewestPerCommand(t *testing.T) {
@@ -274,5 +295,62 @@ func TestSuggestPrefix(t *testing.T) {
 	got, err = s.SuggestPrefix("100%")
 	if err != nil || got != "100% done" {
 		t.Fatalf("like escape: %q err=%v", got, err)
+	}
+}
+
+func TestInternReusesCwd(t *testing.T) {
+	s := testStore(t)
+	_, _ = s.Insert(Entry{ID: "1", Command: "ls", StartTS: time.UnixMilli(1).UTC(), DeviceID: "d", Cwd: "/proj"})
+	_, _ = s.Insert(Entry{ID: "2", Command: "pwd", StartTS: time.UnixMilli(2).UTC(), DeviceID: "d", Cwd: "/proj"})
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM intern_cwd`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("cwd intern rows %d", n)
+	}
+	got, found, err := s.Get("2")
+	if err != nil || !found || got.Cwd != "/proj" {
+		t.Fatalf("cwd %+v found=%v err=%v", got, found, err)
+	}
+}
+
+func TestInternReusesSessionHostShell(t *testing.T) {
+	s := testStore(t)
+	_, _ = s.Insert(Entry{ID: "1", Command: "ls", StartTS: time.UnixMilli(1).UTC(), DeviceID: "d", SessionID: "s1", Hostname: "box", Shell: "zsh"})
+	_, _ = s.Insert(Entry{ID: "2", Command: "pwd", StartTS: time.UnixMilli(2).UTC(), DeviceID: "d", SessionID: "s1", Hostname: "box", Shell: "zsh"})
+	assertCount := func(table string) {
+		t.Helper()
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("%s intern rows %d", table, n)
+		}
+	}
+	assertCount("intern_session")
+	assertCount("intern_hostname")
+	assertCount("intern_shell")
+	got, err := s.List(Filter{Session: "s1", Host: "box", Shell: "zsh", Limit: 10})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("intern filters: n=%d err=%v", len(got), err)
+	}
+}
+
+func TestCommandHashDedup(t *testing.T) {
+	s := testStore(t)
+	a := Entry{ID: "1", Command: "echo hi", StartTS: time.UnixMilli(1).UTC(), Cwd: "/x", DeviceID: "d"}
+	ok, err := s.Insert(a)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	a.ID = "2"
+	ok, err = s.Insert(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected hash unique index to ignore duplicate")
 	}
 }

@@ -141,6 +141,7 @@ func newDatabaseCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{Use: "migrate", Short: "Apply pending migrations", RunE: runDatabaseMigrate})
 	cmd.AddCommand(&cobra.Command{Use: "status", Short: "Show migration status", RunE: runDatabaseStatus})
 	cmd.AddCommand(&cobra.Command{Use: "doctor", Short: "Check database integrity and migrations", RunE: runDatabaseDoctor})
+	cmd.AddCommand(&cobra.Command{Use: "compact", Short: "Checkpoint WAL, vacuum, and print table sizes", RunE: runDatabaseCompact})
 	return cmd
 }
 
