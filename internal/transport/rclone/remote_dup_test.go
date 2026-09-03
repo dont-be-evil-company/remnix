@@ -484,10 +484,9 @@ func TestDedupeCollapsesDuplicateNames(t *testing.T) {
 	f := newDupFs()
 	tr := &Transport{fs: f, remote: "dup"}
 	ctx := context.Background()
-	info := object.NewStaticObjectInfo("acks/dev.ack", time.Now(), 1, true, nil, f)
 	for i := 0; i < 4; i++ {
 		body := fmt.Sprintf("%d", i)
-		info = object.NewStaticObjectInfo("acks/dev.ack", time.Now().Add(time.Duration(i)*time.Second), int64(len(body)), true, nil, f)
+		info := object.NewStaticObjectInfo("acks/dev.ack", time.Now().Add(time.Duration(i)*time.Second), int64(len(body)), true, nil, f)
 		if _, err := f.Put(ctx, bytes.NewReader([]byte(body)), info); err != nil {
 			t.Fatal(err)
 		}

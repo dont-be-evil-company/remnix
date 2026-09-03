@@ -129,20 +129,39 @@ __syncsh_precmd() {
 
 syncsh-search() {
   local selected run=0
-  selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || return
-  if [[ "$selected" == __syncsh_accept__:* ]]; then
-    selected="${selected#__syncsh_accept__:}"
-    run=1
-  fi
-  if [[ -n "$selected" ]]; then
-    LBUFFER="$selected"
-    RBUFFER=""
-    unset POSTDISPLAY
-  fi
-  zle reset-prompt
-  # Use the builtin. Nested "zle accept-line" runs the suggest wrapper with
-  # WIDGET still set to syncsh-search, so orig lookup is empty → "No such widget".
-  (( run )) && zle .accept-line
+  # Block suggest redraw/update for the whole widget. oh-my-posh and friends
+  # invoke reset-prompt under their own WIDGET names, which bypass the
+  # accept-line/redisplay case and would rebuild the multi-line menu.
+  typeset -gi __syncsh_suggest_suppress=1
+  {
+    if (( ${+functions[__syncsh_suggest_clear]} )); then
+      __syncsh_suggest_clear
+      zle redisplay
+    fi
+    zle -I
+    selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || return
+    if [[ "$selected" == __syncsh_accept__:* ]]; then
+      selected="${selected#__syncsh_accept__:}"
+      run=1
+    fi
+    if [[ -n "$selected" ]]; then
+      LBUFFER="$selected"
+      RBUFFER=""
+    fi
+    if (( ${+functions[__syncsh_suggest_clear]} )); then
+      __syncsh_suggest_clear
+      # Redisplay first (known cursor), then clear below - reverse order misses
+      # rows restored by alt-screen.
+      zle redisplay
+      [[ -n ${terminfo[ed]:-} ]] && echoti ed
+    fi
+    zle reset-prompt
+    # Use the builtin. Nested "zle accept-line" runs the suggest wrapper with
+    # WIDGET still set to syncsh-search, so orig lookup is empty → "No such widget".
+    (( run )) && zle .accept-line
+  } always {
+    __syncsh_suggest_suppress=0
+  }
 }
 
 zle -N syncsh-search
@@ -171,6 +190,7 @@ typeset -ga __syncsh_suggest_accept
 __syncsh_suggest_accept=(%s)
 typeset -gA __syncsh_suggest_fallback
 typeset -g __syncsh_suggest_last=""
+typeset -gi __syncsh_suggest_suppress=0
 # zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes
 typeset -g __syncsh_suggest_hl=fg=238
 zle_highlight=(${zle_highlight:#suffix:*})
@@ -189,11 +209,13 @@ __syncsh_suggest_highlight() {
 
 __syncsh_suggest_clear() {
   unset POSTDISPLAY
+  __syncsh_suggest_last=""
   __syncsh_suggest_highlight
 }
 
 __syncsh_suggest_update() {
   emulate -L zsh
+  (( __syncsh_suggest_suppress )) && return
   # POSTDISPLAY is appended after BUFFER, not the cursor. Matching on
   # LBUFFER makes the ghost overlap RBUFFER as soon as the cursor moves left.
   if [[ -z $BUFFER ]]; then
@@ -223,8 +245,17 @@ __syncsh_suggest_update() {
 
 __syncsh_suggest_redraw() {
   [[ -n ${__syncsh_in_comp:-} ]] && return
+  # Hard stop while ctrl+r / accept-line is tearing down the multi-line menu.
+  # Prompt themes (oh-my-posh) re-enter redraw under their own WIDGET names.
+  if (( __syncsh_suggest_suppress )); then
+    __syncsh_suggest_clear
+    return
+  fi
+  # "zle redisplay" / "zle reset-prompt" set WIDGET to those names, not the
+  # caller. Updating here rebuilds the multi-line menu and can recurse through
+  # compsys (FUNCNEST) or leave the box in scrollback on accept-line.
   case $WIDGET in
-    accept-line|accept-and-hold|accept-line-and-down-history|accept-and-infer-next-history)
+    accept-line|accept-and-hold|accept-line-and-down-history|accept-and-infer-next-history|syncsh-search|redisplay|reset-prompt)
       __syncsh_suggest_clear
       return
       ;;
@@ -236,26 +267,38 @@ __syncsh_suggest_bind_clear() {
   emulate -L zsh
   local w orig
   for w in accept-line accept-and-hold accept-line-and-down-history accept-and-infer-next-history; do
-    [[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_$w ]] && continue
     orig="__syncsh_suggest_orig_$w"
-    case "${widgets[$w]:-}" in
-      user:*)
-        zle -A "$w" "$orig"
-        ;;
-      builtin|'')
-        eval "$orig() { zle .$w }"
-        zle -N "$orig"
-        ;;
-      *)
-        continue
-        ;;
-    esac
+    # Capture the underlying widget once; always refresh the wrapper body so
+    # re-eval "$(syncsh init zsh)" picks up clear fixes.
+    if [[ ${widgets[$w]:-} != user:__syncsh_suggest_clear_then_$w ]]; then
+      case "${widgets[$w]:-}" in
+        user:*)
+          zle -A "$w" "$orig"
+          ;;
+        builtin|'')
+          eval "$orig() { zle .$w }"
+          zle -N "$orig"
+          ;;
+        *)
+          continue
+          ;;
+      esac
+    fi
     # One wrapper per widget. A shared wrapper keyed on $WIDGET breaks when
     # another widget (syncsh-search) invokes accept-line: $WIDGET stays the caller.
+    # Suppress + clear + redisplay so multi-line POSTDISPLAY is erased even when
+    # the prompt theme's WIDGET name would otherwise rebuild the menu.
     eval "__syncsh_suggest_clear_then_$w() {
       emulate -L zsh
-      __syncsh_suggest_clear
-      zle $orig
+      typeset -gi __syncsh_suggest_suppress=1
+      {
+        __syncsh_suggest_clear
+        zle redisplay
+        [[ -n ${terminfo[ed]:-} ]] && echoti ed
+        zle $orig
+      } always {
+        __syncsh_suggest_suppress=0
+      }
     }"
     zle -N "$w" "__syncsh_suggest_clear_then_$w"
   done
@@ -330,8 +373,9 @@ __syncsh_suggest_bind() {
 __syncsh_suggest_bind
 __syncsh_suggest_bind_clear
 
-if autoload -Uz add-zle-hook-widget 2>/dev/null && add-zle-hook-widget line-pre-redraw __syncsh_suggest_redraw 2>/dev/null; then
-  :
+if autoload -Uz add-zle-hook-widget 2>/dev/null; then
+  add-zle-hook-widget -d line-pre-redraw __syncsh_suggest_redraw 2>/dev/null || true
+  add-zle-hook-widget line-pre-redraw __syncsh_suggest_redraw 2>/dev/null && :
 else
   __syncsh_suggest_self_insert() {
     zle .self-insert
@@ -671,7 +715,8 @@ syncsh-suggest-complete() {
   __syncsh_comp_cache_store
   __syncsh_suggest_last="$BUFFER"
   __syncsh_suggest_typed="$BUFFER"
-  __syncsh_suggest_idx=0
+  # Open the dropdown (idx>0); otherwise apply keeps a single-line ghost only.
+  __syncsh_suggest_idx=1
   __syncsh_suggest_off=2
   __syncsh_suggest_fetch_hist
   __syncsh_suggest_rebuild
@@ -766,7 +811,11 @@ __syncsh_suggest_highlight() {
 }
 
 __syncsh_suggest_clear() {
+  # Re-entrancy guard: line-pre-redraw can nest into clear while we unset state.
+  (( ${+__syncsh_suggest_clearing} )) && (( __syncsh_suggest_clearing )) && return
+  typeset -gi __syncsh_suggest_clearing=1
   unset POSTDISPLAY __syncsh_suggest_suffix __syncsh_suggest_typed __syncsh_suggest_ghost
+  __syncsh_suggest_last=""
   __syncsh_suggest_items=()
   __syncsh_suggest_kinds=()
   __syncsh_suggest_descrs=()
@@ -776,8 +825,13 @@ __syncsh_suggest_clear() {
   __syncsh_suggest_off=2
   __syncsh_suggest_view=0
   __syncsh_suggest_bar=0
-  (( ${+functions[__syncsh_comp_cache_clear]} )) && __syncsh_comp_cache_clear
+  __syncsh_comp_cache_key=""
+  __syncsh_comp_cache_values=()
+  __syncsh_comp_cache_inserts=()
+  __syncsh_comp_cache_descrs=()
+  unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
   __syncsh_suggest_highlight
+  __syncsh_suggest_clearing=0
 }
 
 __syncsh_suggest_scroll() {
@@ -939,7 +993,10 @@ __syncsh_suggest_apply() {
   if [[ -n ${__syncsh_suggest_ghost:-} && $BUFFER == "$__syncsh_suggest_typed" && ${__syncsh_suggest_ghost} == "$BUFFER"* && ${__syncsh_suggest_ghost} != "$BUFFER" ]]; then
     __syncsh_suggest_suffix="${__syncsh_suggest_ghost#"$BUFFER"}"
   fi
-  if (( ${#__syncsh_suggest_items} >= 2 )); then
+  # Multi-line POSTDISPLAY cannot be cleared reliably on accept-line (zsh +
+  # prompt themes leave the box in scrollback). Only paint the dropdown while
+  # the user is navigating it; otherwise keep a single-line ghost suffix.
+  if (( ${#__syncsh_suggest_items} >= 2 && __syncsh_suggest_idx > 0 )); then
     __syncsh_suggest_menu_box
     POSTDISPLAY="${__syncsh_suggest_suffix}"$'\n'"$REPLY"
   elif [[ -n ${__syncsh_suggest_suffix} ]]; then
@@ -1036,6 +1093,7 @@ __syncsh_suggest_rebuild() {
 
 __syncsh_suggest_update() {
   emulate -L zsh
+  (( __syncsh_suggest_suppress )) && return
   [[ -n ${__syncsh_in_comp:-} ]] && return
   [[ $WIDGET == __syncsh_comp_list ]] && return
   if [[ -z $BUFFER ]]; then

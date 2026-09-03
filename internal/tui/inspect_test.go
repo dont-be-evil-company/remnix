@@ -197,7 +197,7 @@ func TestInspectRunSearchFiltersCwd(t *testing.T) {
 	if len(m.runVisible) != 2 {
 		t.Fatalf("runs %d", len(m.runVisible))
 	}
-	for _, r := range []rune("old") {
+	for _, r := range "old" {
 		got, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = got.(inspectModel)
 	}

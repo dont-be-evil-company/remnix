@@ -38,6 +38,44 @@ func TestCtrlRBindings(t *testing.T) {
 	if strings.Contains(zsh, "(( run )) && zle accept-line") {
 		t.Fatal("nested zle accept-line hits the suggest wrapper with empty WIDGET")
 	}
+	// Suggest menu must stay dismissed across reset-prompt → .accept-line.
+	if !strings.Contains(zsh, "redisplay|reset-prompt") {
+		t.Fatal("suggest redraw must clear on redisplay/reset-prompt, not rebuild")
+	}
+	searchAt := strings.Index(zsh, "syncsh-search() {")
+	if searchAt < 0 {
+		t.Fatal("missing syncsh-search")
+	}
+	searchFn := zsh[searchAt:]
+	if end := strings.Index(searchFn, "\nzle -N syncsh-search"); end > 0 {
+		searchFn = searchFn[:end]
+	}
+	// clear → redisplay → zle -I must precede the TUI so alt-screen saves a clean buffer.
+	clearAt := strings.Index(searchFn, "__syncsh_suggest_clear")
+	redisplayAt := strings.Index(searchFn, "zle redisplay")
+	invalidateAt := strings.Index(searchFn, "zle -I")
+	tuiAt := strings.Index(searchFn, `search --interactive`)
+	if clearAt < 0 || redisplayAt < 0 || invalidateAt < 0 || tuiAt < 0 {
+		t.Fatal("syncsh-search missing clear/redisplay/zle -I before TUI")
+	}
+	if clearAt >= redisplayAt || redisplayAt >= invalidateAt || invalidateAt >= tuiAt {
+		t.Fatal("syncsh-search must clear, redisplay, then zle -I before opening the TUI")
+	}
+	if !strings.Contains(searchFn, "echoti ed") {
+		t.Fatal("syncsh-search must clear-to-eos after TUI in case alt-screen restored junk")
+	}
+	// redisplay must come before echoti ed (known cursor), both after the TUI.
+	postTui := searchFn[tuiAt:]
+	if strings.Index(postTui, "zle redisplay") > strings.Index(postTui, "echoti ed") {
+		t.Fatal("after TUI: redisplay before echoti ed")
+	}
+	if !strings.Contains(zsh, "__syncsh_suggest_suppress") {
+		t.Fatal("syncsh-search must suppress suggest redraw during ctrl+r/accept")
+	}
+	menu, _ := Integration("zsh", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true, SuggestAccept: []string{"Right"}})
+	if !strings.Contains(menu, `__syncsh_suggest_idx > 0`) {
+		t.Fatal("multi-line suggest menu must only paint while navigating (idx>0)")
+	}
 	bashHook, _ := Integration("bash", "syncsh", opts)
 	if !strings.Contains(bashHook, `\C-r`) {
 		t.Fatal("bash missing C-r")
@@ -92,8 +130,20 @@ func TestZshInlineSuggest(t *testing.T) {
 	if !strings.Contains(on, "__syncsh_suggest_clear") || strings.Count(on, `BUFFER="$BUFFER$POSTDISPLAY"`) != 1 {
 		t.Fatal("Enter must drop ghost text; only the accept widget may merge POSTDISPLAY")
 	}
+	if strings.Contains(on, `[[ ${widgets[$w]:-} == user:__syncsh_suggest_clear_then_$w ]] && continue`) {
+		t.Fatal("accept-line wrapper must be refreshed on re-eval, not skipped when already bound")
+	}
+	if !strings.Contains(on, "re-eval") && !strings.Contains(on, "always refresh the wrapper body") {
+		t.Fatal("accept-line wrapper must be redefined on every init")
+	}
 	if strings.Contains(on, `zle -A ".$w"`) {
 		t.Fatal("builtin accept-line must be wrapped with zle .accept-line, not zle -A")
+	}
+	if !strings.Contains(on, "add-zle-hook-widget -d line-pre-redraw") {
+		t.Fatal("must dedupe line-pre-redraw hooks on re-eval")
+	}
+	if !strings.Contains(on, "redisplay|reset-prompt") {
+		t.Fatal("redraw hook must clear on redisplay/reset-prompt, not rebuild suggestions")
 	}
 	if strings.Contains(on, "__syncsh_suggest_orig[$WIDGET]") || strings.Contains(on, "__syncsh_suggest_clear_then_orig") {
 		t.Fatal("accept-line wrapper must not look up orig via $WIDGET")
