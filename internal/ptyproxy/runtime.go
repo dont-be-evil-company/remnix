@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 	"github.com/mistweaverco/syncsh/internal/config"
@@ -32,7 +33,15 @@ func Run(shellPath string) error {
 	in := os.Stdin
 	out := os.Stdout
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) {
-		return fmt.Errorf("pty-proxy: stdin and stdout must be a terminal")
+		// nu config.nu and `syncsh init fish | source` often exec us with a
+		// pipe on stdin/stdout. /dev/tty is still the outer terminal.
+		tin, tout, err := openOuterTTY()
+		if err != nil {
+			return fmt.Errorf("pty-proxy: stdin and stdout must be a terminal")
+		}
+		defer tin.Close()
+		defer tout.Close()
+		in, out = tin, tout
 	}
 
 	cols, rows, err := term.GetSize(int(out.Fd()))
@@ -164,6 +173,19 @@ func (e ExitError) Error() string {
 	return fmt.Sprintf("exit status %d", e.Code)
 }
 
+func openOuterTTY() (in, out *os.File, err error) {
+	in, err = os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	fd, err := syscall.Dup(int(in.Fd()))
+	if err != nil {
+		_ = in.Close()
+		return nil, nil, err
+	}
+	return in, os.NewFile(uintptr(fd), "/dev/tty"), nil
+}
+
 func childEnv(shellPath string) []string {
 	env := os.Environ()
 	filtered := env[:0]
@@ -211,6 +233,42 @@ func (s *shadow) Snapshot() Snapshot {
 	return snapshotFrom(s.emu)
 }
 
+// streamSnapshot writes the 8-byte geometry header before encoding cells so
+// Ctrl+R can place the overlay without waiting on a full-screen snapshot.
+func (s *shadow) streamSnapshot(w io.Writer) {
+	s.mu.Lock()
+	width, height := s.emu.Width(), s.emu.Height()
+	pos := s.emu.CursorPosition()
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	s.mu.Unlock()
+	_, _ = w.Write(EncodeHeader(Snapshot{
+		Rows:      height,
+		Cols:      width,
+		CursorRow: pos.Y,
+		CursorCol: pos.X,
+	}))
+	s.mu.Lock()
+	w2 := s.emu.Width()
+	if w2 < 1 {
+		w2 = 1
+	}
+	rows := make([]string, height)
+	for y := 0; y < height; y++ {
+		if y < s.emu.Height() {
+			rows[y] = encodeRow(s.emu, y, w2)
+		}
+	}
+	s.mu.Unlock()
+	for _, row := range rows {
+		_, _ = w.Write(EncodeRow(row))
+	}
+}
+
 func snapshotFrom(emu *vt.Emulator) Snapshot {
 	w, h := emu.Width(), emu.Height()
 	if w < 1 {
@@ -234,10 +292,18 @@ func snapshotFrom(emu *vt.Emulator) Snapshot {
 }
 
 func encodeRow(emu *vt.Emulator, y, w int) string {
-	var b []byte
+	b := make([]byte, 0, w+8)
+	styled := false
+	havePrev := false
+	var prevStyle uv.Style
 	for x := 0; x < w; {
 		cell := emu.CellAt(x, y)
 		if cell == nil || cell.Width == 0 {
+			if styled {
+				b = append(b, "\x1b[0m"...)
+				styled = false
+				havePrev = false
+			}
 			b = append(b, ' ')
 			x++
 			continue
@@ -246,11 +312,23 @@ func encodeRow(emu *vt.Emulator, y, w int) string {
 		if content == "" {
 			content = " "
 		}
-		if !cell.Style.IsZero() {
-			b = append(b, cell.Style.String()...)
+		st := cell.Style
+		if st.IsZero() {
+			if styled {
+				b = append(b, "\x1b[0m"...)
+				styled = false
+				havePrev = false
+			}
 			b = append(b, content...)
-			b = append(b, "\x1b[0m"...)
 		} else {
+			if !havePrev {
+				b = append(b, st.String()...)
+			} else if !prevStyle.Equal(&st) {
+				b = append(b, st.Diff(&prevStyle)...)
+			}
+			prevStyle = st
+			havePrev = true
+			styled = true
 			b = append(b, content...)
 		}
 		if cell.Width > 1 {
@@ -258,6 +336,9 @@ func encodeRow(emu *vt.Emulator, y, w int) string {
 		} else {
 			x++
 		}
+	}
+	if styled {
+		b = append(b, "\x1b[0m"...)
 	}
 	return string(b)
 }
@@ -284,7 +365,7 @@ func serveSnapshots(scr *shadow) string {
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				_, _ = c.Write(Encode(scr.Snapshot()))
+				scr.streamSnapshot(c)
 			}(conn)
 		}
 	}()

@@ -48,6 +48,24 @@ func TestComposeOverlayFullIsIdentity(t *testing.T) {
 	}
 }
 
+func TestSuspendShellKeyboardPushesAndPops(t *testing.T) {
+	var b strings.Builder
+	restore := suspendShellKeyboard(&b)
+	got := b.String()
+	if !strings.Contains(got, "\x1b[>u") {
+		t.Fatalf("must push kitty flags 0 so fish 4 CSI-u keys become UTF-8: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[>4;0m") {
+		t.Fatalf("must disable modifyOtherKeys: %q", got)
+	}
+	b.Reset()
+	restore()
+	got = b.String()
+	if !strings.Contains(got, "\x1b[<1u") {
+		t.Fatalf("must pop kitty flags so the parent shell keeps its protocol: %q", got)
+	}
+}
+
 func TestDrawFixedCUPsEachRow(t *testing.T) {
 	var b strings.Builder
 	drawFixed(&b, 8, 3, 2, "AA\nBB")

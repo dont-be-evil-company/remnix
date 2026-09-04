@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
@@ -63,6 +64,72 @@ func TestFetchFromSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Rows != 2 || got.CursorCol != 2 || got.RowANSI[1] != "efgh" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestFetchDoesNotWaitForEOF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pty.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	want := Snapshot{Rows: 1, Cols: 3, CursorRow: 0, CursorCol: 1, RowANSI: []string{"abc"}}
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_, _ = c.Write(Encode(want))
+		// Leave the connection open; ReadAll would block until the deadline.
+	}()
+	t.Setenv(EnvSocket, path)
+	start := time.Now()
+	got, err := Fetch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("Fetch waited %s for a close that never came", time.Since(start))
+	}
+	if got.RowANSI[0] != "abc" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestFetchGeomDoesNotWaitForRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pty.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	hdr := EncodeHeader(Snapshot{Rows: 24, Cols: 80, CursorRow: 23, CursorCol: 0})
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, _ = c.Write(hdr)
+		<-done
+	}()
+	t.Setenv(EnvSocket, path)
+	start := time.Now()
+	got, rest, err := FetchGeom()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rest.Close()
+	if time.Since(start) > 300*time.Millisecond {
+		t.Fatalf("FetchGeom waited %s for rows that were never sent", time.Since(start))
+	}
+	if got.Rows != 24 || got.Cols != 80 || got.CursorRow != 23 {
 		t.Fatalf("%+v", got)
 	}
 }

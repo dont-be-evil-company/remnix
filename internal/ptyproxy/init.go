@@ -44,7 +44,9 @@ fi
 
 func fishPreamble(bin string) string {
 	q := fishQuote(bin)
-	return `if status is-interactive; and test -t 0; and test -t 1
+	// `syncsh init fish | source` makes stdin a pipe, so test -t 0 is false
+	// and exec would inherit that pipe. Reopen the real TTY on exec.
+	return `if status is-interactive; and test -c /dev/tty
   set -l _syncsh_pty_tmux_current ""
   if set -q TMUX
     set _syncsh_pty_tmux_current "$TMUX"
@@ -56,11 +58,11 @@ func fishPreamble(bin string) string {
   if not set -q SYNCSH_PTY_PROXY_ACTIVE
     set -gx SYNCSH_PTY_PROXY_ACTIVE 1
     set -gx SYNCSH_PTY_PROXY_TMUX "$_syncsh_pty_tmux_current"
-    exec ` + q + ` pty-proxy --shell (status fish-path)
+    exec ` + q + ` pty-proxy --shell (status fish-path) </dev/tty
   else if test "$_syncsh_pty_tmux_current" != "$_syncsh_pty_tmux_previous"
     set -gx SYNCSH_PTY_PROXY_ACTIVE 1
     set -gx SYNCSH_PTY_PROXY_TMUX "$_syncsh_pty_tmux_current"
-    exec ` + q + ` pty-proxy --shell (status fish-path)
+    exec ` + q + ` pty-proxy --shell (status fish-path) </dev/tty
   end
 end
 `
@@ -68,7 +70,9 @@ end
 
 func nuPreamble(bin string) string {
 	q := nuQuote(bin)
-	return `if (is-terminal --stdin) and (is-terminal --stdout) {
+	// is-terminal is false while config.nu loads (Nu captures config
+	// output). exec anyway; pty-proxy reopens /dev/tty if fds are pipes.
+	return `if $nu.is-interactive and ("/dev/tty" | path exists) {
   let tmux_current = ($env.TMUX? | default "")
   let tmux_previous = ($env.SYNCSH_PTY_PROXY_TMUX? | default "")
   if (($env.SYNCSH_PTY_PROXY_ACTIVE? | default "") | is-empty) or ($tmux_current != $tmux_previous) {

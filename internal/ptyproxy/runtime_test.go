@@ -32,3 +32,54 @@ func TestSnapshotFromEmulator(t *testing.T) {
 		t.Fatalf("round-trip: %#v", got.RowANSI)
 	}
 }
+
+func TestEncodeRowCoalescesAdjacentStyle(t *testing.T) {
+	emu := vt.NewEmulator(8, 1)
+	emu.SetScrollbackSize(0)
+	_, _ = emu.Write([]byte("\x1b[31mAAAA\x1b[0m"))
+	row := encodeRow(emu, 0, 8)
+	if !strings.Contains(row, "AAAA") {
+		t.Fatalf("missing text: %q", row)
+	}
+	if strings.Count(row, "\x1b[0m") > 1 {
+		t.Fatalf("reset between same-style cells: %q", row)
+	}
+}
+
+type firstWriteRecorder struct {
+	first int
+	n     int
+}
+
+func (w *firstWriteRecorder) Write(p []byte) (int, error) {
+	if w.n == 0 {
+		w.first = len(p)
+	}
+	w.n++
+	return len(p), nil
+}
+
+func TestStreamSnapshotWritesHeaderFirst(t *testing.T) {
+	s := newShadow(80, 24)
+	s.Write([]byte("hello"))
+	var w firstWriteRecorder
+	s.streamSnapshot(&w)
+	if w.n < 2 {
+		t.Fatalf("expected header then rows, got %d writes", w.n)
+	}
+	if w.first != 8 {
+		t.Fatalf("first write should be 8-byte header, got %d", w.first)
+	}
+}
+
+func TestOpenOuterTTY(t *testing.T) {
+	in, out, err := openOuterTTY()
+	if err != nil {
+		t.Skip(err)
+	}
+	defer in.Close()
+	defer out.Close()
+	if in.Fd() == out.Fd() {
+		t.Fatal("read and write sides must be distinct fds")
+	}
+}

@@ -148,18 +148,14 @@ func fish(bin string, opts Options) string {
 	if opts.SuggestMenu {
 		extra = `
 function syncsh-suggest-menu
-    set -l selected (__syncsh_widget_run suggest --interactive --prefix (commandline -b) --cwd "$PWD")
-    or return
-    if string match -q '__syncsh_accept__:*' -- "$selected"
-        set selected (string replace -r '^__syncsh_accept__:' '' -- "$selected")
-        commandline -r -- "$selected"
-        commandline -f execute
-    else if test -n "$selected"
-        commandline -r -- "$selected"
+    __syncsh_widget_run suggest --interactive --prefix (commandline -b) --cwd "$PWD"
+    or begin
         commandline -f repaint
+        return
     end
+    __syncsh_apply_selected
 end
-bind \c@ syncsh-suggest-menu
+__syncsh_bind ctrl-space syncsh-suggest-menu
 `
 	}
 	return fmt.Sprintf(`# syncsh fish integration
@@ -170,8 +166,39 @@ if not set -q __syncsh_session
     set -g __syncsh_session "$fish_pid"-(date +%%s)
 end
 
+function __syncsh_bind
+    bind $argv
+    bind -M insert $argv
+end
+
+# Command substitution steals stdout, so the TUI never owns the TTY (zsh
+# $(...) keeps stdin/stderr as the terminal; fish does not). Run as a
+# foreground command, not a (...) capture, and attach /dev/tty: fish bind
+# functions capture stdout, which would skip the overlay and force alt-screen.
+# With pty-proxy, /dev/tty is the inner slave (Ctty).
 function __syncsh_widget_run
-    $__syncsh_bin $argv 3>&1 1>&2 2>&3 3>&-
+    set -l tmp (mktemp)
+    or return 1
+    $__syncsh_bin $argv --result-file $tmp </dev/tty >/dev/tty
+    set -l st $status
+    set -g __syncsh_widget_out ''
+    if test -f $tmp
+        set -g __syncsh_widget_out (string collect -- < $tmp | string trim)
+        command rm -f -- $tmp
+    end
+    return $st
+end
+
+function __syncsh_apply_selected
+    set -l selected $__syncsh_widget_out
+    if string match -q '__syncsh_accept__:*' -- "$selected"
+        set selected (string replace -r '^__syncsh_accept__:' '' -- "$selected")
+        commandline -r -- "$selected"
+        commandline -f execute
+    else if test -n "$selected"
+        commandline -r -- "$selected"
+    end
+    commandline -f repaint
 end
 
 function __syncsh_agent_ensure
@@ -191,18 +218,14 @@ function __syncsh_postexec --on-event fish_postexec
 end
 
 function syncsh-search
-    set -l selected (__syncsh_widget_run search --interactive --query (commandline -b) --cwd "$PWD")
-    or return
-    if string match -q '__syncsh_accept__:*' -- "$selected"
-        set selected (string replace -r '^__syncsh_accept__:' '' -- "$selected")
-        commandline -r -- "$selected"
-        commandline -f execute
-    else if test -n "$selected"
-        commandline -r -- "$selected"
+    __syncsh_widget_run search --interactive --query (commandline -b) --cwd "$PWD"
+    or begin
         commandline -f repaint
+        return
     end
+    __syncsh_apply_selected
 end
-bind \cr syncsh-search
+__syncsh_bind \cr syncsh-search
 __syncsh_agent_ensure
 %s`, bin, zshQuote(bin), extra)
 }
@@ -212,39 +235,55 @@ func nu(bin string, opts Options) string {
 	q = strings.ReplaceAll(q, `"`, `\"`)
 	menu := ""
 	if opts.SuggestMenu {
-		menu = fmt.Sprintf(`
+		menu = `
 def --env syncsh-suggest-menu [] {
-  let selected = (do {
-    let tmp = (mktemp)
-    ^"%[1]s" suggest --interactive --prefix (commandline) --cwd $env.PWD --result-file $tmp
-    let out = (try { open --raw $tmp } catch { "" })
-    rm -f $tmp
-    $out | str trim
-  })
+  let tmp = (^mktemp | str trim)
+  ^$"($__syncsh_bin)" suggest --interactive --prefix (commandline) --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty
+  let selected = (try { open --raw $tmp } catch { "" } | str trim)
+  try { rm $tmp }
   if ($selected | str starts-with "__syncsh_accept__:") {
     commandline edit --replace ($selected | str replace -r '^__syncsh_accept__:' '')
   } else if not ($selected | is-empty) {
     commandline edit --replace $selected
   }
 }
-$env.config = ($env.config | default {} | upsert keybindings {|c|
-  ($c.keybindings? | default []) | append {
-    name: syncsh_suggest_menu
-    modifier: control
-    keycode: space
-    mode: [emacs, vi_insert, vi_normal]
-    event: { send: executehostcommand, cmd: "syncsh-suggest-menu" }
-  }
-})
-`, q)
+__syncsh_rebind {
+  name: syncsh_suggest_menu
+  modifier: control
+  keycode: space
+  mode: [emacs, vi_insert, vi_normal]
+  event: { send: executehostcommand, cmd: "syncsh-suggest-menu" }
+}
+`
 	}
 	return fmt.Sprintf(`# syncsh nushell integration
-# Add to config.nu: source (syncsh init nu | save -f ~/.cache/syncsh.nu; echo ~/.cache/syncsh.nu)
+# source is parse-time: it cannot see a file written later in the same script.
+# Generate from env.nu (evaluated before config.nu is parsed):
+#   mkdir ~/.cache
+#   ^syncsh init nu | save --force ~/.cache/syncsh.nu
+# Then this literal line at the top of config.nu (required if pty_proxy is on):
+#   source ~/.cache/syncsh.nu
 
 let __syncsh_bin = "%[1]s"
 $env.__syncsh_session = ($env.__syncsh_session? | default $"($nu.pid)-(date now | format date '%%s')")
 
 do { ^$"($__syncsh_bin)" agent } | ignore
+
+# Replace an existing modifier+keycode binding (Nushell's default Ctrl+R is
+# history_menu; appending a second Ctrl+R leaves that grid in place).
+def --env __syncsh_rebind [binding: record] {
+  $env.config = ($env.config | default {} | upsert keybindings {|c|
+    let rest = (
+      $c.keybindings? | default [] | where {|k|
+        not (
+          ($k.modifier? | default "") == $binding.modifier
+          and ($k.keycode? | default "") == $binding.keycode
+        )
+      }
+    )
+    $rest | append $binding
+  })
+}
 
 $env.config = ($env.config | default {} | upsert hooks {|c|
   let hooks = ($c.hooks? | default {})
@@ -265,24 +304,21 @@ $env.config = ($env.config | default {} | upsert hooks {|c|
         }
       }
     }
-} | upsert keybindings {|c|
-  ($c.keybindings? | default []) | append {
-    name: syncsh_search
-    modifier: control
-    keycode: char_r
-    mode: [emacs, vi_insert, vi_normal]
-    event: { send: executehostcommand, cmd: "syncsh-search" }
-  }
 })
 
+__syncsh_rebind {
+  name: syncsh_search
+  modifier: control
+  keycode: char_r
+  mode: [emacs, vi_insert, vi_normal]
+  event: { send: executehostcommand, cmd: "syncsh-search" }
+}
+
 def syncsh-search [] {
-  let selected = (do {
-    let tmp = (mktemp)
-    ^$"($__syncsh_bin)" search --interactive --query (commandline) --cwd $env.PWD --result-file $tmp
-    let out = (try { open --raw $tmp } catch { "" })
-    rm -f $tmp
-    $out | str trim
-  })
+  let tmp = (^mktemp | str trim)
+  ^$"($__syncsh_bin)" search --interactive --query (commandline) --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty
+  let selected = (try { open --raw $tmp } catch { "" } | str trim)
+  try { rm $tmp }
   if ($selected | str starts-with "__syncsh_accept__:") {
     commandline edit --replace ($selected | str replace -r '^__syncsh_accept__:' '')
   } else if not ($selected | is-empty) {

@@ -21,22 +21,30 @@ func TestPreambleExecAndGuards(t *testing.T) {
 	}
 	fish := Preamble("/opt/syncsh", "fish")
 	for _, want := range []string{
-		"exec '/opt/syncsh' pty-proxy --shell (status fish-path)",
+		"exec '/opt/syncsh' pty-proxy --shell (status fish-path) </dev/tty",
 		"status is-interactive",
+		"test -c /dev/tty",
 		"SYNCSH_PTY_PROXY_ACTIVE",
 	} {
 		if !strings.Contains(fish, want) {
 			t.Fatalf("fish preamble missing %q\n%s", want, fish)
 		}
 	}
+	if strings.Contains(fish, "test -t 0") {
+		t.Fatal("fish preamble must not require a TTY stdin; `| source` makes stdin a pipe")
+	}
 	nu := Preamble("/opt/syncsh", "nu")
 	for _, want := range []string{
 		`exec "/opt/syncsh" pty-proxy --shell $nu.current-exe`,
-		"is-terminal --stdin",
+		"$nu.is-interactive",
+		`"/dev/tty" | path exists`,
 		"SYNCSH_PTY_PROXY_ACTIVE",
 	} {
 		if !strings.Contains(nu, want) {
 			t.Fatalf("nu preamble missing %q\n%s", want, nu)
 		}
+	}
+	if strings.Contains(nu, "is-terminal") {
+		t.Fatal("nu preamble must not require is-terminal; config.nu load makes it false")
 	}
 }

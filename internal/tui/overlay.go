@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -35,6 +36,7 @@ type OverlayState struct {
 type overlaySession struct {
 	snap  ptyproxy.Snapshot
 	place ptyproxy.Placement
+	rows  <-chan []string
 }
 
 func overlayRows(termRows, percent int) int {
@@ -103,15 +105,18 @@ func composeOverlay(termRows, y, h int, bg []string, body string) string {
 
 // beginOverlay follows Atuin interactive.rs history():
 //
-//   - stdout must be a TTY (fd-swap in the shell widget). Otherwise Atuin
-//     forces fullscreen because cursor queries fail on a pipe.
-//   - height < terminal → popup: fetch snapshot, Place, scroll/clear/CUP.
-//   - height >= terminal or no snapshot → nil (caller uses alt-screen).
-func beginOverlay(w *os.File, stdoutIsTTY bool, rowsFor func(termRows int) int) *overlaySession {
-	if !stdoutIsTTY || w == nil {
+//   - the paint writer must be a TTY (/dev/tty, even if os.Stdout is a pipe).
+//   - height < terminal → popup. Geometry comes from pty-proxy when the
+//     socket answers; otherwise GetSize on the paint TTY so fish/nu still
+//     get a 40% band instead of alt-screen.
+//     Row ANSI is read in the background so a full-screen greeting cannot
+//     stall the first paint for the snapshot deadline.
+//   - height >= terminal → nil (caller uses alt-screen).
+func beginOverlay(w *os.File, rowsFor func(termRows int) int) *overlaySession {
+	if w == nil || !isTerminalFile(w) {
 		return nil
 	}
-	snap, err := ptyproxy.Fetch()
+	snap, rest, err := overlaySnapshot(w)
 	if err != nil {
 		return nil
 	}
@@ -120,11 +125,56 @@ func beginOverlay(w *os.File, stdoutIsTTY bool, rowsFor func(termRows int) int) 
 		height = rowsFor(snap.Rows)
 	}
 	if height < 1 || height >= snap.Rows {
+		if rest != nil {
+			_ = rest.Close()
+		}
 		return nil
 	}
 	place := ptyproxy.Place(snap.CursorRow, snap.Rows, snap.Cols, height)
 	ptyproxy.Prepare(w, snap, place)
-	return &overlaySession{snap: snap, place: place}
+	ch := make(chan []string, 1)
+	if rest != nil {
+		go func() {
+			defer rest.Close()
+			if c, ok := rest.(interface{ SetDeadline(time.Time) error }); ok {
+				_ = c.SetDeadline(time.Now().Add(500 * time.Millisecond))
+			}
+			rows, err := ptyproxy.ReadRows(rest, snap.Rows)
+			if err != nil {
+				return
+			}
+			ch <- rows
+		}()
+	}
+	return &overlaySession{snap: snap, place: place, rows: ch}
+}
+
+// overlaySnapshot prefers the pty-proxy screen (cursor + restore rows). If
+// that is missing, fall back to the paint TTY's size so a 40% popup still
+// works in fish/nu when stdout is a pipe and the snapshot socket is late.
+func overlaySnapshot(w *os.File) (ptyproxy.Snapshot, io.ReadCloser, error) {
+	snap, rest, err := ptyproxy.FetchGeom()
+	if err == nil && snap.Rows >= 2 && snap.Cols >= 1 {
+		return snap, rest, nil
+	}
+	if rest != nil {
+		_ = rest.Close()
+	}
+	cols, rows, gerr := term.GetSize(int(w.Fd()))
+	if gerr != nil || rows < 2 || cols < 1 {
+		if err != nil {
+			return ptyproxy.Snapshot{}, nil, err
+		}
+		if gerr != nil {
+			return ptyproxy.Snapshot{}, nil, gerr
+		}
+		return ptyproxy.Snapshot{}, nil, ptyproxy.ErrNoProxy
+	}
+	return ptyproxy.Snapshot{
+		Rows:      rows,
+		Cols:      cols,
+		CursorRow: rows - 1,
+	}, nil, nil
 }
 
 func (s *overlaySession) end(w *os.File) {
@@ -132,6 +182,11 @@ func (s *overlaySession) end(w *os.File) {
 		return
 	}
 	if s != nil {
+		select {
+		case rows := <-s.rows:
+			s.snap.RowANSI = rows
+		default:
+		}
 		s.snap.Restore(w, s.place.Rect, s.place.Scroll)
 	}
 	_, _ = io.WriteString(w, "\x1b[?25h")
@@ -182,21 +237,18 @@ func drawFixed(w io.Writer, cols, y, h int, body string) {
 	}
 }
 
-// widgetIO matches Atuin TerminalWriter: TUI on stdout when it is a TTY,
-// otherwise /dev/tty (and the caller must use fullscreen, not overlay).
-func widgetIO() (in, out *os.File, closeFn func(), stdoutIsTTY bool, err error) {
-	if isTerminalFile(os.Stdout) {
-		if isTerminalFile(os.Stdin) {
-			return os.Stdin, os.Stdout, func() {}, true, nil
-		}
-		inTTY, _, closeIn, openErr := OpenTTY()
-		if openErr != nil {
-			return os.Stdin, os.Stdout, func() {}, true, nil
-		}
-		return inTTY, os.Stdout, closeIn, true, nil
-	}
+// widgetIO prefers /dev/tty for painting so fish bind and nu executehostcommand
+// can overlay even when os.Stdout is a pipe. Input stays on stdin when that
+// is already a TTY (zsh fd-swap).
+func widgetIO() (in, out *os.File, closeFn func(), err error) {
 	in, out, closeFn, err = OpenTTY()
-	return in, out, closeFn, false, err
+	if err != nil {
+		return os.Stdin, os.Stdout, func() {}, nil
+	}
+	if isTerminalFile(os.Stdin) {
+		in = os.Stdin
+	}
+	return in, out, closeFn, nil
 }
 
 func isTerminalFile(f *os.File) bool {
@@ -205,12 +257,12 @@ func isTerminalFile(f *os.File) bool {
 
 func widgetProgram(m tea.Model, rowsFor func(termRows int) int) (*tea.Program, func(), error) {
 	prepareWidgetTTY()
-	in, outTTY, closeFn, stdoutIsTTY, err := widgetIO()
+	in, outTTY, closeFn, err := widgetIO()
 	if err != nil {
 		return tea.NewProgram(m), func() {}, nil
 	}
 	opts := []tea.ProgramOption{tea.WithInput(in)}
-	sess := beginOverlay(outTTY, stdoutIsTTY, rowsFor)
+	sess := beginOverlay(outTTY, rowsFor)
 	if sess != nil {
 		st := sess.state(outTTY)
 		// Bubble Tea has no Viewport::Fixed. Its inline renderer uses relative
@@ -220,7 +272,7 @@ func widgetProgram(m tea.Model, rowsFor func(termRows int) int) (*tea.Program, f
 		opts = append(opts,
 			tea.WithOutput(io.Discard),
 			tea.WithWindowSize(st.TermCols, st.TermRows),
-			tea.WithColorProfile(colorprofile.Detect(outTTY, os.Environ())),
+			tea.WithColorProfile(colorprofile.Env(os.Environ())),
 		)
 		if om, ok := m.(overlayAware); ok {
 			om.EnableOverlay(st)
@@ -229,11 +281,31 @@ func widgetProgram(m tea.Model, rowsFor func(termRows int) int) (*tea.Program, f
 	} else {
 		opts = append(opts, tea.WithOutput(outTTY))
 	}
+	// After snapshot: fish 4 leaves kitty keyboard / modifyOtherKeys on
+	// during command substitution (no tty handoff). Overlay output is
+	// Discard, so Bubble Tea never writes the disable sequences.
+	resumeKB := suspendShellKeyboard(outTTY)
 	cleanup := func() {
 		sess.end(outTTY)
+		resumeKB()
 		closeFn()
 	}
 	return tea.NewProgram(m, opts...), cleanup, nil
+}
+
+// suspendShellKeyboard pushes a kitty-protocol stack entry with no flags so
+// the widget sees plain keys (and Escape). Pop on restore so the parent
+// shell (fish 4 especially) keeps the flags it SET before the widget.
+func suspendShellKeyboard(w io.Writer) func() {
+	if w == nil {
+		return func() {}
+	}
+	_, _ = io.WriteString(w, ansi.DisableKittyKeyboard)
+	_, _ = io.WriteString(w, "\x1b[>4;0m")
+	return func() {
+		_, _ = io.WriteString(w, ansi.PopKittyKeyboard(1))
+		_, _ = io.WriteString(w, ansi.SetModifyOtherKeys1)
+	}
 }
 
 type overlayAware interface {

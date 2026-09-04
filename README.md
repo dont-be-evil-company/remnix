@@ -60,8 +60,12 @@ eval "$(syncsh init bash)"
 # fish - add to ~/.config/fish/config.fish
 syncsh init fish | source
 
-# nushell - add to config.nu
-source (syncsh init nu | save -f ~/.cache/syncsh.nu; echo ~/.cache/syncsh.nu)
+# nushell: source is parse-time, so do not generate and source in the same file.
+# env.nu (runs before config.nu is parsed):
+mkdir ~/.cache
+^syncsh init nu | save --force ~/.cache/syncsh.nu
+# config.nu, near the top if pty_proxy is on:
+source ~/.cache/syncsh.nu
 ```
 
 Prefer typing the recovery key interactively. Putting `SYNCSH_RECOVERY_KEY=...`
@@ -168,7 +172,10 @@ Ghost text stays in each shell’s line editor:
 
 Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(syncsh init ...)"`
 near the top of the rc file so only the proxy re-execs, not the rest of your
-startup.
+startup. For Nushell, put `^syncsh init nu | save --force ~/.cache/syncsh.nu`
+in `env.nu` and `source ~/.cache/syncsh.nu` with a literal path at the top of
+`config.nu`. Regenerating in `config.nu` itself cannot work: `source` is
+parse-time and will not see the file written on that same run.
 
 ## Search / suggestions
 

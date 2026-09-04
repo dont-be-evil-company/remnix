@@ -116,14 +116,29 @@ func TestCtrlRBindings(t *testing.T) {
 		t.Fatal("bash must not use --result-file")
 	}
 	fishHook, _ := Integration("fish", "syncsh", opts)
-	if !strings.Contains(fishHook, `bind \cr`) {
-		t.Fatal("fish missing bind \\cr")
+	if !strings.Contains(fishHook, `__syncsh_bind \cr`) {
+		t.Fatal("fish missing Ctrl+R bind")
+	}
+	if strings.Contains(fishHook, `\c@`) {
+		t.Fatal("fish 4 rejects bind \\c@ as an invalid token and aborts source")
 	}
 	if !strings.Contains(fishHook, "commandline -f execute") {
 		t.Fatal("fish should run the selected command")
 	}
-	if !strings.Contains(fishHook, "3>&1 1>&2 2>&3 3>&-") {
-		t.Fatal("fish widget must swap stdout/stderr like Atuin")
+	if strings.Contains(fishHook, "3>&1 1>&2 2>&3 3>&-") {
+		t.Fatal("fish must not fd-swap; command substitution steals stdout")
+	}
+	if strings.Contains(fishHook, "(__syncsh_widget_run") {
+		t.Fatal("fish must not wrap the TUI in command substitution")
+	}
+	if !strings.Contains(fishHook, "--result-file") {
+		t.Fatal("fish must return the selection via --result-file")
+	}
+	if !strings.Contains(fishHook, "--result-file $tmp </dev/tty >/dev/tty") {
+		t.Fatal("fish bind captures stdout; the TUI must reopen /dev/tty for overlay")
+	}
+	if strings.Count(fishHook, "commandline -f repaint") < 2 {
+		t.Fatal("fish must repaint after cancel as well as after a selection")
 	}
 	nuHook, _ := Integration("nu", "syncsh", opts)
 	if !strings.Contains(nuHook, "keycode: char_r") {
@@ -133,7 +148,25 @@ func TestCtrlRBindings(t *testing.T) {
 		t.Fatal("nu missing search command")
 	}
 	if !strings.Contains(nuHook, "--result-file") {
-		t.Fatal("nu keeps --result-file; it cannot fd-swap like bash/zsh/fish")
+		t.Fatal("nu keeps --result-file; it cannot fd-swap like bash/zsh")
+	}
+	if strings.Contains(nuHook, "source (syncsh init") {
+		t.Fatal("nu must not source a subexpression; source requires a literal path")
+	}
+	if strings.Contains(nuHook, "let selected = (do {") {
+		t.Fatal("nu must not wrap the TUI in a capturing (do { ... })")
+	}
+	if !strings.Contains(nuHook, "o> /dev/tty") {
+		t.Fatal("nu must send the TUI to /dev/tty; executehostcommand captures stdout")
+	}
+	if !strings.Contains(nuHook, "source ~/.cache/syncsh.nu") {
+		t.Fatal("nu comment must tell the user to source a literal cache file")
+	}
+	if !strings.Contains(nuHook, "env.nu") {
+		t.Fatal("nu comment must generate the cache file from env.nu; source is parse-time")
+	}
+	if !strings.Contains(nuHook, "__syncsh_rebind") || !strings.Contains(nuHook, "where {|k|") {
+		t.Fatal("nu must replace the default history_menu Ctrl+R, not only append")
 	}
 }
 
@@ -455,8 +488,11 @@ func TestFishOverlayMenuNoGhost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `bind \c@`) {
+	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `ctrl-space`) {
 		t.Fatal("fish should bind Ctrl+Space overlay menu")
+	}
+	if strings.Contains(out, `\c@`) {
+		t.Fatal("fish 4 rejects bind \\c@ as an invalid token and aborts source")
 	}
 	if strings.Contains(out, "POSTDISPLAY") {
 		t.Fatal("fish has no POSTDISPLAY ghost")
@@ -470,5 +506,56 @@ func TestNuOverlayMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "syncsh-suggest-menu") || !strings.Contains(out, "keycode: space") {
 		t.Fatal("nu should bind Ctrl+Space overlay menu")
+	}
+	if !strings.Contains(out, "__syncsh_rebind") {
+		t.Fatal("Ctrl+Space must go through __syncsh_rebind")
+	}
+}
+
+func TestFishInitParses(t *testing.T) {
+	bin, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish not installed")
+	}
+	out, err := Integration("fish", "/opt/syncsh", Options{
+		SuggestEnabled:  true,
+		SuggestMenu:     true,
+		PtyProxyEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/init.fish"
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "--no-config", "--no-execute", path)
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish rejected init: %v\n%s\n%s", err, got, out)
+	}
+}
+
+func TestNuInitParses(t *testing.T) {
+	bin, err := exec.LookPath("nu")
+	if err != nil {
+		t.Skip("nu not installed")
+	}
+	out, err := Integration("nu", "/opt/syncsh", Options{
+		SuggestEnabled:  true,
+		SuggestMenu:     true,
+		PtyProxyEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/init.nu"
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "--no-config-file", "-c", "nu-check "+path)
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("nu rejected init: %v\n%s\n%s", err, got, out)
 	}
 }
