@@ -17,6 +17,7 @@ func newSearchCmd() *cobra.Command {
 		exact       bool
 		interactive bool
 		explain     bool
+		resultFile  string
 	)
 	cmd := &cobra.Command{
 		Use:   "search [query]",
@@ -42,6 +43,7 @@ func newSearchCmd() *cobra.Command {
 				Exact:       exact,
 				Interactive: interactive,
 				Explain:     explain,
+				ResultFile:  resultFile,
 			})
 		},
 	}
@@ -55,6 +57,7 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&exact, "exact", false, "substring match instead of fuzzy ranking")
 	cmd.Flags().BoolVar(&explain, "explain", false, "print ranking score breakdown")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open fuzzy search TUI (Ctrl+R widget)")
+	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
 	return cmd
 }
 
@@ -76,28 +79,44 @@ func newInspectCmd() *cobra.Command {
 }
 
 func newSuggestCmd() *cobra.Command {
-	var prefix, cwd string
-	var list bool
+	var prefix, cwd, resultFile string
+	var list, interactive bool
 	cmd := &cobra.Command{
 		Use:   "suggest",
 		Short: "Print the best history prefix match for inline shell suggestions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSuggest(cmd, prefix, cwd, list)
+			return runSuggest(cmd, prefix, cwd, list, interactive, resultFile)
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed command prefix")
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory used for ranking")
 	cmd.Flags().BoolVar(&list, "list", false, "print ranked prefix matches, one per line")
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open the suggestion overlay TUI")
+	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
 	return cmd
 }
 
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init {zsh|bash|fish}",
+		Use:   "init {zsh|bash|fish|nu}",
 		Short: "Print shell integration for the given shell",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runInit,
 	}
+}
+
+func newPtyProxyCmd() *cobra.Command {
+	var shellPath string
+	cmd := &cobra.Command{
+		Use:    "pty-proxy",
+		Short:  "Wrap a shell in a terminal proxy for overlay TUIs",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPtyProxy(shellPath)
+		},
+	}
+	cmd.Flags().StringVar(&shellPath, "shell", "", "absolute path of the shell to spawn")
+	return cmd
 }
 
 func newImportCmd() *cobra.Command {

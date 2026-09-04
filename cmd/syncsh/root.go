@@ -44,6 +44,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newSearchCmd())
 	cmd.AddCommand(newSuggestCmd())
 	cmd.AddCommand(newAgentCmd())
+	cmd.AddCommand(newPtyProxyCmd())
 	cmd.AddCommand(newStatsCmd())
 	cmd.AddCommand(newInspectCmd())
 	cmd.AddCommand(newInitCmd())

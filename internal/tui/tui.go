@@ -17,31 +17,39 @@ import (
 )
 
 type Options struct {
-	Query     string
-	Cwd       string
-	DeviceID  string
-	SessionID string
-	Widget    bool
-	Delete    func(history.Entry) error
+	Query          string
+	Cwd            string
+	DeviceID       string
+	SessionID      string
+	Widget         bool
+	OverlayPercent int
+	ResultFile     string
+	Delete         func(history.Entry) error
 }
 
 type model struct {
-	input     textinput.Model
-	all       []history.Entry
-	visible   []history.Entry
-	cursor    int
-	cwd       string
-	deviceID  string
-	sessionID string
-	cwdOnly   bool
-	selected  string
-	print     bool
-	run       bool
-	quitting  bool
-	width     int
-	height    int
-	delete    func(history.Entry) error
-	status    string
+	input            textinput.Model
+	all              []history.Entry
+	visible          []history.Entry
+	cursor           int
+	cwd              string
+	deviceID         string
+	sessionID        string
+	cwdOnly          bool
+	selected         string
+	print            bool
+	run              bool
+	quitting         bool
+	width            int
+	height           int
+	overlay          bool
+	overlayPercent   int
+	overlayY         int
+	overlayH         int
+	overlayCursorRow int
+	overlayOut       io.Writer
+	delete           func(history.Entry) error
+	status           string
 }
 
 var (
@@ -80,17 +88,39 @@ func New(entries []history.Entry, opts Options) model {
 	st.Focused.Text = lipgloss.NewStyle().Foreground(colArg)
 	ti.SetStyles(st)
 	m := model{
-		input:     ti,
-		all:       entries,
-		cwd:       opts.Cwd,
-		deviceID:  opts.DeviceID,
-		sessionID: opts.SessionID,
-		width:     80,
-		height:    24,
-		delete:    opts.Delete,
+		input:          ti,
+		all:            entries,
+		cwd:            opts.Cwd,
+		deviceID:       opts.DeviceID,
+		sessionID:      opts.SessionID,
+		width:          80,
+		height:         24,
+		overlayPercent: opts.OverlayPercent,
+		delete:         opts.Delete,
 	}
 	m.refresh()
 	return m
+}
+
+func (m *model) EnableOverlay(st OverlayState) {
+	m.overlay = true
+	m.overlayOut = st.Out
+	m.overlayCursorRow = st.CursorRow
+	if st.TermCols > 0 {
+		m.width = st.TermCols
+	}
+	if st.TermRows > 0 {
+		m.height = st.TermRows
+	}
+	m.overlayH = st.RectH
+	if m.overlayH < 1 || m.overlayH > m.height {
+		m.overlayH = overlayRows(m.height, m.overlayPercent)
+	}
+	m.overlayY = st.RectY
+	if m.overlayY < 0 || m.overlayY+m.overlayH > m.height {
+		m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
+	}
+	m.input.SetWidth(max(8, m.width-14))
 }
 
 func Filter(entries []history.Entry, query, cwd string, cwdOnly bool) []history.Entry {
@@ -180,7 +210,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = max(1, msg.Width)
-		m.height = max(1, msg.Height)
+		if m.overlay {
+			m.height = max(1, msg.Height)
+			m.overlayH = overlayRows(m.height, m.overlayPercent)
+			m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
+		} else {
+			m.height = max(1, msg.Height)
+		}
 		m.input.SetWidth(max(8, m.width-14))
 		return m, nil
 	case tea.KeyReleaseMsg:
@@ -241,6 +277,9 @@ func (m model) View() tea.View {
 	}
 	w := max(1, m.width)
 	h := max(1, m.height)
+	if m.overlay {
+		h = max(1, m.overlayH)
+	}
 	// Leave one column so a full-width line plus '\n' does not wrap
 	// (terminals advance to the next row after the last column).
 	inner := max(1, w-1)
@@ -269,7 +308,12 @@ func (m model) View() tea.View {
 	b.WriteString(input)
 
 	v := tea.NewView(b.String())
-	v.AltScreen = true
+	// Overlay is Atuin Viewport::Fixed: we CUP the popup ourselves.
+	// Fullscreen (no overlay) uses the alt-screen, like Viewport::Fullscreen.
+	v.AltScreen = !m.overlay
+	if m.overlay {
+		drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+	}
 	return v
 }
 
@@ -444,31 +488,69 @@ func WriteSelection(out io.Writer, cmd string, run bool) {
 	fmt.Fprintln(out, cmd)
 }
 
+func writeSelectionTo(out io.Writer, resultFile, cmd string, run bool) error {
+	if resultFile == "" {
+		WriteSelection(out, cmd, run)
+		return nil
+	}
+	f, err := os.OpenFile(resultFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	WriteSelection(f, cmd, run)
+	return nil
+}
+
 func Run(entries []history.Entry, query string, out io.Writer) error {
 	return RunOpts(entries, Options{Query: query}, out)
 }
 
 func RunOpts(entries []history.Entry, opts Options, out io.Writer) error {
 	m := New(entries, opts)
-	var progOpts []tea.ProgramOption
+	var (
+		p        *tea.Program
+		cleanup  func()
+		err      error
+		progOpts []tea.ProgramOption
+	)
 	if opts.Widget {
-		in, outTTY, closeFn, err := OpenTTY()
-		if err == nil {
-			defer closeFn()
-			progOpts = append(progOpts, tea.WithInput(in), tea.WithOutput(outTTY))
+		p, cleanup, err = widgetProgram(&m, func(termRows int) int {
+			return overlayRows(termRows, opts.OverlayPercent)
+		})
+		if err != nil {
+			return err
 		}
+		defer cleanup()
+	} else {
+		p = tea.NewProgram(m, progOpts...)
 	}
-	p := tea.NewProgram(m, progOpts...)
 	final, err := p.Run()
 	if err != nil {
 		return err
 	}
 	if got, ok := final.(model); ok {
 		if cmd, ok := got.SelectedCommand(); ok {
-			WriteSelection(out, cmd, opts.Widget && got.RunSelected())
+			return writeWidgetSelection(out, opts, cmd, got.RunSelected())
+		}
+	} else if got, ok := final.(*model); ok {
+		if cmd, ok := got.SelectedCommand(); ok {
+			return writeWidgetSelection(out, opts, cmd, got.RunSelected())
 		}
 	}
 	return nil
+}
+
+// writeWidgetSelection matches Atuin: TUI on stdout, selected command on
+// stderr so the shell fd-swap can capture it. --result-file is for nushell.
+func writeWidgetSelection(out io.Writer, opts Options, cmd string, run bool) error {
+	if opts.ResultFile != "" {
+		return writeSelectionTo(out, opts.ResultFile, cmd, opts.Widget && run)
+	}
+	if opts.Widget {
+		return writeSelectionTo(os.Stderr, "", cmd, run)
+	}
+	return writeSelectionTo(out, "", cmd, run)
 }
 
 func OpenTTY() (in *os.File, out *os.File, closeFn func(), err error) {

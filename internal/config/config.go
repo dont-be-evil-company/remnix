@@ -19,6 +19,7 @@ type Config struct {
 	Database           Database `yaml:"-"`
 	Sync               Sync     `yaml:"sync"`
 	Suggest            Suggest  `yaml:"suggest"`
+	PtyProxy           PtyProxy `yaml:"pty_proxy"`
 	DisableAutoMigrate bool     `yaml:"disable_auto_migrate,omitempty"`
 }
 
@@ -136,6 +137,73 @@ type SuggestIcons struct {
 	Typed      string `yaml:"typed,omitempty"`
 	History    string `yaml:"history,omitempty"`
 	Completion string `yaml:"completion,omitempty"`
+}
+
+// PtyProxy wraps the interactive shell in a terminal proxy so widget TUIs can
+// snapshot the live screen and draw a height-limited panel over it.
+type PtyProxy struct {
+	Enabled *bool          `yaml:"enabled,omitempty"`
+	Height  OverlayPercent `yaml:"height,omitempty"`
+}
+
+func (p PtyProxy) IsEnabled() bool {
+	return p.Enabled != nil && *p.Enabled
+}
+
+// HeightPercent is the Ctrl+R overlay height as 1-100 of the terminal.
+// Unset, 0, or 100 means the full screen (same as the alt-screen widget).
+func (p PtyProxy) HeightPercent() int {
+	return p.Height.Percent()
+}
+
+// OverlayPercent is a 1-100 terminal-height fraction. Zero means full height.
+type OverlayPercent int
+
+func (p OverlayPercent) Percent() int {
+	if p <= 0 || p >= 100 {
+		return 100
+	}
+	return int(p)
+}
+
+func (p OverlayPercent) Full() bool {
+	return p.Percent() >= 100
+}
+
+func (p *OverlayPercent) UnmarshalYAML(n *yaml.Node) error {
+	if n == nil || n.Kind == 0 || n.Tag == "!!null" {
+		*p = 0
+		return nil
+	}
+	if n.Kind != yaml.ScalarNode {
+		return fmt.Errorf("pty_proxy.height: want a percent (for example 40 or 40%%)")
+	}
+	s := strings.TrimSpace(n.Value)
+	if s == "" || s == "~" || s == "null" {
+		*p = 0
+		return nil
+	}
+	s = strings.TrimSpace(strings.TrimSuffix(s, "%"))
+	if s == "" {
+		*p = 0
+		return nil
+	}
+	var f float64
+	if _, err := fmt.Sscanf(s, "%f", &f); err != nil {
+		return fmt.Errorf("pty_proxy.height: invalid percent %q", n.Value)
+	}
+	if f > 0 && f < 1 {
+		f *= 100
+	}
+	v := int(f + 0.5)
+	if v < 0 {
+		v = 0
+	}
+	if v > 100 {
+		v = 100
+	}
+	*p = OverlayPercent(v)
+	return nil
 }
 
 // Suggest is inline history completion (zsh ghost text).

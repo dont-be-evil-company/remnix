@@ -9,7 +9,7 @@ import (
 
 func TestIntegrationSupported(t *testing.T) {
 	opts := Options{SuggestEnabled: true, SuggestAccept: []string{"Right"}}
-	for _, sh := range []string{"zsh", "bash", "fish"} {
+	for _, sh := range []string{"zsh", "bash", "fish", "nu"} {
 		out, err := Integration(sh, "syncsh", opts)
 		if err != nil {
 			t.Fatalf("%s: %v", sh, err)
@@ -19,6 +19,12 @@ func TestIntegrationSupported(t *testing.T) {
 		}
 		if sh == "zsh" && !strings.Contains(out, `"$__syncsh_bin" agent`) {
 			t.Fatal("zsh hook must start the history agent")
+		}
+		if sh == "bash" && !strings.Contains(out, `__syncsh_agent_ensure`) {
+			t.Fatal("bash hook must start the history agent")
+		}
+		if sh == "fish" && !strings.Contains(out, `__syncsh_agent_ensure`) {
+			t.Fatal("fish hook must start the history agent")
 		}
 		if !strings.Contains(out, "search --interactive") {
 			t.Fatalf("%s hook missing interactive search", sh)
@@ -58,8 +64,17 @@ func TestCtrlRBindings(t *testing.T) {
 	if clearAt < 0 || redisplayAt < 0 || invalidateAt < 0 || tuiAt < 0 {
 		t.Fatal("syncsh-search missing clear/redisplay/zle -I before TUI")
 	}
-	if clearAt >= redisplayAt || redisplayAt >= invalidateAt || invalidateAt >= tuiAt {
-		t.Fatal("syncsh-search must clear, redisplay, then zle -I before opening the TUI")
+	if !strings.Contains(searchFn, "__syncsh_widget_run search --interactive") {
+		t.Fatal("syncsh-search must run the TUI via __syncsh_widget_run")
+	}
+	if !strings.Contains(zsh, "3>&1 1>&2 2>&3 3>&-") {
+		t.Fatal("widget runner must swap stdout/stderr like Atuin so the TUI owns the TTY")
+	}
+	if strings.Contains(zsh, "--result-file") {
+		t.Fatal("zsh must not use --result-file; Atuin prints the selection on stderr")
+	}
+	if strings.Contains(searchFn, `selected="$("$__syncsh_bin" search --interactive`) {
+		t.Fatal("syncsh-search must not capture TUI stdout with command substitution")
 	}
 	if !strings.Contains(searchFn, "echoti ed") {
 		t.Fatal("syncsh-search must clear-to-eos after TUI in case alt-screen restored junk")
@@ -94,12 +109,31 @@ func TestCtrlRBindings(t *testing.T) {
 	if !strings.Contains(bashHook, "accept-line") {
 		t.Fatal("bash should run the selected command")
 	}
+	if !strings.Contains(bashHook, "3>&1 1>&2 2>&3 3>&-") {
+		t.Fatal("bash widget must swap stdout/stderr like Atuin")
+	}
+	if strings.Contains(bashHook, "--result-file") {
+		t.Fatal("bash must not use --result-file")
+	}
 	fishHook, _ := Integration("fish", "syncsh", opts)
 	if !strings.Contains(fishHook, `bind \cr`) {
 		t.Fatal("fish missing bind \\cr")
 	}
 	if !strings.Contains(fishHook, "commandline -f execute") {
 		t.Fatal("fish should run the selected command")
+	}
+	if !strings.Contains(fishHook, "3>&1 1>&2 2>&3 3>&-") {
+		t.Fatal("fish widget must swap stdout/stderr like Atuin")
+	}
+	nuHook, _ := Integration("nu", "syncsh", opts)
+	if !strings.Contains(nuHook, "keycode: char_r") {
+		t.Fatal("nu missing Ctrl+R keybinding")
+	}
+	if !strings.Contains(nuHook, "syncsh-search") {
+		t.Fatal("nu missing search command")
+	}
+	if !strings.Contains(nuHook, "--result-file") {
+		t.Fatal("nu keeps --result-file; it cannot fd-swap like bash/zsh/fish")
 	}
 }
 
@@ -330,5 +364,111 @@ func TestZshSuggestCompletions(t *testing.T) {
 	out, err := exec.Command(zsh, "-n", f.Name()).CombinedOutput()
 	if err != nil {
 		t.Fatalf("zsh -n: %v\n%s", err, out)
+	}
+}
+
+func TestPtyProxyPreamble(t *testing.T) {
+	off, err := Integration("zsh", "/opt/syncsh", Options{SuggestEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(off, "pty-proxy") {
+		t.Fatal("preamble must be omitted when pty_proxy is off")
+	}
+	on, err := Integration("zsh", "/opt/syncsh", Options{SuggestEnabled: true, PtyProxyEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(on, "exec '/opt/syncsh' pty-proxy") {
+		t.Fatal("zsh missing pty-proxy exec")
+	}
+	if !strings.Contains(on, "SYNCSH_PTY_PROXY_ACTIVE") {
+		t.Fatal("missing active guard")
+	}
+	bashOn, _ := Integration("bash", "/opt/syncsh", Options{PtyProxyEnabled: true})
+	if !strings.Contains(bashOn, "pty-proxy --shell \"$BASH\"") {
+		t.Fatal("bash preamble should forward $BASH")
+	}
+	fishOn, _ := Integration("fish", "/opt/syncsh", Options{PtyProxyEnabled: true})
+	if !strings.Contains(fishOn, "pty-proxy --shell (status fish-path)") {
+		t.Fatal("fish preamble should forward fish-path")
+	}
+	nuOn, _ := Integration("nu", "/opt/syncsh", Options{PtyProxyEnabled: true})
+	if !strings.Contains(nuOn, "pty-proxy --shell $nu.current-exe") {
+		t.Fatal("nu preamble should forward current-exe")
+	}
+}
+
+func TestZshOverlayMenuWhenProxy(t *testing.T) {
+	post, err := Integration("zsh", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true, SuggestAccept: []string{"Right"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(post, "__syncsh_suggest_menu_box") {
+		t.Fatal("without proxy, POSTDISPLAY menu must remain")
+	}
+	if strings.Contains(post, "suggest --interactive") {
+		t.Fatal("without proxy, overlay suggest TUI should not bind")
+	}
+	over, err := Integration("zsh", "syncsh", Options{
+		SuggestEnabled:  true,
+		SuggestMenu:     true,
+		PtyProxyEnabled: true,
+		SuggestAccept:   []string{"Right"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(over, "__syncsh_suggest_menu_box") || strings.Contains(over, "_main_complete") {
+		t.Fatal("proxy-on must not emit POSTDISPLAY menu or compsys capture")
+	}
+	if !strings.Contains(over, "suggest --interactive") || !strings.Contains(over, "bindkey '^@'") {
+		t.Fatal("proxy-on must bind Ctrl+Space overlay menu")
+	}
+	if !strings.Contains(over, "POSTDISPLAY") {
+		t.Fatal("ghost text must remain with the overlay menu")
+	}
+}
+
+func TestBashBleGhostAndOverlayMenu(t *testing.T) {
+	out, err := Integration("bash", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ble/complete/auto-complete/source:syncsh") {
+		t.Fatal("bash should register a ble.sh autosuggest source")
+	}
+	if !strings.Contains(out, `__syncsh_rpc suggest`) {
+		t.Fatal("ble.sh source should use agent RPC")
+	}
+	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `\C-@`) {
+		t.Fatal("bash should bind Ctrl+Space overlay menu")
+	}
+	off, _ := Integration("bash", "syncsh", Options{SuggestEnabled: false})
+	if strings.Contains(off, "source:syncsh") {
+		t.Fatal("disabled suggest should not emit ble.sh source")
+	}
+}
+
+func TestFishOverlayMenuNoGhost(t *testing.T) {
+	out, err := Integration("fish", "syncsh", Options{SuggestEnabled: true, SuggestMenu: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `bind \c@`) {
+		t.Fatal("fish should bind Ctrl+Space overlay menu")
+	}
+	if strings.Contains(out, "POSTDISPLAY") {
+		t.Fatal("fish has no POSTDISPLAY ghost")
+	}
+}
+
+func TestNuOverlayMenu(t *testing.T) {
+	out, err := Integration("nu", "syncsh", Options{SuggestMenu: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "syncsh-suggest-menu") || !strings.Contains(out, "keycode: space") {
+		t.Fatal("nu should bind Ctrl+Space overlay menu")
 	}
 }

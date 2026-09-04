@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/config"
 	"github.com/mistweaverco/syncsh/internal/history"
 	"github.com/mistweaverco/syncsh/internal/importers"
+	"github.com/mistweaverco/syncsh/internal/ptyproxy"
 	"github.com/mistweaverco/syncsh/internal/search"
 	"github.com/mistweaverco/syncsh/internal/shell"
 	"github.com/mistweaverco/syncsh/internal/stats"
@@ -31,6 +33,7 @@ type searchOptions struct {
 	Exact       bool
 	Interactive bool
 	Explain     bool
+	ResultFile  string
 }
 
 func openApp() (*app.App, error) {
@@ -96,12 +99,14 @@ func runSearch(cmd *cobra.Command, opts searchOptions) error {
 			cwd, _ = os.Getwd()
 		}
 		return tui.RunOpts(entries, tui.Options{
-			Query:     opts.Query,
-			Cwd:       cwd,
-			DeviceID:  a.Config.DeviceID,
-			SessionID: opts.Session,
-			Widget:    true,
-			Delete:    func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+			Query:          opts.Query,
+			Cwd:            cwd,
+			DeviceID:       a.Config.DeviceID,
+			SessionID:      opts.Session,
+			Widget:         true,
+			OverlayPercent: a.Config.PtyProxy.HeightPercent(),
+			ResultFile:     opts.ResultFile,
+			Delete:         func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
 		}, cmd.OutOrStdout())
 	}
 	results := search.RankWith(opts.Query, entries, opts.Exact, search.Context{
@@ -174,22 +179,17 @@ func runInspect(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runSuggest(cmd *cobra.Command, prefix, cwd string, list bool) error {
+func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, resultFile string) error {
+	if interactive {
+		return runSuggestInteractive(cmd, prefix, cwd, resultFile)
+	}
 	if prefix == "" {
 		return nil
 	}
 	if list {
-		items, err := agent.DialRPCList("suggest-list", prefix, cwd)
+		items, err := loadSuggestList(prefix, cwd)
 		if err != nil {
-			a, err := openApp()
-			if err != nil {
-				return err
-			}
-			defer a.Close()
-			items, err = agent.NewService(a).SuggestList(prefix, cwd)
-			if err != nil {
-				return err
-			}
+			return err
 		}
 		for _, s := range items {
 			fmt.Fprintln(cmd.OutOrStdout(), s)
@@ -217,6 +217,59 @@ func runSuggest(cmd *cobra.Command, prefix, cwd string, list bool) error {
 	return nil
 }
 
+func loadSuggestList(prefix, cwd string) ([]string, error) {
+	items, err := agent.DialRPCList("suggest-list", prefix, cwd)
+	if err == nil {
+		return items, nil
+	}
+	a, err := openApp()
+	if err != nil {
+		return nil, err
+	}
+	defer a.Close()
+	if prefix != "" {
+		return agent.NewService(a).SuggestList(prefix, cwd)
+	}
+	entries, err := history.NewStore(a.DB).List(history.Filter{Unique: true, Limit: 5000})
+	if err != nil {
+		return nil, err
+	}
+	return search.Suggestions(prefix, entries, search.Context{
+		Cwd:      cwd,
+		DeviceID: a.Config.DeviceID,
+	}, a.Config.Suggest.MenuLimit()), nil
+}
+
+func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile string) error {
+	items, err := loadSuggestList(prefix, cwd)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	h := cfg.Suggest.MenuLimit() + 3
+	return tui.RunSuggestMenu(tui.SuggestMenuOptions{
+		Prefix:        prefix,
+		Items:         items,
+		TypedIcon:     cfg.Suggest.IconTyped(),
+		HistoryIcon:   cfg.Suggest.IconHistory(),
+		OverlayHeight: h,
+		Widget:        true,
+		ResultFile:    resultFile,
+	}, cmd.OutOrStdout())
+}
+
+func runPtyProxy(shellPath string) error {
+	err := ptyproxy.Run(shellPath)
+	var ee ptyproxy.ExitError
+	if errors.As(err, &ee) {
+		os.Exit(ee.Code)
+	}
+	return err
+}
+
 func runInit(cmd *cobra.Command, args []string) error {
 	bin, err := os.Executable()
 	if err != nil {
@@ -230,11 +283,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		SuggestEnabled:     cfg.Suggest.IsEnabled(),
 		SuggestAccept:      cfg.Suggest.AcceptKeys(),
 		SuggestMenu:        cfg.Suggest.MenuEnabled(),
-		SuggestCompletions: cfg.Suggest.MenuEnabled() && cfg.Suggest.CompletionsEnabled(),
+		SuggestCompletions: cfg.Suggest.MenuEnabled() && cfg.Suggest.CompletionsEnabled() && !cfg.PtyProxy.IsEnabled(),
 		SuggestMenuMax:     cfg.Suggest.MenuLimit(),
 		IconTyped:          cfg.Suggest.IconTyped(),
 		IconHistory:        cfg.Suggest.IconHistory(),
 		IconCompletion:     cfg.Suggest.IconCompletion(),
+		PtyProxyEnabled:    cfg.PtyProxy.IsEnabled(),
 	})
 	if err != nil {
 		return err

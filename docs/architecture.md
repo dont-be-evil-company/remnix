@@ -5,7 +5,7 @@ SQLite, optionally encrypts them into event bundles, and stores those objects
 on a remote filesystem. There is no syncsh server.
 
 ```text
-TUI / wizard / picker / shell agent
+TUI / wizard / picker / shell agent / pty-proxy
         │
    internal/agent      (unix socket RPC: suggest, history start/end)
         │

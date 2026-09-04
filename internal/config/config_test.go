@@ -24,6 +24,9 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := AgentSocketPath(); got != "/tmp/syncsh-run/agent.sock" {
 		t.Fatalf("AgentSocketPath = %q", got)
 	}
+	if got := PtyProxySocketPath(); !strings.HasPrefix(got, "/tmp/syncsh-run/pty-proxy-") {
+		t.Fatalf("PtyProxySocketPath = %q", got)
+	}
 	if got := ConfigPath(); got != filepath.Join("/tmp/syncsh-cfg", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got)
 	}
@@ -509,6 +512,66 @@ func TestLoadSuggestMenu(t *testing.T) {
 	}
 	if cfg.Suggest.MenuLimit() != 32 {
 		t.Fatalf("cap 32, got %d", cfg.Suggest.MenuLimit())
+	}
+}
+
+func TestLoadPtyProxy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PtyProxy.IsEnabled() {
+		t.Fatal("pty_proxy should default off")
+	}
+	if err := os.WriteFile(ConfigPath(), []byte("version: 2\npty_proxy:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.PtyProxy.IsEnabled() {
+		t.Fatal("pty_proxy should be on")
+	}
+	if cfg.PtyProxy.HeightPercent() != 100 {
+		t.Fatalf("omitted height should be full, got %d", cfg.PtyProxy.HeightPercent())
+	}
+}
+
+func TestLoadPtyProxyHeight(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SYNCSH_CONFIG_DIR", dir)
+	t.Setenv("SYNCSH_DATA_DIR", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		raw  string
+		want int
+	}{
+		{"version: 2\npty_proxy:\n  enabled: true\n  height: 40\n", 40},
+		{"version: 2\npty_proxy:\n  height: 40%\n", 40},
+		{"version: 2\npty_proxy:\n  height: \"25%\"\n", 25},
+		{"version: 2\npty_proxy:\n  height: 100\n", 100},
+		{"version: 2\npty_proxy:\n  height: 0.5\n", 50},
+	}
+	for _, tc := range cases {
+		if err := os.WriteFile(ConfigPath(), []byte(tc.raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("%q: %v", tc.raw, err)
+		}
+		if got := cfg.PtyProxy.HeightPercent(); got != tc.want {
+			t.Fatalf("%q: height %d want %d", tc.raw, got, tc.want)
+		}
 	}
 }
 

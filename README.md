@@ -59,6 +59,9 @@ eval "$(syncsh init bash)"
 
 # fish - add to ~/.config/fish/config.fish
 syncsh init fish | source
+
+# nushell - add to config.nu
+source (syncsh init nu | save -f ~/.cache/syncsh.nu; echo ~/.cache/syncsh.nu)
 ```
 
 Prefer typing the recovery key interactively. Putting `SYNCSH_RECOVERY_KEY=...`
@@ -105,11 +108,14 @@ coproc fallback) so the shell does not spawn a process on every keystroke.
 The agent is started on first use. Configure accept keys in `config.yaml`:
 
 ```yaml
+pty_proxy:
+  enabled: false       # Unix: wrap the shell so Ctrl+R / suggest overlay the prompt
+  height: 100%         # Ctrl+R overlay; omit or 100% = full screen (alt-screen). Try 40%.
 suggest:
   enabled: true
-  menu: false          # optional LSP-style picker under the prompt (zsh)
+  menu: false          # LSP-style picker (zsh POSTDISPLAY, or overlay TUI with pty_proxy)
   menu_max: 8
-  completions: false   # merge shell completions into the picker
+  completions: false   # merge shell completions into the zsh POSTDISPLAY picker
   icons:
     typed: "›"
     history: "*"
@@ -119,21 +125,50 @@ suggest:
 ```
 
 Set `enabled: false` to keep Ctrl+R without ghost text. Set `menu: true` to show a
-small list under the prompt while typing. The first row is always the text you
-typed (no item is selected until you navigate). Ghost text still previews the
-best history match; accept keys (Right, Tab, ...) insert only that ghost suffix.
-Up/Down (and Ctrl-P/N) start at the first completion or history row and rewrite
-the line to that suggestion; Enter runs it. Esc restores the typed line and
-dismisses the list. `menu_max` is the number of suggestion rows shown at once
-(the typed row stays pinned). Set `completions: true` to also list the shell’s
-own completers (carapace, git, and anything else registered with compsys), with
-descriptions when the completer provides them. Completions sit directly under
-the typed row; history follows. Typing only queries history; press Tab to load
-completions into the float (Tab again cycles; results are cached until the line
-changes). The full completion list is scrollable; a thumb on the right edge of
-the box shows where you are. Capture stops at 512 matches so a huge path
-completion cannot freeze the prompt. Icons are configurable so history and
-completions stay distinguishable.
+small list under the prompt while typing (zsh, no pty-proxy). The first row is
+always the text you typed (no item is selected until you navigate). Ghost text
+still previews the best history match; accept keys (Right, Tab, ...) insert only
+that ghost suffix. Up/Down (and Ctrl-P/N) start at the first completion or
+history row and rewrite the line to that suggestion; Enter runs it. Esc restores
+the typed line and dismisses the list. `menu_max` is the number of suggestion
+rows shown at once (the typed row stays pinned). Set `completions: true` to also
+list the shell’s own completers (carapace, git, and anything else registered
+with compsys), with descriptions when the completer provides them. Completions
+sit directly under the typed row; history follows. Typing only queries history;
+press Tab to load completions into the float (Tab again cycles; results are
+cached until the line changes). The full completion list is scrollable; a thumb
+on the right edge of the box shows where you are. Capture stops at 512 matches
+so a huge path completion cannot freeze the prompt. Icons are configurable so
+history and completions stay distinguishable.
+
+### Terminal proxy (overlay TUIs)
+
+On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `syncsh init`
+high in the shell rc. `init` then `exec`s `syncsh pty-proxy`, which sits between
+the terminal and bash, zsh, fish, or nu. Ctrl+R (and **Ctrl+Space** when
+`suggest.menu` is on) snapshot the visible screen and draw the widget in a
+band on the live prompt (Atuin-style), then restore those rows on exit.
+`pty_proxy.height` is a percent of the terminal (for example `40` or `40%`).
+Omit it, or set `100%`, for a fullscreen search on the alt-screen. Smaller
+values still keep at least five history rows plus the header, rule, help
+line, and input box. Without the proxy, those widgets still work as a
+fullscreen TUI.
+
+After changing hooks, re-run `eval "$(syncsh init zsh)"` (or start a new
+shell). Installing a new binary is not enough.
+
+Ghost text stays in each shell’s line editor:
+
+| Shell | Ghost text | Ctrl+R | Suggest overlay (Ctrl+Space) |
+| --- | --- | --- | --- |
+| zsh | `POSTDISPLAY` | yes | overlay when `pty_proxy` is on; else POSTDISPLAY menu |
+| bash | ble.sh, if loaded | yes | when `suggest.menu` is on |
+| fish | not supported (no `POSTDISPLAY`) | yes | when `suggest.menu` is on |
+| nu | not supported | yes | when `suggest.menu` is on |
+
+Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(syncsh init ...)"`
+near the top of the rc file so only the proxy re-execs, not the rest of your
+startup.
 
 ## Search / suggestions
 
@@ -144,6 +179,7 @@ syncsh search git
 syncsh search --explain git
 syncsh suggest --prefix 'git st' --cwd "$PWD"
 syncsh suggest --prefix 'git st' --cwd "$PWD" --list
+syncsh suggest --interactive --prefix 'git st' --cwd "$PWD"
 syncsh stats
 syncsh inspect                    # history stats TUI (`explore` alias)
 syncsh import histfile ~/.histfile
@@ -272,7 +308,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh gc` | Compact remote objects |
 | `syncsh database compact` | Checkpoint WAL and vacuum local SQLite |
 | `syncsh doctor` | Read-only diagnostics |
-| `syncsh init zsh\|bash\|fish` | Shell integration |
+| `syncsh init zsh\|bash\|fish\|nu` | Shell integration |
 | `syncsh version` | Version (`-v` includes rclone) |
 
 `SYNCSH_RECOVERY_KEY` is accepted by sync, unlock, device add, and key

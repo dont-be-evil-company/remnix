@@ -3,6 +3,8 @@ package shell
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mistweaverco/syncsh/internal/ptyproxy"
 )
 
 type Options struct {
@@ -14,22 +16,30 @@ type Options struct {
 	IconTyped          string
 	IconHistory        string
 	IconCompletion     string
+	PtyProxyEnabled    bool
 }
 
 func Integration(shellName, binary string, opts Options) (string, error) {
 	if binary == "" {
 		binary = "syncsh"
 	}
+	var body string
 	switch strings.ToLower(shellName) {
 	case "zsh":
-		return zsh(binary, opts), nil
+		body = zsh(binary, opts)
 	case "bash":
-		return bash(binary), nil
+		body = bash(binary, opts)
 	case "fish":
-		return fish(binary), nil
+		body = fish(binary, opts)
+	case "nu", "nushell":
+		body = nu(binary, opts)
 	default:
-		return "", fmt.Errorf("unsupported shell %q (want zsh, bash, or fish)", shellName)
+		return "", fmt.Errorf("unsupported shell %q (want zsh, bash, fish, or nu)", shellName)
 	}
+	if opts.PtyProxyEnabled {
+		return ptyproxy.Preamble(binary, shellName) + body, nil
+	}
+	return body, nil
 }
 
 func zsh(bin string, opts Options) string {
@@ -45,6 +55,17 @@ typeset -g __syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
 typeset -g __syncsh_fd=""
 typeset -g __syncsh_out=""
 typeset -g __syncsh_in=""
+
+# Atuin widget protocol (atuin.zsh __atuin_search_cmd): TUI on stdout, selected
+# command on stderr. Swap those fds under $(...) so the TUI hits the TTY and
+# REPLY captures the command. Closing fd 3 avoids leaking the capture pipe.
+__syncsh_widget_run() {
+  emulate -L zsh
+  local st
+  REPLY=$("$__syncsh_bin" "$@" 3>&1 1>&2 2>&3 3>&-)
+  st=$?
+  return $st
+}
 
 __syncsh_sock() {
   if [[ -n ${SYNCSH_RUNTIME_DIR:-} ]]; then
@@ -144,10 +165,11 @@ syncsh-search() {
     zle redisplay
   fi
   zle -I
-  selected="$("$__syncsh_bin" search --interactive --query "$LBUFFER" --cwd "$PWD" </dev/tty)" || {
+  __syncsh_widget_run search --interactive --query "$LBUFFER" --cwd "$PWD" || {
     __syncsh_suggest_suppress=0
     return
   }
+  selected="$REPLY"
   if [[ "$selected" == __syncsh_accept__:* ]]; then
     selected="${selected#__syncsh_accept__:}"
     run=1
@@ -401,7 +423,11 @@ else
 fi
 `, strings.Join(quoted, " "))
 	if opts.SuggestMenu {
-		out += zshSuggestMenu(opts)
+		if opts.PtyProxyEnabled {
+			out += zshOverlayMenu()
+		} else {
+			out += zshSuggestMenu(opts)
+		}
 	}
 	return out
 }
@@ -1231,89 +1257,43 @@ func zshQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func bash(bin string) string {
-	return fmt.Sprintf(`# syncsh bash integration
-# Add to ~/.bashrc: eval "$(%s init bash)"
-
-__syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
-
-__syncsh_preexec() {
-  if [[ -n "${COMP_LINE:-}" ]]; then
+func zshOverlayMenu() string {
+	return `
+syncsh-suggest-menu() {
+  local selected run=0
+  __syncsh_suggest_suppress=1
+  if (( ${+functions[__syncsh_suggest_clear]} )); then
+    __syncsh_suggest_clear
+    zle redisplay
+  fi
+  zle -I
+  __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || {
+    __syncsh_suggest_suppress=0
     return
-  fi
-  local cmd
-  cmd="$(HISTTIMEFORMAT= history 1 2>/dev/null | sed 's/^ *[0-9]* *//')"
-  [[ -z "$cmd" || "$cmd" == "${__syncsh_last_cmd:-}" ]] && return
-  __syncsh_last_cmd="$cmd"
-  __syncsh_id="$(%s history start --command "$cmd" --cwd "$PWD" --session "$__syncsh_session" --shell bash 2>/dev/null)" || true
-}
-
-__syncsh_precmd() {
-  local code=$?
-  if [[ -n "${__syncsh_id:-}" ]]; then
-    %s history end --id "$__syncsh_id" --exit "$code" >/dev/null 2>&1 || true
-    unset __syncsh_id
-  fi
-}
-
-__syncsh_search() {
-  local selected
-  selected="$(%s search --interactive --query "$READLINE_LINE" --cwd "$PWD" </dev/tty)" || return
+  }
+  selected="$REPLY"
   if [[ "$selected" == __syncsh_accept__:* ]]; then
-    READLINE_LINE="${selected#__syncsh_accept__:}"
-    READLINE_POINT=${#READLINE_LINE}
-    bind '"\C-x\C-n": accept-line'
-  elif [[ -n "$selected" ]]; then
-    READLINE_LINE="$selected"
-    READLINE_POINT=${#READLINE_LINE}
-    bind '"\C-x\C-n": ""'
+    selected="${selected#__syncsh_accept__:}"
+    run=1
+  fi
+  if [[ -n "$selected" ]]; then
+    LBUFFER="$selected"
+    RBUFFER=""
+  fi
+  if (( ${+functions[__syncsh_suggest_clear]} )); then
+    __syncsh_suggest_clear
+    zle redisplay
+    [[ -n ${terminfo[ed]:-} ]] && echoti ed
+  fi
+  zle reset-prompt
+  if (( run )); then
+    zle .accept-line
   else
-    bind '"\C-x\C-n": ""'
+    __syncsh_suggest_suppress=0
   fi
 }
-
-trap '__syncsh_preexec' DEBUG
-if [[ "${PROMPT_COMMAND:-}" != *__syncsh_precmd* ]]; then
-  PROMPT_COMMAND="__syncsh_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
-fi
-bind '"\C-x\C-n": ""'
-bind -x '"\C-x\C-r": __syncsh_search'
-bind '"\C-r": "\C-x\C-r\C-x\C-n"'
-`, bin, bin, bin, bin)
-}
-
-func fish(bin string) string {
-	return fmt.Sprintf(`# syncsh fish integration
-# Add to ~/.config/fish/config.fish: %s init fish | source
-
-if not set -q __syncsh_session
-    set -g __syncsh_session "$fish_pid"-(date +%%s)
-end
-
-function __syncsh_preexec --on-event fish_preexec
-    set -g __syncsh_id (%s history start --command "$argv[1]" --cwd "$PWD" --session "$__syncsh_session" --shell fish 2>/dev/null)
-end
-
-function __syncsh_postexec --on-event fish_postexec
-    set -l code $status
-    if set -q __syncsh_id
-        %s history end --id "$__syncsh_id" --exit $code >/dev/null 2>&1
-        set -e __syncsh_id
-    end
-end
-
-function syncsh-search
-    set -l selected
-    %s search --interactive --query (commandline -b) --cwd "$PWD" </dev/tty | read -l selected
-    if string match -q '__syncsh_accept__:*' -- "$selected"
-        set selected (string replace -r '^__syncsh_accept__:' '' -- "$selected")
-        commandline -r -- "$selected"
-        commandline -f execute
-    else if test -n "$selected"
-        commandline -r -- "$selected"
-        commandline -f repaint
-    end
-end
-bind \cr syncsh-search
-`, bin, bin, bin, bin)
+zle -N syncsh-suggest-menu
+bindkey '^@' syncsh-suggest-menu
+bindkey -M viins '^@' syncsh-suggest-menu
+`
 }

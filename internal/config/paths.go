@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const appName = "syncsh"
@@ -135,4 +136,9 @@ func RuntimeDir() string {
 
 func AgentSocketPath() string {
 	return filepath.Join(RuntimeDir(), "agent.sock")
+}
+
+// PtyProxySocketPath is the per-process screen-snapshot socket for pty-proxy.
+func PtyProxySocketPath() string {
+	return filepath.Join(RuntimeDir(), "pty-proxy-"+strconv.Itoa(os.Getpid())+".sock")
 }
