@@ -110,14 +110,14 @@ func FetchGeom() (Snapshot, io.ReadCloser, error) {
 	if path == "" {
 		return Snapshot{}, nil, ErrNoProxy
 	}
-	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+	conn, err := net.DialTimeout("unix", path, 50*time.Millisecond)
 	if err != nil {
 		return Snapshot{}, nil, err
 	}
 	if uc, ok := conn.(*net.UnixConn); ok {
 		_ = uc.CloseWrite()
 	}
-	_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	_ = conn.SetDeadline(time.Now().Add(50 * time.Millisecond))
 	s, err := DecodeHeader(conn)
 	if err != nil {
 		_ = conn.Close()

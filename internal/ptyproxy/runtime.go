@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
@@ -95,19 +96,40 @@ func Run(shellPath string) error {
 	}
 	defer func() { _ = term.Restore(int(in.Fd()), old) }()
 
-	winch := make(chan os.Signal, 1)
+	// Kitty/tmux often deliver SIGWINCH before TIOCGWINSZ shows the new
+	// size, or skip WINCH entirely when a split is closed. Poll the outer
+	// tty so the inner PTY catches up either way.
+	winch := make(chan os.Signal, 8)
 	signal.Notify(winch, syscall.SIGWINCH)
 	defer signal.Stop(winch)
+	var sizeMu sync.Mutex
+	lastCols, lastRows := cols, rows
+	applySize := func(force bool) {
+		c, r := outerWinsize(in, out)
+		if c < 1 || r < 1 {
+			return
+		}
+		sizeMu.Lock()
+		same := c == lastCols && r == lastRows
+		if !force && same {
+			sizeMu.Unlock()
+			return
+		}
+		lastCols, lastRows = c, r
+		sizeMu.Unlock()
+		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(r), Cols: uint16(c)})
+		scr.Resize(c, r)
+	}
 	go func() {
-		for range winch {
-			if err := pty.InheritSize(out, ptmx); err != nil {
-				continue
+		tick := time.NewTicker(150 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-winch:
+				applySize(true)
+			case <-tick.C:
+				applySize(false)
 			}
-			termRows, termCols, err := pty.Getsize(out)
-			if err != nil || termCols < 1 || termRows < 1 {
-				continue
-			}
-			scr.Resize(termCols, termRows)
 		}
 	}()
 
@@ -184,6 +206,19 @@ func openOuterTTY() (in, out *os.File, err error) {
 		return nil, nil, err
 	}
 	return in, os.NewFile(uintptr(fd), "/dev/tty"), nil
+}
+
+func outerWinsize(in, out *os.File) (cols, rows int) {
+	for _, f := range []*os.File{out, in} {
+		if f == nil {
+			continue
+		}
+		c, r, err := term.GetSize(int(f.Fd()))
+		if err == nil && c >= 1 && r >= 1 {
+			return c, r
+		}
+	}
+	return 0, 0
 }
 
 func childEnv(shellPath string) []string {

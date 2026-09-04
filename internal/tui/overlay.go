@@ -21,6 +21,10 @@ const (
 	SearchListMinRows      = 5
 	SearchChromeRows       = 4
 	SearchMinOverlayHeight = SearchChromeRows + SearchListMinRows
+	// overlayGeomWait is how long first paint may block on the snapshot
+	// header. zsh gets it in ~1ms; fish/nu used to wait the full socket
+	// deadline and felt hundreds of ms slower.
+	overlayGeomWait = 20 * time.Millisecond
 )
 
 // OverlayState is the geometry for a pty-proxy popup. Matches Atuin's
@@ -106,75 +110,107 @@ func composeOverlay(termRows, y, h int, bg []string, body string) string {
 // beginOverlay follows Atuin interactive.rs history():
 //
 //   - the paint writer must be a TTY (/dev/tty, even if os.Stdout is a pipe).
-//   - height < terminal → popup. Geometry comes from pty-proxy when the
-//     socket answers; otherwise GetSize on the paint TTY so fish/nu still
-//     get a 40% band instead of alt-screen.
-//     Row ANSI is read in the background so a full-screen greeting cannot
-//     stall the first paint for the snapshot deadline.
+//   - height < terminal → popup. First paint uses GetSize so fish/nu are
+//     not stalled on the snapshot socket (zsh answers in ~1ms; others
+//     used to wait out the dial/header deadline). The proxy header is
+//     waited on for overlayGeomWait; restore rows arrive in the background.
 //   - height >= terminal → nil (caller uses alt-screen).
 func beginOverlay(w *os.File, rowsFor func(termRows int) int) *overlaySession {
 	if w == nil || !isTerminalFile(w) {
 		return nil
 	}
-	snap, rest, err := overlaySnapshot(w)
-	if err != nil {
+	cols, rows, err := term.GetSize(int(w.Fd()))
+	if err != nil || rows < 2 || cols < 1 {
 		return nil
 	}
+	snap := ptyproxy.Snapshot{Rows: rows, Cols: cols, CursorRow: rows - 1}
+
+	gch := make(chan overlayGeom, 1)
+	go func() {
+		s, rest, err := ptyproxy.FetchGeom()
+		gch <- overlayGeom{snap: s, rest: rest, err: err}
+	}()
+
+	var rest io.ReadCloser
+	select {
+	case g := <-gch:
+		snap, rest = applyOverlayGeom(snap, g)
+		gch = nil
+	case <-time.After(overlayGeomWait):
+	}
+
 	height := snap.Rows
 	if rowsFor != nil {
 		height = rowsFor(snap.Rows)
 	}
 	if height < 1 || height >= snap.Rows {
-		if rest != nil {
-			_ = rest.Close()
-		}
+		closeOverlayGeom(gch, rest)
 		return nil
 	}
 	place := ptyproxy.Place(snap.CursorRow, snap.Rows, snap.Cols, height)
 	ptyproxy.Prepare(w, snap, place)
 	ch := make(chan []string, 1)
-	if rest != nil {
-		go func() {
-			defer rest.Close()
-			if c, ok := rest.(interface{ SetDeadline(time.Time) error }); ok {
-				_ = c.SetDeadline(time.Now().Add(500 * time.Millisecond))
-			}
-			rows, err := ptyproxy.ReadRows(rest, snap.Rows)
-			if err != nil {
-				return
-			}
-			ch <- rows
-		}()
-	}
+	go readOverlayRows(gch, rest, snap.Rows, ch)
 	return &overlaySession{snap: snap, place: place, rows: ch}
 }
 
-// overlaySnapshot prefers the pty-proxy screen (cursor + restore rows). If
-// that is missing, fall back to the paint TTY's size so a 40% popup still
-// works in fish/nu when stdout is a pipe and the snapshot socket is late.
-func overlaySnapshot(w *os.File) (ptyproxy.Snapshot, io.ReadCloser, error) {
-	snap, rest, err := ptyproxy.FetchGeom()
-	if err == nil && snap.Rows >= 2 && snap.Cols >= 1 {
-		return snap, rest, nil
+type overlayGeom struct {
+	snap ptyproxy.Snapshot
+	rest io.ReadCloser
+	err  error
+}
+
+func applyOverlayGeom(fallback ptyproxy.Snapshot, g overlayGeom) (ptyproxy.Snapshot, io.ReadCloser) {
+	if g.err == nil && g.snap.Rows >= 2 && g.snap.Cols >= 1 {
+		return g.snap, g.rest
 	}
+	if g.rest != nil {
+		_ = g.rest.Close()
+	}
+	return fallback, nil
+}
+
+func closeOverlayGeom(gch <-chan overlayGeom, rest io.ReadCloser) {
 	if rest != nil {
 		_ = rest.Close()
+		return
 	}
-	cols, rows, gerr := term.GetSize(int(w.Fd()))
-	if gerr != nil || rows < 2 || cols < 1 {
-		if err != nil {
-			return ptyproxy.Snapshot{}, nil, err
-		}
-		if gerr != nil {
-			return ptyproxy.Snapshot{}, nil, gerr
-		}
-		return ptyproxy.Snapshot{}, nil, ptyproxy.ErrNoProxy
+	if gch == nil {
+		return
 	}
-	return ptyproxy.Snapshot{
-		Rows:      rows,
-		Cols:      cols,
-		CursorRow: rows - 1,
-	}, nil, nil
+	go func() {
+		g := <-gch
+		if g.rest != nil {
+			_ = g.rest.Close()
+		}
+	}()
+}
+
+func readOverlayRows(gch <-chan overlayGeom, rest io.ReadCloser, paintedRows int, ch chan<- []string) {
+	n := paintedRows
+	if rest == nil && gch != nil {
+		select {
+		case g := <-gch:
+			_, rest = applyOverlayGeom(ptyproxy.Snapshot{}, g)
+			if rest != nil && g.err == nil {
+				n = g.snap.Rows
+			}
+		case <-time.After(500 * time.Millisecond):
+			return
+		}
+	}
+	if rest == nil {
+		return
+	}
+	defer rest.Close()
+	if c, ok := rest.(interface{ SetDeadline(time.Time) error }); ok {
+		_ = c.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	}
+	rows, err := ptyproxy.ReadRows(rest, n)
+	if err != nil || n != paintedRows {
+		return
+	}
+	ch <- rows
 }
 
 func (s *overlaySession) end(w *os.File) {

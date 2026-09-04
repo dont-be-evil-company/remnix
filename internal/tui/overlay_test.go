@@ -1,9 +1,40 @@
 package tui
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/mistweaverco/syncsh/internal/ptyproxy"
 )
+
+func TestOverlayGeomWaitIsShort(t *testing.T) {
+	if overlayGeomWait > 50*time.Millisecond {
+		t.Fatalf("first paint must not wait on snapshot, got %s", overlayGeomWait)
+	}
+}
+
+func TestApplyOverlayGeomPrefersProxy(t *testing.T) {
+	fallback := ptyproxy.Snapshot{Rows: 24, Cols: 80, CursorRow: 23}
+	got, rest := applyOverlayGeom(fallback, overlayGeom{
+		snap: ptyproxy.Snapshot{Rows: 40, Cols: 120, CursorRow: 10},
+	})
+	if rest != nil {
+		t.Fatal("expected nil rest")
+	}
+	if got.Rows != 40 || got.CursorRow != 10 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestApplyOverlayGeomKeepsFallbackOnError(t *testing.T) {
+	fallback := ptyproxy.Snapshot{Rows: 24, Cols: 80, CursorRow: 23}
+	got, rest := applyOverlayGeom(fallback, overlayGeom{err: io.EOF})
+	if rest != nil || got.Rows != 24 || got.CursorRow != 23 {
+		t.Fatalf("%+v rest=%v", got, rest)
+	}
+}
 
 func TestOverlayRowsFullByDefault(t *testing.T) {
 	if got := overlayRows(24, 0); got != 24 {
