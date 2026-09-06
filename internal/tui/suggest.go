@@ -109,6 +109,8 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
 		}
 		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		return m, nil
 	case tea.KeyReleaseMsg:
 		return m, nil
 	case tea.KeyPressMsg:

@@ -44,6 +44,10 @@ var shellKeywords = map[string]struct{}{
 }
 
 func HighlightCommand(cmd string) string {
+	return HighlightCommandTheme(DefaultTheme(), cmd)
+}
+
+func HighlightCommandTheme(th Theme, cmd string) string {
 	if cmd == "" {
 		return ""
 	}
@@ -56,20 +60,20 @@ func HighlightCommand(cmd string) string {
 		r := runes[i]
 		switch {
 		case r == '#' && (i == 0 || unicode.IsSpace(runes[i-1])):
-			b.WriteString(styleComment.Render(string(runes[i:])))
+			b.WriteString(th.Comment.Render(string(runes[i:])))
 			return b.String()
 		case r == '\'' || r == '"':
 			frag, next := readQuoted(runes, i)
-			b.WriteString(styleString.Render(frag))
+			b.WriteString(th.String.Render(frag))
 			i = next
 		case r == '$':
 			frag, next := readDollar(runes, i)
-			b.WriteString(styleVar.Render(frag))
+			b.WriteString(th.Var.Render(frag))
 			i = next
 			cmdPos = false
 		case isOperatorStart(r):
 			frag, next, reset := readOperator(runes, i)
-			b.WriteString(styleOperator.Render(frag))
+			b.WriteString(th.Operator.Render(frag))
 			i = next
 			if reset {
 				cmdPos = true
@@ -79,7 +83,7 @@ func HighlightCommand(cmd string) string {
 			i++
 		default:
 			word, next := readWord(runes, i)
-			b.WriteString(styleWord(word, cmdPos).Render(word))
+			b.WriteString(styleWordTheme(th, word, cmdPos).Render(word))
 			if cmdPos && !isAssignment(word) {
 				_, kw := shellKeywords[word]
 				if !kw {
@@ -93,25 +97,29 @@ func HighlightCommand(cmd string) string {
 }
 
 func styleWord(word string, cmdPos bool) lipgloss.Style {
+	return styleWordTheme(DefaultTheme(), word, cmdPos)
+}
+
+func styleWordTheme(th Theme, word string, cmdPos bool) lipgloss.Style {
 	if cmdPos {
 		if _, ok := shellKeywords[word]; ok {
-			return styleKeyword
+			return th.Keyword
 		}
 		if isAssignment(word) {
-			return styleVar
+			return th.Var
 		}
-		return styleCommand
+		return th.Command
 	}
 	if strings.HasPrefix(word, "-") && len(word) > 1 {
-		return styleFlag
+		return th.Flag
 	}
 	if isNumber(word) {
-		return styleNumber
+		return th.Number
 	}
 	if strings.Contains(word, "/") || strings.HasPrefix(word, "./") || strings.HasPrefix(word, "~") {
-		return stylePath
+		return th.Path
 	}
-	return styleArg
+	return th.Arg
 }
 
 func isAssignment(word string) bool {

@@ -148,15 +148,17 @@ history and completions stay distinguishable.
 ### Terminal proxy (overlay TUIs)
 
 On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `syncsh init`
-high in the shell rc. `init` then `exec`s `syncsh pty-proxy`, which sits between
-the terminal and bash, zsh, fish, or nu. Ctrl+R (and **Ctrl+Space** when
-`suggest.menu` is on) snapshot the visible screen and draw the widget in a
-band on the live prompt (Atuin-style), then restore those rows on exit.
+high in the shell rc. `init` then `exec`s `syncsh-attach`, a tiny helper that
+connects to the SyncSH daemon. The daemon owns the inner PTY, the shadow
+screen, and the Ctrl+R / Ctrl+Space overlay TUIs. The shell widget asks the
+daemon over RPC (`search-interactive`); keys and paint stay on the existing
+attach stream so a second Go process is not spawned. Set
+`SYNCSH_PTY_PROXY_LEGACY=1` to use the old per-terminal `syncsh pty-proxy`
+Go process for one release. Without a daemon session, the same widgets fall
+back to a local `syncsh search --interactive` TUI.
 `pty_proxy.height` is a percent of the terminal (for example `40` or `40%`).
-Omit it, or set `100%`, for a fullscreen search on the alt-screen. Smaller
-values still keep at least five history rows plus the header, rule, help
-line, and input box. Without the proxy, those widgets still work as a
-fullscreen TUI.
+Omit it, or set `100%`, for a fullscreen overlay. Smaller values still keep
+at least five history rows plus the header, rule, help line, and input box.
 
 After changing hooks, re-run `eval "$(syncsh init zsh)"` (or start a new
 shell). Installing a new binary is not enough.
@@ -194,8 +196,13 @@ syncsh import atuin ~/.local/share/atuin/history.db
 ```
 
 Ranking is a deterministic weighted score: match quality (prefix over fuzzy),
-recency, frequency, cwd, device, and session. SQLite narrows candidates; Go
-scores the set.
+recency, frequency, cwd, device, and session. The daemon keeps a compact
+in-memory command index; SQLite remains the durable source of truth.
+
+Colors and icons are configurable under `ui` in `config.yaml` (Catppuccin-like
+defaults). `suggest.icons` still works as an alias. After editing config,
+`syncsh daemon` reloads on SIGHUP or the next mtime poll; `syncsh init` must
+be re-sourced for shell-generated glyphs.
 
 ## Synchronization
 
@@ -230,7 +237,8 @@ Files:
 | `~/.local/share/syncsh/local.yaml` | This machine’s device id and name |
 | `~/.local/share/syncsh/history.db` | Local history and key metadata |
 | `~/.local/share/syncsh/daemon-status.json` | Last daemon sync result |
-| `$XDG_RUNTIME_DIR/syncsh/agent.sock` | Local history agent (suggest / history RPC) |
+| `$XDG_RUNTIME_DIR/syncsh/control.sock` | Unified daemon control RPC (suggest / history / overlay / stats) |
+| `$XDG_RUNTIME_DIR/syncsh/terminal.sock` | Daemon terminal attach socket |
 | `~/.local/share/syncsh/setup-state.json` | Crash-safe setup marker |
 
 Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in

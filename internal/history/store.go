@@ -257,6 +257,27 @@ func likePrefix(s string) string {
 	return s + "%"
 }
 
+func (s *Store) ScanLive(fn func(Entry) error) error {
+	rows, err := s.db.Query(`SELECT ` + historySelect("h") + `
+FROM ` + historyFrom("h") + `
+WHERE h.deleted = 0
+ORDER BY h.start_ts ASC, h.id ASC`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return err
+		}
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 func (s *Store) ListByCommand(command string) ([]Entry, error) {
 	rows, err := s.db.Query(`SELECT `+historySelect("h")+`
 FROM `+historyFrom("h")+` WHERE h.deleted = 0 AND h.command = ?

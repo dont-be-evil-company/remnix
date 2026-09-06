@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"time"
+
+	"github.com/mistweaverco/syncsh/internal/client"
+	"github.com/mistweaverco/syncsh/internal/protocol"
 )
 
 // Snapshot is a visible-screen capture from pty-proxy. RowANSI entries are
@@ -88,6 +92,11 @@ func Decode(data []byte) (Snapshot, error) {
 // Fetch reads the current screen from the wrapping pty-proxy. Write-shutdown
 // is used so an older proxy waiting for a request byte unblocks immediately.
 func Fetch() (Snapshot, error) {
+	if id := os.Getenv("SYNCSH_SESSION_ID"); id != "" {
+		if s, err := fetchDaemonSnapshot(id); err == nil {
+			return s, nil
+		}
+	}
 	s, rest, err := FetchGeom()
 	if err != nil {
 		return Snapshot{}, err
@@ -190,6 +199,25 @@ func DecodeFrom(r io.Reader) (Snapshot, error) {
 	}
 	s.RowANSI = rows
 	return s, nil
+}
+
+func fetchDaemonSnapshot(id string) (Snapshot, error) {
+	c, err := client.Dial()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer c.Close()
+	var snap protocol.ScreenSnapshot
+	if err := c.CallSession(protocol.OpScreenSnapshot, id, nil, &snap); err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{
+		Rows:      snap.Rows,
+		Cols:      snap.Cols,
+		CursorRow: snap.CursorRow,
+		CursorCol: snap.CursorCol,
+		RowANSI:   snap.RowANSI,
+	}, nil
 }
 
 func clampU16(n int) int {

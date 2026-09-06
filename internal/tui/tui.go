@@ -25,6 +25,7 @@ type Options struct {
 	OverlayPercent int
 	ResultFile     string
 	Delete         func(history.Entry) error
+	Theme          Theme
 }
 
 type model struct {
@@ -50,6 +51,7 @@ type model struct {
 	overlayOut       io.Writer
 	delete           func(history.Entry) error
 	status           string
+	theme            Theme
 }
 
 var (
@@ -97,6 +99,10 @@ func New(entries []history.Entry, opts Options) model {
 		height:         24,
 		overlayPercent: opts.OverlayPercent,
 		delete:         opts.Delete,
+		theme:          opts.Theme,
+	}
+	if m.theme.Cursor() == "" || m.theme.Title.String() == "" {
+		m.theme = DefaultTheme()
 	}
 	m.refresh()
 	return m
@@ -218,6 +224,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = max(1, msg.Height)
 		}
 		m.input.SetWidth(max(8, m.width-14))
+		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
 		return m, nil
 	case tea.KeyReleaseMsg:
 		return m, nil
@@ -416,7 +424,7 @@ func (m model) renderRow(e history.Entry, selected bool, w int, now time.Time) s
 	}
 	marker := " "
 	if selected {
-		marker = styleAccent.Render("❯")
+		marker = styleAccent.Render(m.theme.Cursor())
 	}
 	dur := alignRight(durStyle.Render(formatDuration(e.DurationMs)), durCol)
 	rel := alignRight(styleTime.Render(formatRelative(e.StartTS, now)), relCol)
@@ -480,12 +488,17 @@ func (m model) RunSelected() bool {
 // shell integration can execute it (Atuin's __atuin_accept__: protocol).
 const AcceptPrefix = "__syncsh_accept__:"
 
-func WriteSelection(out io.Writer, cmd string, run bool) {
+// FormatSelection is the widget RPC payload: accept-prefix when Enter should
+// run the command. No trailing newline (NUL fields keep it).
+func FormatSelection(cmd string, run bool) string {
 	if run {
-		fmt.Fprintln(out, AcceptPrefix+cmd)
-		return
+		return AcceptPrefix + cmd
 	}
-	fmt.Fprintln(out, cmd)
+	return cmd
+}
+
+func WriteSelection(out io.Writer, cmd string, run bool) {
+	fmt.Fprintln(out, FormatSelection(cmd, run))
 }
 
 func writeSelectionTo(out io.Writer, resultFile, cmd string, run bool) error {

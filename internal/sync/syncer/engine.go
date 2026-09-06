@@ -44,13 +44,14 @@ type Options struct {
 }
 
 type Engine struct {
-	db      *db.DB
-	opts    Options
-	events  *event.Store
-	heads   *merge.HeadStore
-	keys    *keys.Store
-	devices *device.Store
-	history *history.Store
+	db          *db.DB
+	opts        Options
+	events      *event.Store
+	heads       *merge.HeadStore
+	keys        *keys.Store
+	devices     *device.Store
+	history     *history.Store
+	lastChanges history.ChangeSet
 }
 
 func (e *Engine) trustKind() string {
@@ -79,6 +80,10 @@ func New(d *db.DB, opts Options) *Engine {
 	}
 }
 
+func (e *Engine) LastChangeSet() history.ChangeSet {
+	return e.lastChanges
+}
+
 func (e *Engine) Sync(ctx context.Context) error {
 	if s, ok := e.opts.Transport.(interface {
 		Begin(context.Context) error
@@ -89,6 +94,7 @@ func (e *Engine) Sync(ctx context.Context) error {
 		}
 		defer func() { _ = s.End(ctx) }()
 	}
+	e.lastChanges = history.ChangeSet{}
 	if err := transport.Dedupe(ctx, e.opts.Transport); err != nil {
 		return err
 	}
@@ -399,9 +405,11 @@ func (e *Engine) applyEvents(evs []event.Event) error {
 		if err := event.AppendTx(tx, ev); err != nil {
 			return err
 		}
-		if err := merge.Apply(tx, ev); err != nil {
+		cs, err := merge.ApplyTracked(tx, ev)
+		if err != nil {
 			return err
 		}
+		e.lastChanges.Merge(cs)
 		if err := event.MarkAppliedTx(tx, ev.DeviceID, ev.Seq); err != nil {
 			return err
 		}

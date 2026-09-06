@@ -1,0 +1,45 @@
+package daemon
+
+import (
+	"bufio"
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/mistweaverco/syncsh/internal/terminal"
+	"github.com/mistweaverco/syncsh/internal/tui"
+)
+
+func TestNULSearchInteractiveUnknownSession(t *testing.T) {
+	s := &Server{sessions: terminal.NewManager()}
+	in := strings.NewReader("search-interactive\x00git\x00/tmp\x00missing-id\x00")
+	var out bytes.Buffer
+	if err := s.serveNULOne(bufio.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.HasPrefix(got, "err\x00") {
+		t.Fatalf("want err, got %q", got)
+	}
+	if !strings.Contains(got, "unknown terminal session") {
+		t.Fatalf("want unknown session, got %q", got)
+	}
+}
+
+func TestNULSuggestInteractiveUnknownSession(t *testing.T) {
+	s := &Server{sessions: terminal.NewManager()}
+	in := strings.NewReader("suggest-interactive\x00git\x00/tmp\x00missing-id\x00")
+	var out bytes.Buffer
+	if err := s.serveNULOne(bufio.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "err\x00") {
+		t.Fatalf("want err, got %q", out.String())
+	}
+}
+
+func TestSearchInteractiveSelectionFormat(t *testing.T) {
+	if tui.FormatSelection("ls", true) != tui.AcceptPrefix+"ls" {
+		t.Fatal("accept prefix")
+	}
+}

@@ -11,32 +11,50 @@ import (
 )
 
 func Apply(tx *sql.Tx, ev event.Event) error {
+	_, err := ApplyTracked(tx, ev)
+	return err
+}
+
+func ApplyTracked(tx *sql.Tx, ev event.Event) (history.ChangeSet, error) {
+	var cs history.ChangeSet
 	switch ev.Type {
 	case event.TypeHistoryCreated:
-		return applyCreated(tx, ev)
+		e, err := applyCreated(tx, ev)
+		if err != nil {
+			return cs, err
+		}
+		if e.ID != "" {
+			cs.AddCreated(e)
+		}
+		return cs, nil
 	case event.TypeHistoryTombstoned:
-		return applyTombstone(tx, ev)
+		ids, err := applyTombstone(tx, ev)
+		if err != nil {
+			return cs, err
+		}
+		cs.AddTombstoned(ids...)
+		return cs, nil
 	case event.TypeDeviceMeta:
-		return applyDeviceMeta(tx, ev)
+		return cs, applyDeviceMeta(tx, ev)
 	case event.TypeCheckpointRef:
-		return nil
+		return cs, nil
 	default:
-		return fmt.Errorf("unknown event type %q", ev.Type)
+		return cs, fmt.Errorf("unknown event type %q", ev.Type)
 	}
 }
 
-func applyCreated(tx *sql.Tx, ev event.Event) error {
+func applyCreated(tx *sql.Tx, ev event.Event) (history.Entry, error) {
 	p, err := event.DecodeHistoryCreated(ev)
 	if err != nil {
-		return err
+		return history.Entry{}, err
 	}
 	var deleted int
 	err = tx.QueryRow(`SELECT deleted FROM history WHERE origin_device_id = ? AND origin_seq = ?`, ev.DeviceID, ev.Seq).Scan(&deleted)
 	if err == nil {
-		return nil
+		return history.Entry{}, nil
 	}
 	if err != sql.ErrNoRows {
-		return err
+		return history.Entry{}, err
 	}
 	e := history.Entry{
 		ID:             p.ID,
@@ -60,23 +78,25 @@ func applyCreated(tx *sql.Tx, ev event.Event) error {
 		e.DurationMs = &d
 	}
 	_, err = history.InsertTx(tx, e)
-	return err
+	return e, err
 }
 
-func applyTombstone(tx *sql.Tx, ev event.Event) error {
+func applyTombstone(tx *sql.Tx, ev event.Event) ([]string, error) {
 	p, err := event.DecodeHistoryTombstoned(ev)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var ids []string
 	if p.HistoryID != "" {
 		if _, err := tx.Exec(`UPDATE history SET deleted = 1 WHERE id = ?`, p.HistoryID); err != nil {
-			return err
+			return nil, err
 		}
+		ids = append(ids, p.HistoryID)
 	}
 	if p.OriginDeviceID != "" && p.OriginSeq > 0 {
 		res, err := tx.Exec(`UPDATE history SET deleted = 1 WHERE origin_device_id = ? AND origin_seq = ?`, p.OriginDeviceID, p.OriginSeq)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		n, _ := res.RowsAffected()
 		if n == 0 {
@@ -94,11 +114,14 @@ func applyTombstone(tx *sql.Tx, ev event.Event) error {
 				OriginSeq:      &seq,
 			})
 			if err != nil {
-				return err
+				return nil, err
 			}
+			ids = append(ids, id)
+		} else if p.HistoryID == "" {
+			ids = append(ids, fmt.Sprintf("origin:%s:%d", p.OriginDeviceID, p.OriginSeq))
 		}
 	}
-	return nil
+	return ids, nil
 }
 
 func applyDeviceMeta(tx *sql.Tx, ev event.Event) error {

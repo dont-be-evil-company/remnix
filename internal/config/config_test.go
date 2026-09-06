@@ -24,6 +24,9 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := AgentSocketPath(); got != "/tmp/syncsh-run/agent.sock" {
 		t.Fatalf("AgentSocketPath = %q", got)
 	}
+	if got := ControlSocketPath(); got != "/tmp/syncsh-run/control.sock" {
+		t.Fatalf("ControlSocketPath = %q", got)
+	}
 	if got := PtyProxySocketPath(); !strings.HasPrefix(got, "/tmp/syncsh-run/pty-proxy-") {
 		t.Fatalf("PtyProxySocketPath = %q", got)
 	}

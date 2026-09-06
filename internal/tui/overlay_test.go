@@ -89,6 +89,9 @@ func TestSuspendShellKeyboardPushesAndPops(t *testing.T) {
 	if !strings.Contains(got, "\x1b[>4;0m") {
 		t.Fatalf("must disable modifyOtherKeys: %q", got)
 	}
+	if !strings.Contains(got, "\x1b[?1004l") {
+		t.Fatalf("must disable focus reporting so blur/focus cannot stall the widget: %q", got)
+	}
 	b.Reset()
 	restore()
 	got = b.String()

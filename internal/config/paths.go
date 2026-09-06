@@ -138,6 +138,18 @@ func AgentSocketPath() string {
 	return filepath.Join(RuntimeDir(), "agent.sock")
 }
 
+func ControlSocketPath() string {
+	return filepath.Join(RuntimeDir(), "control.sock")
+}
+
+func TerminalSocketPath() string {
+	return filepath.Join(RuntimeDir(), "terminal.sock")
+}
+
+func PIDFilePath() string {
+	return filepath.Join(RuntimeDir(), "daemon.pid")
+}
+
 // PtyProxySocketPath is the per-process screen-snapshot socket for pty-proxy.
 func PtyProxySocketPath() string {
 	return filepath.Join(RuntimeDir(), "pty-proxy-"+strconv.Itoa(os.Getpid())+".sock")

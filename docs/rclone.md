@@ -71,7 +71,7 @@ On the device, under `$XDG_DATA_HOME/syncsh` (default
 - `syncsh.lock`, `daemon-status.json` - daemon lock and status
 
 Portable settings are `$XDG_CONFIG_HOME/syncsh/config.yaml`. The agent
-socket is `$XDG_RUNTIME_DIR/syncsh/agent.sock` (else `/tmp/syncsh/`).
+socket is `$XDG_RUNTIME_DIR/syncsh/control.sock` (else `/tmp/syncsh/`).
 Atomic upload temps (`.tmp-<uuid>`) are remote objects on backends that
 still use tmp+rename; Drive writes in place.
 

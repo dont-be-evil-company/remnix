@@ -14,11 +14,14 @@ func TestIntegrationSupported(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", sh, err)
 		}
-		if !strings.Contains(out, "history start") || !strings.Contains(out, "history end") {
+		hasLegacy := strings.Contains(out, "history start") && strings.Contains(out, "history end")
+		hasRPC := strings.Contains(out, "--rpc start") && strings.Contains(out, "--rpc end")
+		hasZshRPC := strings.Contains(out, "__syncsh_rpc start")
+		if !hasLegacy && !hasRPC && !hasZshRPC {
 			t.Fatalf("%s hook missing lifecycle commands", sh)
 		}
-		if sh == "zsh" && !strings.Contains(out, `"$__syncsh_bin" agent`) {
-			t.Fatal("zsh hook must start the history agent")
+		if sh == "zsh" && !strings.Contains(out, `"$__syncsh_bin" daemon`) {
+			t.Fatal("zsh hook must start the daemon")
 		}
 		if sh == "bash" && !strings.Contains(out, `__syncsh_agent_ensure`) {
 			t.Fatal("bash hook must start the history agent")
@@ -27,7 +30,10 @@ func TestIntegrationSupported(t *testing.T) {
 			t.Fatal("fish hook must start the history agent")
 		}
 		if !strings.Contains(out, "search --interactive") {
-			t.Fatalf("%s hook missing interactive search", sh)
+			t.Fatalf("%s hook missing interactive search fallback", sh)
+		}
+		if !strings.Contains(out, "search-interactive") {
+			t.Fatalf("%s hook missing daemon overlay search RPC", sh)
 		}
 	}
 }
@@ -60,12 +66,19 @@ func TestCtrlRBindings(t *testing.T) {
 	clearAt := strings.Index(searchFn, "__syncsh_suggest_clear")
 	redisplayAt := strings.Index(searchFn, "zle redisplay")
 	invalidateAt := strings.Index(searchFn, "zle -I")
+	overlayAt := strings.Index(searchFn, `search-interactive`)
 	tuiAt := strings.Index(searchFn, `search --interactive`)
-	if clearAt < 0 || redisplayAt < 0 || invalidateAt < 0 || tuiAt < 0 {
-		t.Fatal("syncsh-search missing clear/redisplay/zle -I before TUI")
+	if clearAt < 0 || redisplayAt < 0 || invalidateAt < 0 || overlayAt < 0 || tuiAt < 0 {
+		t.Fatal("syncsh-search missing clear/redisplay/zle -I before overlay/TUI")
+	}
+	if overlayAt < invalidateAt {
+		t.Fatal("zle -I must precede daemon overlay RPC")
+	}
+	if !strings.Contains(searchFn, "__syncsh_overlay search-interactive") {
+		t.Fatal("syncsh-search must try daemon overlay RPC first")
 	}
 	if !strings.Contains(searchFn, "__syncsh_widget_run search --interactive") {
-		t.Fatal("syncsh-search must run the TUI via __syncsh_widget_run")
+		t.Fatal("syncsh-search must fall back to the local TUI via __syncsh_widget_run")
 	}
 	if !strings.Contains(zsh, "3>&1 1>&2 2>&3 3>&-") {
 		t.Fatal("widget runner must swap stdout/stderr like Atuin so the TUI owns the TTY")
@@ -125,6 +138,9 @@ func TestCtrlRBindings(t *testing.T) {
 	if !strings.Contains(fishHook, "commandline -f execute") {
 		t.Fatal("fish should run the selected command")
 	}
+	if !strings.Contains(fishHook, "commandline --current-buffer --replace -- ''") {
+		t.Fatal("fish must clear the pre-widget buffer so Ctrl+R does not leave typed leftovers")
+	}
 	if strings.Contains(fishHook, "3>&1 1>&2 2>&3 3>&-") {
 		t.Fatal("fish must not fd-swap; command substitution steals stdout")
 	}
@@ -159,6 +175,9 @@ func TestCtrlRBindings(t *testing.T) {
 	if !strings.Contains(nuHook, "o> /dev/tty") {
 		t.Fatal("nu must send the TUI to /dev/tty; executehostcommand captures stdout")
 	}
+	if !strings.Contains(nuHook, "commandline edit --replace --accept") {
+		t.Fatal("nu must execute on Enter via commandline edit --accept")
+	}
 	if !strings.Contains(nuHook, "source ~/.cache/syncsh.nu") {
 		t.Fatal("nu comment must tell the user to source a literal cache file")
 	}
@@ -185,7 +204,7 @@ func TestZshInlineSuggest(t *testing.T) {
 		"POSTDISPLAY",
 		"syncsh-suggest-accept",
 		`__syncsh_rpc suggest "$BUFFER"`,
-		`"$__syncsh_bin" agent`,
+		`"$__syncsh_bin" daemon`,
 		"zsh/net/socket",
 		"'Right'",
 		"'Tab'",
@@ -412,22 +431,22 @@ func TestPtyProxyPreamble(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(on, "exec '/opt/syncsh' pty-proxy") {
-		t.Fatal("zsh missing pty-proxy exec")
+	if !strings.Contains(on, "exec '/opt/syncsh-attach'") {
+		t.Fatal("zsh missing attach exec")
 	}
 	if !strings.Contains(on, "SYNCSH_PTY_PROXY_ACTIVE") {
 		t.Fatal("missing active guard")
 	}
 	bashOn, _ := Integration("bash", "/opt/syncsh", Options{PtyProxyEnabled: true})
-	if !strings.Contains(bashOn, "pty-proxy --shell \"$BASH\"") {
+	if !strings.Contains(bashOn, `--shell "$BASH"`) {
 		t.Fatal("bash preamble should forward $BASH")
 	}
 	fishOn, _ := Integration("fish", "/opt/syncsh", Options{PtyProxyEnabled: true})
-	if !strings.Contains(fishOn, "pty-proxy --shell (status fish-path)") {
+	if !strings.Contains(fishOn, "--shell (status fish-path)") {
 		t.Fatal("fish preamble should forward fish-path")
 	}
 	nuOn, _ := Integration("nu", "/opt/syncsh", Options{PtyProxyEnabled: true})
-	if !strings.Contains(nuOn, "pty-proxy --shell $nu.current-exe") {
+	if !strings.Contains(nuOn, "--shell $nu.current-exe") {
 		t.Fatal("nu preamble should forward current-exe")
 	}
 }
@@ -457,6 +476,9 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	}
 	if !strings.Contains(over, "suggest --interactive") || !strings.Contains(over, "bindkey '^@'") {
 		t.Fatal("proxy-on must bind Ctrl+Space overlay menu")
+	}
+	if !strings.Contains(over, "suggest-interactive") {
+		t.Fatal("proxy-on Ctrl+Space must try daemon overlay RPC")
 	}
 	if !strings.Contains(over, "POSTDISPLAY") {
 		t.Fatal("ghost text must remain with the overlay menu")

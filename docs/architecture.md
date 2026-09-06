@@ -5,9 +5,11 @@ SQLite, optionally encrypts them into event bundles, and stores those objects
 on a remote filesystem. There is no syncsh server.
 
 ```text
-TUI / wizard / picker / shell agent / pty-proxy
+TUI / wizard / picker / syncsh-attach / shell hooks
         │
-   internal/agent      (unix socket RPC: suggest, history start/end)
+   syncsh daemon       (control.sock + terminal.sock)
+        │
+   history.Cache       (RAM projection) + history.Store (SQLite WAL)
         │
    internal/config     (portable YAML; rclone.conf is in the data dir)
         │
@@ -19,6 +21,14 @@ TUI / wizard / picker / shell agent / pty-proxy
         │
    internal/repository.Probe   (empty / unrelated / valid / partial / unsupported)
 ```
+
+One long-lived `syncsh daemon` per user session owns SQLite, the interactive
+history cache, periodic sync/GC, inner PTYs, and overlay TUIs (Ctrl+R search
+and Ctrl+Space suggest). Terminals attach with the tiny `syncsh-attach`
+helper (not another copy of the Go binary). Shell widgets trigger overlays
+over the control socket (`search-interactive` / `suggest-interactive`);
+attach stays a byte pump. A daemon crash cannot reattach existing PTYs; the
+service manager should restart it and new shells will reconnect.
 
 rclone is a **filesystem adapter**. syncsh never calls `rclone sync` or
 `rclone bisync` on the native path. Merge, encryption, and GC stay in syncsh.
@@ -38,7 +48,9 @@ rsync and scp are session transports (`Begin`/`End` staging). rclone talks to
 the cloud directly.
 
 The exclusive mutator for remote writes is `internal/app`’s file lock
-(`syncsh.lock`), used by daemon, manual sync, GC, and key/device ops.
+(`syncsh.lock`), used by the daemon, manual sync (via RPC when the daemon
+is up), GC, and key/device ops. Normal history mutations go through the
+daemon so SQLite and the RAM cache stay coherent.
 
 ## Scale test
 

@@ -43,6 +43,12 @@ type overlaySession struct {
 	rows  <-chan []string
 }
 
+// OverlayRows is the popup height for a terminal of termRows given a 1-100
+// percent. 0 or 100 means the full screen (drawFixed over every row).
+func OverlayRows(termRows, percent int) int {
+	return overlayRows(termRows, percent)
+}
+
 func overlayRows(termRows, percent int) int {
 	if termRows < 1 {
 		termRows = 1
@@ -338,6 +344,9 @@ func suspendShellKeyboard(w io.Writer) func() {
 	}
 	_, _ = io.WriteString(w, ansi.DisableKittyKeyboard)
 	_, _ = io.WriteString(w, "\x1b[>4;0m")
+	// Fish 4 / kitty leave focus reporting on. Blur/focus injects CSI I/O
+	// into the widget; after unfocus the overlay can stop seeing keys.
+	_, _ = io.WriteString(w, "\x1b[?1004l")
 	return func() {
 		_, _ = io.WriteString(w, ansi.PopKittyKeyboard(1))
 		_, _ = io.WriteString(w, ansi.SetModifyOtherKeys1)

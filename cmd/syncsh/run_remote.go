@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"charm.land/huh/v2"
+	"github.com/mistweaverco/syncsh/internal/client"
 	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
 	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
 	"github.com/mistweaverco/syncsh/internal/crypto/keys"
@@ -46,6 +47,12 @@ func tokensFromHardware() []piv.Token {
 }
 
 func runSync(cmd *cobra.Command, endpoint string) error {
+	if endpoint == "" {
+		if err := client.SyncNow(); err == nil {
+			daemon.RecordOK()
+			return nil
+		}
+	}
 	a, err := openApp()
 	if err != nil {
 		return err
@@ -533,6 +540,16 @@ func runDaemonUninstall(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "sync daemon autostart removed")
+	return nil
+}
+
+func runDaemonStats(cmd *cobra.Command, _ []string) error {
+	st, err := client.Stats()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "pid=%d uptime=%ds heap=%d rss=%d sessions=%d ptys=%d cache_cmds=%d cache_bytes=%d dirty=%v db_open=%d last_sync_ok=%v\n",
+		st.PID, st.UptimeSec, st.HeapAlloc, st.RSSBytes, st.Sessions, st.ActivePTYs, st.CacheEntries, st.CacheBytes, st.CacheDirty, st.DBOpenConns, st.LastSyncOK)
 	return nil
 }
 

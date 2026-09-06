@@ -17,6 +17,7 @@ type Options struct {
 	IconHistory        string
 	IconCompletion     string
 	PtyProxyEnabled    bool
+	AttachBin          string
 }
 
 func Integration(shellName, binary string, opts Options) (string, error) {
@@ -47,10 +48,15 @@ func zsh(bin string, opts Options) string {
 	if opts.SuggestEnabled {
 		suggest = zshSuggest(opts)
 	}
+	attach := opts.AttachBin
+	if attach == "" {
+		attach = "syncsh-attach"
+	}
 	return fmt.Sprintf(`# syncsh zsh integration
 # Add to ~/.zshrc: eval "$(%s init zsh)"
 
 typeset -g __syncsh_bin=%s
+typeset -g __syncsh_attach=%s
 typeset -g __syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
 typeset -g __syncsh_fd=""
 typeset -g __syncsh_out=""
@@ -67,13 +73,29 @@ __syncsh_widget_run() {
   return $st
 }
 
+# Daemon overlay when the shell is inside syncsh-attach (SYNCSH_SESSION_ID).
+# Falls through so the caller can spawn the local Go TUI.
+__syncsh_overlay() {
+  emulate -L zsh
+  local op=$1 query=$2
+  [[ -n ${SYNCSH_SESSION_ID:-} ]] || return 1
+  if __syncsh_rpc "$op" "$query" "$PWD" "$SYNCSH_SESSION_ID"; then
+    return 0
+  fi
+  if [[ -n ${__syncsh_attach:-} ]]; then
+    REPLY=$("$__syncsh_attach" --rpc "$op" "$query" "$PWD" "$SYNCSH_SESSION_ID" 2>/dev/null) || return 1
+    return 0
+  fi
+  return 1
+}
+
 __syncsh_sock() {
   if [[ -n ${SYNCSH_RUNTIME_DIR:-} ]]; then
-    print -r -- "$SYNCSH_RUNTIME_DIR/agent.sock"
+    print -r -- "$SYNCSH_RUNTIME_DIR/control.sock"
   elif [[ -n ${XDG_RUNTIME_DIR:-} ]]; then
-    print -r -- "$XDG_RUNTIME_DIR/syncsh/agent.sock"
+    print -r -- "$XDG_RUNTIME_DIR/syncsh/control.sock"
   else
-    print -r -- "${TMPDIR:-/tmp}/syncsh/agent.sock"
+    print -r -- "${TMPDIR:-/tmp}/syncsh/control.sock"
   fi
 }
 
@@ -87,6 +109,10 @@ __syncsh_agent_reset() {
 __syncsh_agent_connect() {
   emulate -L zsh
   [[ -n ${__syncsh_fd:-} || -n ${__syncsh_out:-} ]] && return 0
+  if [[ -n ${SYNCSH_CONTROL_FD:-} ]]; then
+    __syncsh_fd=$SYNCSH_CONTROL_FD
+    return 0
+  fi
   local sock
   sock="$(__syncsh_sock)"
   if zmodload zsh/net/socket 2>/dev/null && [[ -S $sock ]] && zsocket "$sock" 2>/dev/null; then
@@ -99,18 +125,13 @@ __syncsh_agent_connect() {
 __syncsh_agent_ensure() {
   emulate -L zsh
   __syncsh_agent_connect && return 0
-  "$__syncsh_bin" agent >/dev/null 2>&1 &!
+  "$__syncsh_bin" daemon >/dev/null 2>&1 &!
   local i
   for i in {1..20}; do
     __syncsh_agent_connect && return 0
     zmodload zsh/zselect 2>/dev/null && zselect -t 1 || sleep 0.01
   done
-  if [[ -z ${__syncsh_out:-} ]]; then
-    coproc { "$__syncsh_bin" agent --stdio }
-    __syncsh_out=${COPROC[1]}
-    __syncsh_in=${COPROC[2]}
-  fi
-  [[ -n ${__syncsh_out:-} ]]
+  return 1
 }
 
 __syncsh_rpc() {
@@ -165,10 +186,12 @@ syncsh-search() {
     zle redisplay
   fi
   zle -I
-  __syncsh_widget_run search --interactive --query "$LBUFFER" --cwd "$PWD" || {
-    __syncsh_suggest_suppress=0
-    return
-  }
+  if ! __syncsh_overlay search-interactive "$LBUFFER"; then
+    __syncsh_widget_run search --interactive --query "$LBUFFER" --cwd "$PWD" || {
+      __syncsh_suggest_suppress=0
+      return
+    }
+  fi
   selected="$REPLY"
   if [[ "$selected" == __syncsh_accept__:* ]]; then
     selected="${selected#__syncsh_accept__:}"
@@ -204,7 +227,7 @@ autoload -Uz add-zsh-hook
 add-zsh-hook preexec __syncsh_preexec
 add-zsh-hook precmd __syncsh_precmd
 __syncsh_agent_ensure >/dev/null 2>&1 || true
-%s`, bin, zshQuote(bin), suggest)
+%s`, bin, zshQuote(bin), zshQuote(attach), suggest)
 }
 
 func zshSuggest(opts Options) string {
@@ -1267,10 +1290,12 @@ syncsh-suggest-menu() {
     zle redisplay
   fi
   zle -I
-  __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || {
-    __syncsh_suggest_suppress=0
-    return
-  }
+  if ! __syncsh_overlay suggest-interactive "$BUFFER"; then
+    __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || {
+      __syncsh_suggest_suppress=0
+      return
+    }
+  fi
   selected="$REPLY"
   if [[ "$selected" == __syncsh_accept__:* ]]; then
     selected="${selected#__syncsh_accept__:}"

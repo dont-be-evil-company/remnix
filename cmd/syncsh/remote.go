@@ -164,11 +164,12 @@ func newUnlockCmd() *cobra.Command {
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Run the login-time history sync daemon",
+		Short: "Run the SyncSH core daemon",
 		RunE:  runDaemon,
 	}
-	cmd.AddCommand(&cobra.Command{Use: "install", Short: "Install user-session autostart for the sync daemon", RunE: runDaemonInstall})
-	cmd.AddCommand(&cobra.Command{Use: "uninstall", Short: "Remove login autostart for the sync daemon", RunE: runDaemonUninstall})
+	cmd.AddCommand(&cobra.Command{Use: "install", Short: "Install user-session autostart for the SyncSH daemon", RunE: runDaemonInstall})
+	cmd.AddCommand(&cobra.Command{Use: "uninstall", Short: "Remove login autostart for the SyncSH daemon", RunE: runDaemonUninstall})
 	cmd.AddCommand(&cobra.Command{Use: "status", Short: "Show daemon install and last sync status", RunE: runDaemonStatus})
+	cmd.AddCommand(&cobra.Command{Use: "stats", Short: "Show live daemon stats", RunE: runDaemonStats})
 	return cmd
 }

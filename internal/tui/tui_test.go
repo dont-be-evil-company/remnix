@@ -33,6 +33,16 @@ func TestFilterCwdAndQuery(t *testing.T) {
 	}
 }
 
+func TestSearchKeepsKeysAfterFocusBlur(t *testing.T) {
+	m := New([]history.Entry{{Command: "echo hi", StartTS: time.Unix(1, 0)}}, Options{})
+	got, _ := m.Update(tea.BlurMsg{})
+	got, _ = got.(model).Update(tea.FocusMsg{})
+	got, _ = got.(model).Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if !strings.Contains(got.(model).input.Value(), "x") {
+		t.Fatalf("typed x after blur/focus, query=%q", got.(model).input.Value())
+	}
+}
+
 func TestEnterAcceptsEscCancels(t *testing.T) {
 	m := New([]history.Entry{{Command: "echo hi", StartTS: time.Unix(1, 0)}}, Options{})
 	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -265,5 +275,11 @@ func TestWriteSelectionWidgetRuns(t *testing.T) {
 	WriteSelection(&buf, "echo hi", false)
 	if buf.String() != "echo hi\n" {
 		t.Fatalf("browse %q", buf.String())
+	}
+	if FormatSelection("echo hi", true) != AcceptPrefix+"echo hi" {
+		t.Fatal("FormatSelection must not add a newline")
+	}
+	if FormatSelection("echo hi", false) != "echo hi" {
+		t.Fatal("FormatSelection browse")
 	}
 }

@@ -17,6 +17,7 @@ tasks:
     desc: Installs the syncsh to $HOME/.local/bin/syncsh
     cmds:
       - mv ./bin/syncsh $HOME/.local/bin/syncsh
+      - mv ./bin/syncsh-attach $HOME/.local/bin/syncsh-attach
     silent: true
   fmt:
     desc: Formats all files

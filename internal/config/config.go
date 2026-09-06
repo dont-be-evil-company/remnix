@@ -20,7 +20,48 @@ type Config struct {
 	Sync               Sync     `yaml:"sync"`
 	Suggest            Suggest  `yaml:"suggest"`
 	PtyProxy           PtyProxy `yaml:"pty_proxy"`
+	UI                 UI       `yaml:"ui"`
 	DisableAutoMigrate bool     `yaml:"disable_auto_migrate,omitempty"`
+}
+
+type UI struct {
+	Colors Colors `yaml:"colors"`
+	Icons  Icons  `yaml:"icons"`
+}
+
+type Colors struct {
+	Accent   string        `yaml:"accent,omitempty"`
+	Title    string        `yaml:"title,omitempty"`
+	Muted    string        `yaml:"muted,omitempty"`
+	Rule     string        `yaml:"rule,omitempty"`
+	Badge    string        `yaml:"badge,omitempty"`
+	Duration string        `yaml:"duration,omitempty"`
+	Failed   string        `yaml:"failed,omitempty"`
+	Time     string        `yaml:"time,omitempty"`
+	Text     string        `yaml:"text,omitempty"`
+	Syntax   SyntaxColors  `yaml:"syntax"`
+}
+
+type SyntaxColors struct {
+	Command  string `yaml:"command,omitempty"`
+	Keyword  string `yaml:"keyword,omitempty"`
+	Flag     string `yaml:"flag,omitempty"`
+	String   string `yaml:"string,omitempty"`
+	Comment  string `yaml:"comment,omitempty"`
+	Operator string `yaml:"operator,omitempty"`
+	Variable string `yaml:"variable,omitempty"`
+	Path     string `yaml:"path,omitempty"`
+	Number   string `yaml:"number,omitempty"`
+	Argument string `yaml:"argument,omitempty"`
+}
+
+type Icons struct {
+	Cursor               string `yaml:"cursor,omitempty"`
+	SuggestionTyped      string `yaml:"suggestion_typed,omitempty"`
+	SuggestionHistory    string `yaml:"suggestion_history,omitempty"`
+	SuggestionCompletion string `yaml:"suggestion_completion,omitempty"`
+	Separator            string `yaml:"separator,omitempty"`
+	MoveUpDown           string `yaml:"move_up_down,omitempty"`
 }
 
 type Database struct {
@@ -252,6 +293,75 @@ func (s Suggest) IconCompletion() string {
 	return s.Icons.Completion
 }
 
+func (c *Config) IconTyped() string {
+	if c != nil && strings.TrimSpace(c.UI.Icons.SuggestionTyped) != "" {
+		return c.UI.Icons.SuggestionTyped
+	}
+	if c == nil {
+		return "›"
+	}
+	return c.Suggest.IconTyped()
+}
+
+func (c *Config) IconHistory() string {
+	if c != nil && strings.TrimSpace(c.UI.Icons.SuggestionHistory) != "" {
+		return c.UI.Icons.SuggestionHistory
+	}
+	if c == nil {
+		return "*"
+	}
+	return c.Suggest.IconHistory()
+}
+
+func (c *Config) IconCompletion() string {
+	if c != nil && strings.TrimSpace(c.UI.Icons.SuggestionCompletion) != "" {
+		return c.UI.Icons.SuggestionCompletion
+	}
+	if c == nil {
+		return "+"
+	}
+	return c.Suggest.IconCompletion()
+}
+
+func (i Icons) CursorOrDefault() string {
+	if strings.TrimSpace(i.Cursor) == "" {
+		return "❯"
+	}
+	return i.Cursor
+}
+
+func (i Icons) SeparatorOrDefault() string {
+	if strings.TrimSpace(i.Separator) == "" {
+		return "·"
+	}
+	return i.Separator
+}
+
+func (i Icons) MoveUpDownOrDefault() string {
+	if strings.TrimSpace(i.MoveUpDown) == "" {
+		return "↑↓"
+	}
+	return i.MoveUpDown
+}
+
+func colorOr(v, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.EqualFold(v, "default") {
+		return fallback
+	}
+	return v
+}
+
+func (c Colors) AccentOrDefault() string   { return colorOr(c.Accent, "#F5C2E7") }
+func (c Colors) TitleOrDefault() string    { return colorOr(c.Title, "#CBA6F7") }
+func (c Colors) MutedOrDefault() string    { return colorOr(c.Muted, "#585B70") }
+func (c Colors) RuleOrDefault() string     { return colorOr(c.Rule, "#313244") }
+func (c Colors) BadgeOrDefault() string    { return colorOr(c.Badge, "#89B4FA") }
+func (c Colors) DurationOrDefault() string { return colorOr(c.Duration, "#A6E3A1") }
+func (c Colors) FailedOrDefault() string   { return colorOr(c.Failed, "#F38BA8") }
+func (c Colors) TimeOrDefault() string     { return colorOr(c.Time, "#7F849C") }
+func (c Colors) TextOrDefault() string     { return colorOr(c.Text, "#CDD6F4") }
+
 func (s Suggest) MenuLimit() int {
 	if s.MenuMax <= 0 {
 		return 8
@@ -302,6 +412,9 @@ func Load() (*Config, error) {
 		}
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)
+		}
+		if err := cfg.validate(); err != nil {
+			return nil, err
 		}
 	}
 	if cfg.Version < CurrentVersion {
@@ -360,7 +473,52 @@ func nodePresent(n yaml.Node) bool {
 	return n.Kind != 0 && n.Tag != "!!null"
 }
 
+func validateColor(key, v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.EqualFold(v, "default") {
+		return nil
+	}
+	if strings.HasPrefix(v, "#") {
+		h := v[1:]
+		if len(h) != 3 && len(h) != 6 {
+			return fmt.Errorf("%s: invalid color %q (want #RGB or #RRGGBB)", key, v)
+		}
+		for _, r := range h {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return fmt.Errorf("%s: invalid color %q", key, v)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("%s: invalid color %q (want #RRGGBB, #RGB, or default)", key, v)
+}
+
 func (c *Config) validate() error {
+	for _, pair := range []struct{ k, v string }{
+		{"ui.colors.accent", c.UI.Colors.Accent},
+		{"ui.colors.title", c.UI.Colors.Title},
+		{"ui.colors.muted", c.UI.Colors.Muted},
+		{"ui.colors.rule", c.UI.Colors.Rule},
+		{"ui.colors.badge", c.UI.Colors.Badge},
+		{"ui.colors.duration", c.UI.Colors.Duration},
+		{"ui.colors.failed", c.UI.Colors.Failed},
+		{"ui.colors.time", c.UI.Colors.Time},
+		{"ui.colors.text", c.UI.Colors.Text},
+		{"ui.colors.syntax.command", c.UI.Colors.Syntax.Command},
+		{"ui.colors.syntax.keyword", c.UI.Colors.Syntax.Keyword},
+		{"ui.colors.syntax.flag", c.UI.Colors.Syntax.Flag},
+		{"ui.colors.syntax.string", c.UI.Colors.Syntax.String},
+		{"ui.colors.syntax.comment", c.UI.Colors.Syntax.Comment},
+		{"ui.colors.syntax.operator", c.UI.Colors.Syntax.Operator},
+		{"ui.colors.syntax.variable", c.UI.Colors.Syntax.Variable},
+		{"ui.colors.syntax.path", c.UI.Colors.Syntax.Path},
+		{"ui.colors.syntax.number", c.UI.Colors.Syntax.Number},
+		{"ui.colors.syntax.argument", c.UI.Colors.Syntax.Argument},
+	} {
+		if err := validateColor(pair.k, pair.v); err != nil {
+			return err
+		}
+	}
 	seen := map[string]bool{}
 	for _, ep := range c.Sync.Endpoints {
 		if strings.TrimSpace(ep.ID) == "" {

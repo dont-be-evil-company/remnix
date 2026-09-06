@@ -93,6 +93,8 @@ func (m inspectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = max(1, msg.Height)
 		m.input.SetWidth(max(8, m.width-16))
 		return m, nil
+	case tea.FocusMsg, tea.BlurMsg:
+		return m, nil
 	case tea.KeyReleaseMsg:
 		return m, nil
 	case tea.KeyPressMsg:

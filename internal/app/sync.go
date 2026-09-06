@@ -181,10 +181,10 @@ func (a *App) openEndpoints(eps []config.Endpoint) ([]openedEndpoint, []error) {
 	return live, errs
 }
 
-func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device, onlyID string) (anyOK bool, err error) {
+func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device, onlyID string) (anyOK bool, cs history.ChangeSet, err error) {
 	eps, err := a.resolveEndpoints(onlyID)
 	if err != nil {
-		return false, err
+		return false, cs, err
 	}
 	live, errs := a.openEndpoints(eps)
 	for _, o := range live {
@@ -193,6 +193,7 @@ func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Toke
 			errs = append(errs, fmt.Errorf("%s: %w", o.ep.ID, err))
 			continue
 		}
+		cs.Merge(eng.LastChangeSet())
 		anyOK = true
 	}
 	if anyOK && onlyID == "" && len(live) > 1 {
@@ -204,7 +205,7 @@ func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Toke
 			errs = append(errs, err)
 		}
 	}
-	return anyOK, errors.Join(errs...)
+	return anyOK, cs, errors.Join(errs...)
 }
 
 func (a *App) Sync(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device) error {
@@ -217,7 +218,7 @@ func (a *App) SyncOnly(ctx context.Context, endpointID string, secret []byte, to
 		return err
 	}
 	defer func() { _ = lock.Release() }()
-	anyOK, syncErr := a.syncUnlocked(ctx, secret, tokens, fido, endpointID)
+	anyOK, _, syncErr := a.syncUnlocked(ctx, secret, tokens, fido, endpointID)
 	if !anyOK {
 		return syncErr
 	}
@@ -225,16 +226,21 @@ func (a *App) SyncOnly(ctx context.Context, endpointID string, secret []byte, to
 }
 
 func (a *App) SyncEngine(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device) error {
+	_, err := a.SyncEngineWithChanges(ctx, secret, tokens, fido)
+	return err
+}
+
+func (a *App) SyncEngineWithChanges(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device) (history.ChangeSet, error) {
 	lock, err := AcquireLock()
 	if err != nil {
-		return err
+		return history.ChangeSet{}, err
 	}
 	defer func() { _ = lock.Release() }()
-	anyOK, err := a.syncUnlocked(ctx, secret, tokens, fido, "")
+	anyOK, cs, err := a.syncUnlocked(ctx, secret, tokens, fido, "")
 	if !anyOK {
-		return err
+		return cs, err
 	}
-	return err
+	return cs, err
 }
 
 func (a *App) RunCallbacks(ctx context.Context) error {

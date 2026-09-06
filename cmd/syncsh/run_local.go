@@ -1,16 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/agent"
 	"github.com/mistweaverco/syncsh/internal/app"
+	"github.com/mistweaverco/syncsh/internal/client"
 	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/mistweaverco/syncsh/internal/protocol"
 	"github.com/mistweaverco/syncsh/internal/history"
 	"github.com/mistweaverco/syncsh/internal/importers"
 	"github.com/mistweaverco/syncsh/internal/ptyproxy"
@@ -60,12 +61,24 @@ func runTUI(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return tui.RunOpts(entries, tui.Options{
-		Delete:   func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
+		Delete: func(e history.Entry) error {
+			if err := client.HistoryDelete(e.Command); err == nil {
+				return nil
+			}
+			return a.TombstoneCommand(e.Command)
+		},
 		DeviceID: a.Config.DeviceID,
 	}, cmd.OutOrStdout())
 }
 
 func runSearch(cmd *cobra.Command, opts searchOptions) error {
+	if hits, err := client.HistorySearch(clientSearchReq(opts)); err == nil {
+		entries := client.HitsToEntries(hits)
+		if opts.Interactive {
+			return runSearchTUI(cmd, opts, entries, nil)
+		}
+		return writeSearchResults(cmd, opts, entries, "")
+	}
 	a, err := openApp()
 	if err != nil {
 		return err
@@ -94,24 +107,64 @@ func runSearch(cmd *cobra.Command, opts searchOptions) error {
 		return err
 	}
 	if opts.Interactive {
-		cwd := opts.Cwd
-		if cwd == "" {
-			cwd, _ = os.Getwd()
-		}
-		return tui.RunOpts(entries, tui.Options{
-			Query:          opts.Query,
-			Cwd:            cwd,
-			DeviceID:       a.Config.DeviceID,
-			SessionID:      opts.Session,
-			Widget:         true,
-			OverlayPercent: a.Config.PtyProxy.HeightPercent(),
-			ResultFile:     opts.ResultFile,
-			Delete:         func(e history.Entry) error { return a.TombstoneCommand(e.Command) },
-		}, cmd.OutOrStdout())
+		return runSearchTUI(cmd, opts, entries, a)
 	}
+	return writeSearchResults(cmd, opts, entries, a.Config.DeviceID)
+}
+
+func clientSearchReq(opts searchOptions) protocol.HistorySearchReq {
+	limit := opts.Limit
+	if limit <= 0 || opts.Interactive {
+		limit = 5000
+	}
+	return protocol.HistorySearchReq{
+		Query:     opts.Query,
+		Cwd:       opts.Cwd,
+		SessionID: opts.Session,
+		Host:      opts.Host,
+		Shell:     opts.Shell,
+		Limit:     limit,
+		Exact:     opts.Exact,
+		Unique:    opts.Interactive,
+	}
+}
+
+func runSearchTUI(cmd *cobra.Command, opts searchOptions, entries []history.Entry, a *app.App) error {
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	deviceID := ""
+	sessionID := opts.Session
+	overlay := 100
+	if a != nil {
+		deviceID = a.Config.DeviceID
+		overlay = a.Config.PtyProxy.HeightPercent()
+	}
+	return tui.RunOpts(entries, tui.Options{
+		Query:          opts.Query,
+		Cwd:            cwd,
+		DeviceID:       deviceID,
+		SessionID:      sessionID,
+		Widget:         true,
+		OverlayPercent: overlay,
+		ResultFile:     opts.ResultFile,
+		Delete: func(e history.Entry) error {
+			if err := client.HistoryDelete(e.Command); err == nil {
+				return nil
+			}
+			if a != nil {
+				return a.TombstoneCommand(e.Command)
+			}
+			return client.HistoryDelete(e.Command)
+		},
+	}, cmd.OutOrStdout())
+}
+
+func writeSearchResults(cmd *cobra.Command, opts searchOptions, entries []history.Entry, deviceID string) error {
 	results := search.RankWith(opts.Query, entries, opts.Exact, search.Context{
 		Cwd:       opts.Cwd,
-		DeviceID:  a.Config.DeviceID,
+		DeviceID:  deviceID,
 		SessionID: opts.Session,
 	})
 	n := opts.Limit
@@ -171,9 +224,15 @@ func runInspect(_ *cobra.Command, _ []string) error {
 		Load:      load,
 		ListRuns:  store.ListByCommand,
 		DeleteCommand: func(command string) error {
+			if err := client.HistoryDelete(command); err == nil {
+				return nil
+			}
 			return a.TombstoneCommand(command)
 		},
 		DeleteEntry: func(e history.Entry) error {
+			if err := client.TombstoneEntries([]history.Entry{e}); err == nil {
+				return nil
+			}
 			return a.TombstoneEntries([]history.Entry{e})
 		},
 	})
@@ -196,7 +255,7 @@ func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, 
 		}
 		return nil
 	}
-	if s, err := agent.DialRPC("suggest", prefix, cwd); err == nil {
+	if s, err := client.Suggest(prefix, cwd); err == nil {
 		if s != "" {
 			fmt.Fprintln(cmd.OutOrStdout(), s)
 		}
@@ -207,7 +266,13 @@ func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, 
 		return err
 	}
 	defer a.Close()
-	s, err := agent.NewService(a).Suggest(prefix, cwd)
+	svc := history.NewService(history.NewStore(a.DB), history.NewCache(), a.DB.SQL, a.Config.DeviceID, nil, nil)
+	_ = svc.Rebuild(context.Background())
+	cands, err := svc.SuggestCandidates(prefix, cwd)
+	if err != nil {
+		return err
+	}
+	s := search.BestSuggestion(prefix, cands, search.Context{Cwd: cwd, DeviceID: a.Config.DeviceID})
 	if err != nil {
 		return err
 	}
@@ -218,7 +283,7 @@ func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, 
 }
 
 func loadSuggestList(prefix, cwd string) ([]string, error) {
-	items, err := agent.DialRPCList("suggest-list", prefix, cwd)
+	items, err := client.SuggestList(prefix, cwd)
 	if err == nil {
 		return items, nil
 	}
@@ -228,7 +293,13 @@ func loadSuggestList(prefix, cwd string) ([]string, error) {
 	}
 	defer a.Close()
 	if prefix != "" {
-		return agent.NewService(a).SuggestList(prefix, cwd)
+		svc := history.NewService(history.NewStore(a.DB), history.NewCache(), a.DB.SQL, a.Config.DeviceID, nil, nil)
+		_ = svc.Rebuild(context.Background())
+		cands, err := svc.SuggestCandidates(prefix, cwd)
+		if err != nil {
+			return nil, err
+		}
+		return search.Suggestions(prefix, cands, search.Context{Cwd: cwd, DeviceID: a.Config.DeviceID}, a.Config.Suggest.MenuLimit()), nil
 	}
 	entries, err := history.NewStore(a.DB).List(history.Filter{Unique: true, Limit: 5000})
 	if err != nil {
@@ -279,16 +350,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	attach := filepath.Join(filepath.Dir(bin), "syncsh-attach")
 	out, err := shell.Integration(args[0], bin, shell.Options{
 		SuggestEnabled:     cfg.Suggest.IsEnabled(),
 		SuggestAccept:      cfg.Suggest.AcceptKeys(),
 		SuggestMenu:        cfg.Suggest.MenuEnabled(),
 		SuggestCompletions: cfg.Suggest.MenuEnabled() && cfg.Suggest.CompletionsEnabled() && !cfg.PtyProxy.IsEnabled(),
 		SuggestMenuMax:     cfg.Suggest.MenuLimit(),
-		IconTyped:          cfg.Suggest.IconTyped(),
-		IconHistory:        cfg.Suggest.IconHistory(),
-		IconCompletion:     cfg.Suggest.IconCompletion(),
+		IconTyped:          cfg.IconTyped(),
+		IconHistory:        cfg.IconHistory(),
+		IconCompletion:     cfg.IconCompletion(),
 		PtyProxyEnabled:    cfg.PtyProxy.IsEnabled(),
+		AttachBin:          attach,
 	})
 	if err != nil {
 		return err
@@ -302,7 +375,7 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	session, _ := cmd.Flags().GetString("session")
 	sh, _ := cmd.Flags().GetString("shell")
-	if id, err := agent.DialRPC("start", command, cwd, session, sh); err == nil {
+	if id, err := client.HistoryStart(command, cwd, session, sh); err == nil {
 		fmt.Fprintln(cmd.OutOrStdout(), id)
 		return nil
 	}
@@ -311,7 +384,7 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer a.Close()
-	id, err := agent.NewService(a).Start(command, cwd, session, sh)
+	id, err := history.NewService(history.NewStore(a.DB), history.NewCache(), a.DB.SQL, a.Config.DeviceID, a.EnqueueHistoryCreated, nil).StartCommand(command, cwd, session, sh)
 	if err != nil {
 		return err
 	}
@@ -322,7 +395,7 @@ func runHistoryStart(cmd *cobra.Command, _ []string) error {
 func runHistoryEnd(cmd *cobra.Command, _ []string) error {
 	id, _ := cmd.Flags().GetString("id")
 	exit, _ := cmd.Flags().GetInt("exit")
-	if _, err := agent.DialRPC("end", id, strconv.Itoa(exit)); err == nil {
+	if err := client.HistoryEnd(id, exit); err == nil {
 		return nil
 	}
 	a, err := openApp()
@@ -330,7 +403,7 @@ func runHistoryEnd(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer a.Close()
-	return agent.NewService(a).End(id, exit)
+	return history.NewService(history.NewStore(a.DB), history.NewCache(), a.DB.SQL, a.Config.DeviceID, nil, nil).CompleteCommand(id, exit)
 }
 
 func runImportHistfile(cmd *cobra.Command, args []string) error {

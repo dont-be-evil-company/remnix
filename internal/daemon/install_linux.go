@@ -28,7 +28,7 @@ func unitPath() (string, error) {
 
 func unitContents(bin string) string {
 	return fmt.Sprintf(`[Unit]
-Description=syncsh history sync daemon
+Description=syncsh core daemon
 After=default.target
 
 [Service]
@@ -40,6 +40,20 @@ TimeoutStopSec=600
 [Install]
 WantedBy=default.target
 `, bin)
+}
+
+func socketUnitContents() string {
+	return `[Unit]
+Description=syncsh daemon control socket
+
+[Socket]
+ListenStream=%t/syncsh/control.sock
+SocketMode=0600
+DirectoryMode=0700
+
+[Install]
+WantedBy=sockets.target
+`
 }
 
 func install(bin string) error {
@@ -57,7 +71,10 @@ func install(bin string) error {
 	if err := os.WriteFile(path, []byte(unitContents(bin)), 0o644); err != nil {
 		return err
 	}
+	sockPath := filepath.Join(dir, "syncsh-daemon.socket")
+	_ = os.WriteFile(sockPath, []byte(socketUnitContents()), 0o644)
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "--user", "enable", "--now", "syncsh-daemon.socket").Run()
 	if err := exec.Command("systemctl", "--user", "enable", "--now", "syncsh-daemon.service").Run(); err != nil {
 		return fmt.Errorf("wrote %s but could not enable user unit (start it with: systemctl --user enable --now syncsh-daemon.service): %w", path, err)
 	}
