@@ -402,14 +402,6 @@ func TestOverlayHidesPTYOutput(t *testing.T) {
 	}
 }
 
-func TestRunOverlayUnknownSession(t *testing.T) {
-	m := NewManager()
-	_, err := m.RunOverlay("missing", nil, nil)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
 type frameCollector struct {
 	mu   sync.Mutex
 	buf  strings.Builder
@@ -430,7 +422,7 @@ func startFrameCollector(conn net.Conn) *frameCollector {
 			if err != nil {
 				continue
 			}
-			if kind == FrameData {
+			if kind == FrameData || kind == FrameRaw {
 				c.mu.Lock()
 				c.buf.Write(payload)
 				c.mu.Unlock()

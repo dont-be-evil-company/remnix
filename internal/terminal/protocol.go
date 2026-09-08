@@ -8,9 +8,11 @@ import (
 )
 
 const (
-	FrameData  byte = 0
-	FrameWinch byte = 1
-	FrameExit  byte = 2
+	FrameData     byte = 0
+	FrameWinch    byte = 1
+	FrameExit     byte = 2
+	FrameRaw      byte = 3
+	FrameLeaveAlt byte = FrameRaw
 )
 
 type CreateRequest struct {

@@ -12,6 +12,7 @@ import "core:thread"
 FRAME_DATA :: 0
 FRAME_WINCH :: 1
 FRAME_EXIT :: 2
+FRAME_RAW :: 3
 BUF_MAX :: 1024 * 1024
 
 when ODIN_OS == .Linux {
@@ -220,11 +221,10 @@ tty_to_sock :: proc() {
 		pfd[0] = {fd = tty_in, events = {.IN}}
 		pfd[1] = {fd = wake_rd, events = {.IN}}
 		n: posix.nfds_t = wake_rd >= 0 ? 2 : 1
-		// Hold a trailing ESC for a beat so a split CSI I/O from pane
-		// focus can still be assembled and dropped. Flush it as Escape
-		// if nothing follows (overlay / vi-mode).
+		// Hold a trailing ESC or incomplete CSI for a beat. Drop a stuck
+		// `\x1b[` so it cannot eat the next keys after vim/overlay.
 		timeout: i32 = -1
-		if in_hold_n == 1 && in_hold[0] == 0x1b {
+		if in_hold_n > 0 {
 			timeout = 16
 		}
 		pr := posix.poll(&pfd[0], n, timeout)
@@ -241,8 +241,8 @@ tty_to_sock :: proc() {
 			if in_hold_n == 1 && in_hold[0] == 0x1b {
 				esc := [1]u8{0x1b}
 				queue_input(FRAME_DATA, esc[:])
-				in_hold_n = 0
 			}
+			in_hold_n = 0
 			continue
 		}
 		if n > 1 && pfd[1].revents & {.IN, .HUP, .ERR, .NVAL} != {} {
@@ -449,28 +449,6 @@ rewrite_focus_tracking :: proc(s, dst: []u8) -> (n: int, drop, focus_off, change
 	return pos + 1, false, focus_off, true
 }
 
-leaves_alt_screen :: proc(s: []u8) -> bool {
-	nseq := len(s)
-	if nseq < 6 || s[0] != 0x1b || s[1] != '[' || s[2] != '?' || s[nseq - 1] != 'l' {
-		return false
-	}
-	body := s[3:nseq - 1]
-	start := 0
-	for i := 0; i <= len(body); i += 1 {
-		if i == len(body) || body[i] == ';' {
-			tok := body[start:i]
-			if len(tok) == 4 && tok[0] == '1' && tok[1] == '0' && tok[2] == '4' && tok[3] == '9' {
-				return true
-			}
-			if len(tok) == 2 && tok[0] == '4' && tok[1] == '7' {
-				return true
-			}
-			start = i + 1
-		}
-	}
-	return false
-}
-
 out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
 	if out_hold_n == 0 {
 		if ch != 0x1b {
@@ -480,6 +458,10 @@ out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
 		out_hold[out_hold_n] = ch
 		out_hold_n += 1
 		return true
+	}
+	if out_hold_n >= 2 && out_hold[1] == '[' && ch < 0x20 {
+		out_hold_n = 0
+		return out_byte(tty_out, ch)
 	}
 	if out_hold_n < len(out_hold) {
 		out_hold[out_hold_n] = ch
@@ -499,9 +481,6 @@ out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
 	if complete {
 		ok := true
 		seq := out_hold[:out_hold_n]
-		if leaves_alt_screen(seq) {
-			in_hold_n = 0
-		}
 		rewritten: [128]u8
 		n, drop, focus_off, changed := rewrite_focus_tracking(seq, rewritten[:])
 		if changed {
@@ -665,6 +644,14 @@ take_frames :: proc(in_buf, tty_out: ^[dynamic]u8, exit_code: ^int, done: ^bool)
 			}
 			done^ = true
 			return true
+		}
+		if kind == FRAME_RAW {
+			out_hold_n = 0
+			if n > 0 && !buf_add(tty_out, payload) {
+				return true
+			}
+			buf_drain(in_buf, 5 + int(n))
+			continue
 		}
 		if kind == FRAME_DATA && n > 0 {
 			if !feed_output(tty_out, payload) {

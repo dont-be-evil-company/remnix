@@ -47,6 +47,8 @@ type Session struct {
 	overlayCancel context.CancelFunc
 	keyDec        kittyKeyDecoder
 	resetKeys     atomic.Bool
+	afterAlt      atomic.Bool
+	idleMu        sync.Mutex
 }
 
 func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Session, error) {
@@ -108,6 +110,7 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		closed: make(chan struct{}),
 	}
 	go s.pump(conn)
+	go s.watchForeground()
 	return s, nil
 }
 
@@ -134,6 +137,9 @@ func (s *Session) Close() {
 		if s.ptmxW != nil {
 			_ = s.ptmxW.Close()
 		}
+		if s.screen != nil {
+			s.screen.Close()
+		}
 		if s.closed != nil {
 			close(s.closed)
 		}
@@ -142,17 +148,9 @@ func (s *Session) Close() {
 
 func (s *Session) pump(conn net.Conn) {
 	defer s.Close()
-	parseCh := make(chan []byte, 256)
-	go func() {
-		defer func() { _ = recover() }()
-		for chunk := range parseCh {
-			s.screen.Write(chunk)
-		}
-	}()
 	go func() {
 		buf := make([]byte, 8192)
 		var queries queryScanner
-		var altLeave altLeaveWatch
 		var kbStrip keyboardModeStripper
 		for {
 			n, err := s.ptmx.Read(buf)
@@ -166,28 +164,24 @@ func (s *Session) pump(conn net.Conn) {
 						_, _ = s.ptmxW.Write(reply)
 					}
 				}
+				_, leftAlt := s.screen.Write(chunk)
 				stripped := kbStrip.feed(chunk)
-				out, leftAlt := altLeave.feed(stripped)
 				if leftAlt {
 					s.resetKeys.Store(true)
-					// Do not TIOCSPGRP/Setsize here: nvim is still in
-					// teardown and a WINCH makes it redraw on the alt
-					// screen, then exit without a second 1049l.
-					go s.restoreForegroundLater()
+					s.afterAlt.Store(true)
 				}
 				if !s.overlayActive.Load() {
-					_ = s.sendFrame(FrameData, out)
-				}
-				select {
-				case parseCh <- chunk:
-				default:
+					_ = s.sendFrame(FrameData, stripped)
+					if leftAlt {
+						s.sendIdleReset(idleResetOpts{})
+						go s.restoreForegroundLater()
+					}
 				}
 			}
 			if err != nil {
 				break
 			}
 		}
-		close(parseCh)
 	}()
 	go func() {
 		for {
@@ -201,9 +195,7 @@ func (s *Session) pump(conn net.Conn) {
 					s.keyDec.hold = s.keyDec.hold[:0]
 				}
 				if s.overlayActive.Load() {
-					if decoded := s.keyDec.feed(payload); len(decoded) > 0 {
-						s.sendOverlayKey(decoded)
-					}
+					s.sendOverlayKey(payload)
 				} else {
 					s.ensureForeground()
 					_, _ = s.ptmxW.Write(s.keyDec.feed(payload))
@@ -282,6 +274,23 @@ func (s *Session) sendFrame(kind byte, payload []byte) error {
 	return WriteFrame(s.conn, kind, payload)
 }
 
+func (s *Session) sendIdleReset(opts idleResetOpts) {
+	if s == nil {
+		return
+	}
+	s.idleMu.Lock()
+	defer s.idleMu.Unlock()
+	if s.overlayActive.Load() {
+		return
+	}
+	raw := idleReset(s.screen, opts)
+	if len(raw) == 0 {
+		return
+	}
+	s.screen.Write(raw)
+	_ = s.sendFrame(FrameRaw, raw)
+}
+
 func setForegroundPTY(ptmx *os.File, pid int) {
 	pgid := int32(pid)
 	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, ptmx.Fd(), syscall.TIOCSPGRP, uintptr(unsafe.Pointer(&pgid)))
@@ -303,12 +312,49 @@ func (s *Session) restoreForegroundLater() {
 	if !s.foregroundIdle() {
 		return
 	}
-	s.restoreForeground()
-	if s.Cols >= 8 && s.Rows >= 4 && s.ptmx != nil {
-		_ = pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(s.Rows), Cols: uint16(s.Cols)})
-		s.screen.Resize(s.Cols, s.Rows)
+	fg, shell, ok := s.foregroundPgid()
+	if ok && fg != shell {
+		s.restoreForeground()
 	}
-	_ = s.sendFrame(FrameData, []byte(seqForceMainScreen))
+	if s.ptmx != nil && s.Cols >= 8 && s.Rows >= 4 {
+		if ws, err := pty.GetsizeFull(s.ptmx); err == nil {
+			if int(ws.Rows) != s.Rows || int(ws.Cols) != s.Cols {
+				_ = pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(s.Rows), Cols: uint16(s.Cols)})
+				s.screen.Resize(s.Cols, s.Rows)
+			}
+		}
+	}
+}
+
+// watchForeground force-leaves the alt screen when the foreground process is
+// gone but the emulator is still on the alternate screen (hard-kill left the
+// pane in alt).
+func (s *Session) watchForeground() {
+	tick := time.NewTimer(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		tick.Reset(50 * time.Millisecond)
+		select {
+		case <-s.closed:
+			return
+		case <-tick.C:
+		}
+		if s.overlayActive.Load() || !s.screen.IsAltScreen() || !s.foregroundIdle() {
+			continue
+		}
+		select {
+		case <-s.closed:
+			return
+		case <-time.After(120 * time.Millisecond):
+		}
+		if s.overlayActive.Load() || !s.screen.IsAltScreen() || !s.foregroundIdle() {
+			continue
+		}
+		s.afterAlt.Store(true)
+		s.resetKeys.Store(true)
+		s.sendIdleReset(idleResetOpts{includeAlt: true})
+		s.restoreForeground()
+	}
 }
 
 func (s *Session) foregroundPgid() (fg, shell int32, ok bool) {

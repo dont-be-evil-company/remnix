@@ -153,3 +153,14 @@ func TestKeyboardModeStripperSplit(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestKeyboardModeStripperAbortsCSIOnEsc(t *testing.T) {
+	var s keyboardModeStripper
+	got := s.feed([]byte("\x1b[?2026\x1b[?1049l\x1b[?25h"))
+	if !bytes.Contains(got, []byte("\x1b[?1049l")) {
+		t.Fatalf("nested ESC must not swallow 1049l, got %q", got)
+	}
+	if !bytes.Contains(got, []byte("\x1b[?25h")) {
+		t.Fatalf("must keep next CSI, got %q", got)
+	}
+}

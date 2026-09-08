@@ -29,4 +29,11 @@ func TestFrameRoundTrip(t *testing.T) {
 	if err != nil || kind != FrameData || string(payload) != "abc" {
 		t.Fatalf("kind=%d payload=%q err=%v", kind, payload, err)
 	}
+	if err := WriteFrame(&buf, FrameRaw, []byte("\x1b[?1049l")); err != nil {
+		t.Fatal(err)
+	}
+	kind, payload, err = ReadFrame(&buf)
+	if err != nil || kind != FrameRaw || string(payload) != "\x1b[?1049l" {
+		t.Fatalf("raw kind=%d payload=%q err=%v", kind, payload, err)
+	}
 }

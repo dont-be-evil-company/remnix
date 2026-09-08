@@ -216,8 +216,17 @@ func (s *keyboardModeStripper) feed(p []byte) []byte {
 			continue
 		}
 		j := i + 2
+		cancelled := false
 		for j < len(buf) && !csiFinal(buf[j]) {
+			if buf[j] < 0x20 {
+				i = j
+				cancelled = true
+				break
+			}
 			j++
+		}
+		if cancelled {
+			continue
 		}
 		if j >= len(buf) {
 			if len(buf)-i > 64 {

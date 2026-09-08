@@ -3,18 +3,6 @@ package terminal
 import (
 	"bytes"
 	"fmt"
-	"strings"
-)
-
-const (
-	seqKittyFlagsOff = "\x1b[=0;1u"
-	seqKittyPop      = "\x1b[<u\x1b[<1u"
-	seqModifyKeysOff = "\x1b[>4;0m"
-	seqAfterAlt      = "\x1b[?2026l\x1b[?2004l\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h"
-	// seqForceMainScreen is sent after the alt-screen app has exited. A
-	// WINCH during nvim's rmcup can make it redraw on the alt screen and
-	// die without a second 1049l; Kitty then keeps the last nvim frame.
-	seqForceMainScreen = "\x1b[?1049l" + seqKittyPop + seqKittyFlagsOff + seqModifyKeysOff + seqAfterAlt
 )
 
 // queryScanner watches PTY output for terminal probes and builds stdin replies.
@@ -128,75 +116,4 @@ func replyCSI(s []byte, rows, cols int) []byte {
 		}
 	}
 	return nil
-}
-
-// withMainScreenKeyboardReset appends a keyboard-protocol disable when the
-// chunk leaves the alternate screen (nvim, less, ...). Terminals that share one
-// kitty stack between main and alt would otherwise keep CSI-u on after pop.
-func withMainScreenKeyboardReset(p []byte) []byte {
-	if !leavesAltScreen(p) {
-		return p
-	}
-	return appendKeyboardReset(p)
-}
-
-func appendKeyboardReset(p []byte) []byte {
-	n := len(seqKittyPop) + len(seqKittyFlagsOff) + len(seqModifyKeysOff) + len(seqAfterAlt)
-	out := make([]byte, 0, len(p)+n)
-	out = append(out, p...)
-	out = append(out, seqKittyPop...)
-	out = append(out, seqKittyFlagsOff...)
-	out = append(out, seqModifyKeysOff...)
-	out = append(out, seqAfterAlt...)
-	return out
-}
-
-// altLeaveWatch catches rmcup split across PTY reads (CSI ? 1049 l).
-type altLeaveWatch struct {
-	tail []byte
-}
-
-func (w *altLeaveWatch) feed(p []byte) (out []byte, left bool) {
-	const keep = 32
-	check := p
-	if len(w.tail) > 0 {
-		check = append(append([]byte(nil), w.tail...), p...)
-	}
-	out = p
-	if leavesAltScreen(check) && !leavesAltScreen(w.tail) {
-		out = appendKeyboardReset(p)
-		left = true
-	}
-	if n := len(p); n > keep {
-		w.tail = append(w.tail[:0], p[n-keep:]...)
-	} else {
-		w.tail = append(w.tail[:0], p...)
-	}
-	return out, left
-}
-
-func leavesAltScreen(p []byte) bool {
-	for i := 0; i < len(p); {
-		j := bytes.Index(p[i:], []byte("\x1b["))
-		if j < 0 {
-			return false
-		}
-		i += j
-		k := i + 2
-		for k < len(p) && !csiFinal(p[k]) {
-			k++
-		}
-		if k >= len(p) {
-			return false
-		}
-		if p[i+2] == '?' && p[k] == 'l' {
-			for _, part := range strings.Split(string(p[i+3:k]), ";") {
-				if part == "1049" || part == "47" {
-					return true
-				}
-			}
-		}
-		i = k + 1
-	}
-	return false
 }

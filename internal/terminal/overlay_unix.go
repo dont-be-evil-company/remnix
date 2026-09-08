@@ -15,11 +15,6 @@ const (
 	seqModifyOff = "\x1b[>4;0m"
 	seqFocusOff  = "\x1b[?1004l"
 	seqCursorOn  = "\x1b[?25h"
-	// seqUnstick ends OSC/DCS attach may still be holding after nvim, and
-	// drops synchronized output / mouse / paste. Do not send 1049l here:
-	// the overlay is inline on the main screen, and a second 1049l after
-	// nvim swaps Kitty back to a stale buffer (blinking cursor, no TUI).
-	seqUnstick = "\x1b\\\x07\x1b[?2026l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25l\x1b[0m"
 )
 
 type frameWriter struct {
@@ -62,12 +57,15 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	if s == nil {
 		return nil, ErrNoSession
 	}
-	snap := s.Snapshot()
-	if snap.Rows < 4 {
-		snap.Rows = s.Rows
+	if s.screen.IsAltScreen() && s.foregroundIdle() {
+		s.sendIdleReset(idleResetOpts{includeAlt: true})
 	}
-	if snap.Cols < 8 {
+	snap := s.Snapshot()
+	if s.Cols >= 8 {
 		snap.Cols = s.Cols
+	}
+	if s.Rows >= 4 {
+		snap.Rows = s.Rows
 	}
 	if snap.Rows < 4 {
 		snap.Rows = 24
@@ -75,8 +73,9 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	if snap.Cols < 8 {
 		snap.Cols = 80
 	}
-	if snap.CursorRow < 0 || snap.CursorRow >= snap.Rows {
+	if s.afterAlt.Swap(false) || snap.CursorRow < 0 || snap.CursorRow >= snap.Rows {
 		snap.CursorRow = snap.Rows - 1
+		snap.CursorCol = 0
 	}
 	height := snap.Rows
 	if rowsFor != nil {
@@ -106,6 +105,28 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	s.overlayMu.Unlock()
 
 	keyR, keyW := io.Pipe()
+
+	paint := &frameWriter{s: s}
+	unstick := idleReset(s.screen, idleResetOpts{hideCursor: true, forceSticky: true})
+	if len(unstick) > 0 {
+		s.screen.Write(unstick)
+		_ = s.sendFrame(FrameRaw, unstick)
+	}
+	ptyproxy.Prepare(paint, snap, place)
+	_, _ = io.WriteString(paint, seqKittyOff)
+	_, _ = io.WriteString(paint, seqModifyOff)
+	_, _ = io.WriteString(paint, seqFocusOff)
+	_ = paint.Flush()
+drainStart:
+	for {
+		select {
+		case <-keys:
+			continue drainStart
+		default:
+			break drainStart
+		}
+	}
+
 	go func() {
 		defer keyW.Close()
 		for {
@@ -131,15 +152,6 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 		case <-ctx.Done():
 		}
 	}()
-
-	paint := &frameWriter{s: s}
-	_, _ = io.WriteString(paint, seqUnstick)
-	_ = paint.Flush()
-	ptyproxy.Prepare(paint, snap, place)
-	_, _ = io.WriteString(paint, seqKittyOff)
-	_, _ = io.WriteString(paint, seqModifyOff)
-	_, _ = io.WriteString(paint, seqFocusOff)
-	_ = paint.Flush()
 
 	ov := &Overlay{
 		Keys:  keyR,
