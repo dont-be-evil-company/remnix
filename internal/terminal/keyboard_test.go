@@ -40,6 +40,25 @@ func TestKittyKeyDecoderSplit(t *testing.T) {
 	}
 }
 
+func TestKittyKeyDecoderC0CancelsIncompleteCSI(t *testing.T) {
+	var d kittyKeyDecoder
+	if got := d.feed([]byte("\x1b[")); len(got) != 0 {
+		t.Fatalf("partial %q", got)
+	}
+	got := d.feed([]byte{3})
+	if !bytes.Equal(got, []byte{3}) {
+		t.Fatalf("Ctrl+C must cancel held CSI, got %q", got)
+	}
+}
+
+func TestKittyKeyDecoderNestedEscCancelsCSI(t *testing.T) {
+	var d kittyKeyDecoder
+	got := d.feed([]byte("\x1b[\x1b[Ia"))
+	if string(got) != "a" {
+		t.Fatalf("nested ESC must abort CSI then drop focus, got %q", got)
+	}
+}
+
 func TestKittyKeyDecoderDropsFocus(t *testing.T) {
 	var d kittyKeyDecoder
 	got := d.feed([]byte("a\x1b[I\x1b[Ob"))
@@ -78,10 +97,13 @@ func TestKittyKeyDecoderPlainPassthrough(t *testing.T) {
 
 func TestKeyboardModeStripper(t *testing.T) {
 	var s keyboardModeStripper
-	in := []byte("hi\x1b[>3u\x1b[<1u\x1b[=0;1u\x1b[>4;2m\x1b[31mthere")
+	in := []byte("hi\x1b[>3u\x1b[<1u\x1b[=0;1u\x1b[>4;2m\x1b[>4;0m\x1b[31mthere")
 	got := s.feed(in)
 	if bytes.Contains(got, []byte("\x1b[>3u")) || bytes.Contains(got, []byte("\x1b[>4;2m")) {
-		t.Fatalf("mode CSI leaked: %q", got)
+		t.Fatalf("enable CSI leaked: %q", got)
+	}
+	if !bytes.Contains(got, []byte("\x1b[<1u")) || !bytes.Contains(got, []byte("\x1b[=0;1u")) || !bytes.Contains(got, []byte("\x1b[>4;0m")) {
+		t.Fatalf("disable must reach the emulator: %q", got)
 	}
 	if !bytes.Contains(got, []byte("\x1b[31m")) || !bytes.Contains(got, []byte("hi")) || !bytes.Contains(got, []byte("there")) {
 		t.Fatalf("kept payload missing: %q", got)
@@ -102,7 +124,7 @@ func TestRewriteFocusTrackingCombined(t *testing.T) {
 		t.Fatalf("unrelated modes %q", got)
 	}
 	got, drop, off = rewriteFocusTracking([]byte("\x1b[?1004l"))
-	if !drop || off || got != nil {
+	if drop || off || string(got) != "\x1b[?1004l" {
 		t.Fatalf("bare 1004l drop=%v off=%v %q", drop, off, got)
 	}
 }

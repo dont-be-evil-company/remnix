@@ -303,6 +303,12 @@ func TestOverlayDivertsKeysFromPTY(t *testing.T) {
 	if !strings.Contains(col.snapshot(), "\x1b[?2026l") {
 		t.Fatalf("overlay must end synchronized output so paint is visible after nvim, got %q", trimForLog(col.snapshot()))
 	}
+	if strings.Contains(col.snapshot(), "\x1b[?1049l") {
+		t.Fatalf("overlay must not leave the alt-screen; 1049l after nvim hides the TUI: %q", trimForLog(col.snapshot()))
+	}
+	if !strings.Contains(col.snapshot(), "\x1b[=0;1u") {
+		t.Fatalf("overlay must disable kitty keyboard without pushing a new stack entry: %q", trimForLog(col.snapshot()))
+	}
 	before := col.snapshot()
 
 	if err := WriteFrame(client, FrameData, []byte("secret\n")); err != nil {

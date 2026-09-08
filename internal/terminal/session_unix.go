@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/creack/pty"
@@ -45,6 +46,7 @@ type Session struct {
 	overlayWinch  chan Size
 	overlayCancel context.CancelFunc
 	keyDec        kittyKeyDecoder
+	resetKeys     atomic.Bool
 }
 
 func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Session, error) {
@@ -167,7 +169,11 @@ func (s *Session) pump(conn net.Conn) {
 				stripped := kbStrip.feed(chunk)
 				out, leftAlt := altLeave.feed(stripped)
 				if leftAlt {
-					s.restoreForeground()
+					s.resetKeys.Store(true)
+					// Do not TIOCSPGRP/Setsize here: nvim is still in
+					// teardown and a WINCH makes it redraw on the alt
+					// screen, then exit without a second 1049l.
+					go s.restoreForegroundLater()
 				}
 				if !s.overlayActive.Load() {
 					_ = s.sendFrame(FrameData, out)
@@ -191,9 +197,15 @@ func (s *Session) pump(conn net.Conn) {
 			}
 			switch kind {
 			case FrameData:
+				if s.resetKeys.Swap(false) {
+					s.keyDec.hold = s.keyDec.hold[:0]
+				}
 				if s.overlayActive.Load() {
-					s.sendOverlayKey(payload)
+					if decoded := s.keyDec.feed(payload); len(decoded) > 0 {
+						s.sendOverlayKey(decoded)
+					}
 				} else {
+					s.ensureForeground()
 					_, _ = s.ptmxW.Write(s.keyDec.feed(payload))
 				}
 			case FrameWinch:
@@ -280,6 +292,61 @@ func (s *Session) restoreForeground() {
 		return
 	}
 	setForegroundPTY(s.ptmx, s.cmd.Process.Pid)
+	_ = s.cmd.Process.Signal(syscall.SIGCONT)
+}
+
+func (s *Session) restoreForegroundLater() {
+	time.Sleep(80 * time.Millisecond)
+	if s == nil || s.overlayActive.Load() {
+		return
+	}
+	if !s.foregroundIdle() {
+		return
+	}
+	s.restoreForeground()
+	if s.Cols >= 8 && s.Rows >= 4 && s.ptmx != nil {
+		_ = pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(s.Rows), Cols: uint16(s.Cols)})
+		s.screen.Resize(s.Cols, s.Rows)
+	}
+	_ = s.sendFrame(FrameData, []byte(seqForceMainScreen))
+}
+
+func (s *Session) foregroundPgid() (fg, shell int32, ok bool) {
+	if s == nil || s.ptmx == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0, 0, false
+	}
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, s.ptmx.Fd(), syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&fg)))
+	if errno != 0 {
+		return 0, 0, false
+	}
+	return fg, int32(s.cmd.Process.Pid), true
+}
+
+func pgidDead(fg int32) bool {
+	err := syscall.Kill(-int(fg), 0)
+	return err != nil && err != syscall.EPERM
+}
+
+func (s *Session) foregroundIdle() bool {
+	fg, shell, ok := s.foregroundPgid()
+	if !ok {
+		return false
+	}
+	if fg <= 1 || fg == shell {
+		return true
+	}
+	return pgidDead(fg)
+}
+
+// ensureForeground gives the shell the PTY if the previous foreground group
+// (nvim, less, ...) is gone. Otherwise keys and Ctrl+C land on a dead pgid and
+// zsh sits stopped on SIGTTIN.
+func (s *Session) ensureForeground() {
+	fg, shell, ok := s.foregroundPgid()
+	if !ok || fg <= 1 || fg == shell || !pgidDead(fg) {
+		return
+	}
+	s.restoreForeground()
 }
 
 func envValue(env []string, key string) string {

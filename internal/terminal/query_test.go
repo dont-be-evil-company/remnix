@@ -85,6 +85,12 @@ func TestWithMainScreenKeyboardReset(t *testing.T) {
 	if !bytes.Contains(got, []byte(seqKittyFlagsOff)) || !bytes.Contains(got, []byte(seqModifyKeysOff)) {
 		t.Fatalf("must disable kitty + modifyOtherKeys after nvim, got %q", got)
 	}
+	if !bytes.Contains(got, []byte(seqKittyPop)) || !bytes.Contains(got, []byte("\x1b[?2026l")) || !bytes.Contains(got, []byte("\x1b[?1004l")) {
+		t.Fatalf("must unstick sync/focus/keyboard after nvim, got %q", got)
+	}
+	if !bytes.Contains([]byte(seqForceMainScreen), []byte("\x1b[?1049l")) {
+		t.Fatal("post-exit unstick must force the main screen")
+	}
 	plain := []byte("hello")
 	if got := withMainScreenKeyboardReset(plain); !bytes.Equal(got, plain) {
 		t.Fatalf("unchanged without alt-screen leave, got %q", got)

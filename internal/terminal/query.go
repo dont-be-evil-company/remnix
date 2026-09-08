@@ -8,7 +8,13 @@ import (
 
 const (
 	seqKittyFlagsOff = "\x1b[=0;1u"
+	seqKittyPop      = "\x1b[<u\x1b[<1u"
 	seqModifyKeysOff = "\x1b[>4;0m"
+	seqAfterAlt      = "\x1b[?2026l\x1b[?2004l\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h"
+	// seqForceMainScreen is sent after the alt-screen app has exited. A
+	// WINCH during nvim's rmcup can make it redraw on the alt screen and
+	// die without a second 1049l; Kitty then keeps the last nvim frame.
+	seqForceMainScreen = "\x1b[?1049l" + seqKittyPop + seqKittyFlagsOff + seqModifyKeysOff + seqAfterAlt
 )
 
 // queryScanner watches PTY output for terminal probes and builds stdin replies.
@@ -135,10 +141,13 @@ func withMainScreenKeyboardReset(p []byte) []byte {
 }
 
 func appendKeyboardReset(p []byte) []byte {
-	out := make([]byte, 0, len(p)+len(seqKittyFlagsOff)+len(seqModifyKeysOff))
+	n := len(seqKittyPop) + len(seqKittyFlagsOff) + len(seqModifyKeysOff) + len(seqAfterAlt)
+	out := make([]byte, 0, len(p)+n)
 	out = append(out, p...)
+	out = append(out, seqKittyPop...)
 	out = append(out, seqKittyFlagsOff...)
 	out = append(out, seqModifyKeysOff...)
+	out = append(out, seqAfterAlt...)
 	return out
 }
 

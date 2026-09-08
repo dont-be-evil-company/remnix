@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	seqDisableKitty = "\x1b[>u"
-	seqModifyOff    = "\x1b[>4;0m"
-	seqFocusOff     = "\x1b[?1004l"
-	seqPopKitty     = "\x1b[<1u"
-	seqModifyOn     = "\x1b[>4;1m"
-	// seqUnstick ends OSC/DCS that attach may still be holding after nvim,
-	// leaves alt-screen / synchronized output / mouse / paste, then SGR.
-	seqUnstick = "\x1b\\\x07\x1b[?2026l\x1b[?1049l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25l\x1b[0m"
+	seqKittyOff  = "\x1b[<u\x1b[<1u\x1b[=0;1u"
+	seqModifyOff = "\x1b[>4;0m"
+	seqFocusOff  = "\x1b[?1004l"
+	seqCursorOn  = "\x1b[?25h"
+	// seqUnstick ends OSC/DCS attach may still be holding after nvim, and
+	// drops synchronized output / mouse / paste. Do not send 1049l here:
+	// the overlay is inline on the main screen, and a second 1049l after
+	// nvim swaps Kitty back to a stale buffer (blinking cursor, no TUI).
+	seqUnstick = "\x1b\\\x07\x1b[?2026l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25l\x1b[0m"
 )
 
 type frameWriter struct {
@@ -101,6 +102,7 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	s.overlayWinch = winch
 	s.overlayCancel = cancel
 	s.overlayActive.Store(true)
+	s.resetKeys.Store(true)
 	s.overlayMu.Unlock()
 
 	keyR, keyW := io.Pipe()
@@ -134,7 +136,7 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	_, _ = io.WriteString(paint, seqUnstick)
 	_ = paint.Flush()
 	ptyproxy.Prepare(paint, snap, place)
-	_, _ = io.WriteString(paint, seqDisableKitty)
+	_, _ = io.WriteString(paint, seqKittyOff)
 	_, _ = io.WriteString(paint, seqModifyOff)
 	_, _ = io.WriteString(paint, seqFocusOff)
 	_ = paint.Flush()
@@ -151,11 +153,14 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	ov.closeFn = func() {
 		once.Do(func() {
 			snap.Restore(paint, place.Rect, place.Scroll)
-			_, _ = io.WriteString(paint, seqPopKitty)
-			_, _ = io.WriteString(paint, seqModifyOn)
+			_, _ = io.WriteString(paint, seqKittyOff)
+			_, _ = io.WriteString(paint, seqModifyOff)
+			_, _ = io.WriteString(paint, seqFocusOff)
+			_, _ = io.WriteString(paint, seqCursorOn)
 			_ = paint.Flush()
 			s.endOverlay(cancel, keys, winch)
 			_ = keyR.Close()
+			s.restoreForeground()
 		})
 	}
 	return ov, nil

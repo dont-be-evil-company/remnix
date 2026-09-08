@@ -38,9 +38,10 @@ foreign libc_extra {
 	ioctl :: proc(fd: posix.FD, request: c.ulong, arg: rawptr) -> c.int ---
 }
 
-got_winch: b32
-io_stop:   b32
-orig_term: posix.termios
+got_winch:      b32
+io_stop:        b32
+need_focus_off: b32
+orig_term:      posix.termios
 tty_fd:    posix.FD = -1
 tty_in:    posix.FD = -1
 raw_set:   bool
@@ -219,13 +220,28 @@ tty_to_sock :: proc() {
 		pfd[0] = {fd = tty_in, events = {.IN}}
 		pfd[1] = {fd = wake_rd, events = {.IN}}
 		n: posix.nfds_t = wake_rd >= 0 ? 2 : 1
-		pr := posix.poll(&pfd[0], n, -1)
+		// Hold a trailing ESC for a beat so a split CSI I/O from pane
+		// focus can still be assembled and dropped. Flush it as Escape
+		// if nothing follows (overlay / vi-mode).
+		timeout: i32 = -1
+		if in_hold_n == 1 && in_hold[0] == 0x1b {
+			timeout = 16
+		}
+		pr := posix.poll(&pfd[0], n, timeout)
 		if pr < 0 {
 			if posix.errno() == .EINTR {
 				continue
 			}
 			if io_stop {
 				break
+			}
+			continue
+		}
+		if pr == 0 {
+			if in_hold_n == 1 && in_hold[0] == 0x1b {
+				esc := [1]u8{0x1b}
+				queue_input(FRAME_DATA, esc[:])
+				in_hold_n = 0
 			}
 			continue
 		}
@@ -421,6 +437,9 @@ rewrite_focus_tracking :: proc(s, dst: []u8) -> (n: int, drop, focus_off, change
 		}
 	}
 	if first {
+		if fin == 'l' {
+			return 0, false, false, false
+		}
 		return 0, true, focus_off, true
 	}
 	if pos >= len(dst) {
@@ -428,6 +447,28 @@ rewrite_focus_tracking :: proc(s, dst: []u8) -> (n: int, drop, focus_off, change
 	}
 	dst[pos] = fin
 	return pos + 1, false, focus_off, true
+}
+
+leaves_alt_screen :: proc(s: []u8) -> bool {
+	nseq := len(s)
+	if nseq < 6 || s[0] != 0x1b || s[1] != '[' || s[2] != '?' || s[nseq - 1] != 'l' {
+		return false
+	}
+	body := s[3:nseq - 1]
+	start := 0
+	for i := 0; i <= len(body); i += 1 {
+		if i == len(body) || body[i] == ';' {
+			tok := body[start:i]
+			if len(tok) == 4 && tok[0] == '1' && tok[1] == '0' && tok[2] == '4' && tok[3] == '9' {
+				return true
+			}
+			if len(tok) == 2 && tok[0] == '4' && tok[1] == '7' {
+				return true
+			}
+			start = i + 1
+		}
+	}
+	return false
 }
 
 out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
@@ -458,6 +499,9 @@ out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
 	if complete {
 		ok := true
 		seq := out_hold[:out_hold_n]
+		if leaves_alt_screen(seq) {
+			in_hold_n = 0
+		}
 		rewritten: [128]u8
 		n, drop, focus_off, changed := rewrite_focus_tracking(seq, rewritten[:])
 		if changed {
@@ -513,7 +557,8 @@ drop_input_seq :: proc(s: []u8) -> bool {
 
 // Drop complete emulator replies in this read only. Hold an incomplete CSI
 // that already has '[' (so split CSI I/O from a kitty pane focus cannot
-// leak ESC into zsh). Never hold a lone ESC across reads.
+// leak ESC into zsh). Hold a lone trailing ESC for the next read/timeout
+// so `\x1b` + `[I` is not flushed as Escape plus typing.
 filter_keys :: proc(dst, src: []u8) -> int {
 	tmp: [4224]u8
 	combined := src
@@ -538,16 +583,26 @@ filter_keys :: proc(dst, src: []u8) -> int {
 			continue
 		}
 		if i + 1 >= n {
-			dst[o] = combined[i]
-			o += 1
-			i += 1
+			in_hold[0] = 0x1b
+			in_hold_n = 1
 			break
 		}
 		kind := combined[i + 1]
 		if kind == '[' {
 			j := i + 2
+			cancelled := false
 			for j < n && !csi_final(combined[j]) {
+				// C0 (Ctrl+C, nested ESC) cannot be a CSI param. Abort
+				// so a held `\x1b[` after a split cannot eat all keys.
+				if combined[j] < 0x20 {
+					i = j
+					cancelled = true
+					break
+				}
 				j += 1
+			}
+			if cancelled {
+				continue
 			}
 			if j >= n {
 				hold := n - i
@@ -561,7 +616,11 @@ filter_keys :: proc(dst, src: []u8) -> int {
 				break
 			}
 			seql := j - i + 1
-			if !drop_input_seq(combined[i:][:seql]) {
+			if drop_input_seq(combined[i:][:seql]) {
+				if combined[j] == 'I' || combined[j] == 'O' {
+					need_focus_off = true
+				}
+			} else {
 				copy(dst[o:], combined[i:][:seql])
 				o += seql
 			}
@@ -991,6 +1050,12 @@ main :: proc() {
 		}
 		if got_winch {
 			maybe_winch(&cols, &rows, true)
+		}
+		if need_focus_off {
+			need_focus_off = false
+			if !buf_add(&tty_out, {0x1b, '[', '?', '1', '0', '0', '4', 'l'}) {
+				break
+			}
 		}
 		sync.mutex_lock(&io_mu)
 		sock_flush := buf_flush(sock, &g_sock_out)
