@@ -19,6 +19,7 @@ import (
 	"github.com/mistweaverco/syncsh/internal/daemon"
 	"github.com/mistweaverco/syncsh/internal/device"
 	"github.com/mistweaverco/syncsh/internal/doctor"
+	"github.com/mistweaverco/syncsh/internal/protocol"
 	"github.com/mistweaverco/syncsh/internal/redact"
 	"github.com/mistweaverco/syncsh/internal/repository"
 	"github.com/mistweaverco/syncsh/internal/setup"
@@ -543,13 +544,43 @@ func runDaemonUninstall(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+func printDaemonStats(cmd *cobra.Command, st protocol.Stats) {
+	fmt.Fprintf(cmd.OutOrStdout(), "pid=%d uptime=%ds heap=%d rss=%d sessions=%d ptys=%d cache_cmds=%d cache_interned=%d cache_bytes=%d dirty=%v db_open=%d last_sync_ok=%v\n",
+		st.PID, st.UptimeSec, st.HeapAlloc, st.RSSBytes, st.Sessions, st.ActivePTYs, st.CacheEntries, st.CacheInterned, st.CacheBytes, st.CacheDirty, st.DBOpenConns, st.LastSyncOK)
+}
+
 func runDaemonStats(cmd *cobra.Command, _ []string) error {
 	st, err := client.Stats()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "pid=%d uptime=%ds heap=%d rss=%d sessions=%d ptys=%d cache_cmds=%d cache_bytes=%d dirty=%v db_open=%d last_sync_ok=%v\n",
-		st.PID, st.UptimeSec, st.HeapAlloc, st.RSSBytes, st.Sessions, st.ActivePTYs, st.CacheEntries, st.CacheBytes, st.CacheDirty, st.DBOpenConns, st.LastSyncOK)
+	printDaemonStats(cmd, st)
+	return nil
+}
+
+func runDaemonReload(cmd *cobra.Command, _ []string) error {
+	if err := client.ReloadConfig(); err != nil {
+		return fmt.Errorf("daemon not running: %w", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "daemon config reloaded")
+	return nil
+}
+
+func runDaemonCompact(cmd *cobra.Command, _ []string) error {
+	st, err := client.CompactCache()
+	if err != nil {
+		return fmt.Errorf("daemon not running: %w", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "cache compacted")
+	printDaemonStats(cmd, st)
+	return nil
+}
+
+func runDaemonRestart(cmd *cobra.Command, _ []string) error {
+	if err := daemon.Restart(); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "daemon restarted")
 	return nil
 }
 

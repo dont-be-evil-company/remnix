@@ -30,16 +30,16 @@ type UI struct {
 }
 
 type Colors struct {
-	Accent   string        `yaml:"accent,omitempty"`
-	Title    string        `yaml:"title,omitempty"`
-	Muted    string        `yaml:"muted,omitempty"`
-	Rule     string        `yaml:"rule,omitempty"`
-	Badge    string        `yaml:"badge,omitempty"`
-	Duration string        `yaml:"duration,omitempty"`
-	Failed   string        `yaml:"failed,omitempty"`
-	Time     string        `yaml:"time,omitempty"`
-	Text     string        `yaml:"text,omitempty"`
-	Syntax   SyntaxColors  `yaml:"syntax"`
+	Accent   string       `yaml:"accent,omitempty"`
+	Title    string       `yaml:"title,omitempty"`
+	Muted    string       `yaml:"muted,omitempty"`
+	Rule     string       `yaml:"rule,omitempty"`
+	Badge    string       `yaml:"badge,omitempty"`
+	Duration string       `yaml:"duration,omitempty"`
+	Failed   string       `yaml:"failed,omitempty"`
+	Time     string       `yaml:"time,omitempty"`
+	Text     string       `yaml:"text,omitempty"`
+	Syntax   SyntaxColors `yaml:"syntax"`
 }
 
 type SyntaxColors struct {
@@ -484,7 +484,7 @@ func validateColor(key, v string) error {
 			return fmt.Errorf("%s: invalid color %q (want #RGB or #RRGGBB)", key, v)
 		}
 		for _, r := range h {
-			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 				return fmt.Errorf("%s: invalid color %q", key, v)
 			}
 		}

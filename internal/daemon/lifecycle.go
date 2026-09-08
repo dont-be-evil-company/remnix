@@ -34,6 +34,7 @@ func Run(ctx context.Context) error {
 	go s.syncer.Run(ctx)
 	go s.serveTerminal(ctx)
 	go s.watchSignals(ctx)
+	go s.compactLoop(ctx)
 	return s.serveControl(ctx)
 }
 

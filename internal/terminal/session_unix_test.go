@@ -152,38 +152,6 @@ func TestSessionDSRRoundTrip(t *testing.T) {
 	t.Fatalf("DSR reply not delivered (replied=%v)\n%s", replied, trimForLog(got))
 }
 
-func readAndAnswerQueries(t *testing.T, conn net.Conn, d time.Duration, needle string) string {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	var b strings.Builder
-	for time.Now().Before(deadline) {
-		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		kind, payload, err := ReadFrame(conn)
-		if err != nil {
-			continue
-		}
-		if kind != FrameData {
-			continue
-		}
-		b.Write(payload)
-		s := b.String()
-		switch {
-		case strings.Contains(string(payload), "\x1b[6n"):
-			_ = WriteFrame(conn, FrameData, []byte("\x1b[24;80R"))
-		case strings.Contains(string(payload), "\x1b[0c") || strings.HasSuffix(s, "\x1b[c"):
-			_ = WriteFrame(conn, FrameData, []byte("\x1b[?1;2c"))
-		case strings.Contains(string(payload), "\x1b]11;?"):
-			_ = WriteFrame(conn, FrameData, []byte("\x1b]11;rgb:1111/1111/1111\x07"))
-		case strings.Contains(string(payload), "\x1b[?u"):
-			_ = WriteFrame(conn, FrameData, []byte("\x1b[?0u"))
-		}
-		if needle == "" || strings.Contains(s, needle) {
-			return s
-		}
-	}
-	return b.String()
-}
-
 func readFramesUntil(t *testing.T, conn net.Conn, d time.Duration, needle string) string {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(d))

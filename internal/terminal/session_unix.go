@@ -404,12 +404,3 @@ func envValue(env []string, key string) string {
 	}
 	return ""
 }
-
-func socketPair() (local, remote *os.File, err error) {
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-	return os.NewFile(uintptr(fds[0]), "syncsh-control-local"),
-		os.NewFile(uintptr(fds[1]), "syncsh-control-remote"), nil
-}

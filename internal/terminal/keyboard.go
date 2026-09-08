@@ -353,7 +353,6 @@ func rewriteFocusTracking(seq []byte) (out []byte, drop, focusOff bool) {
 		b.WriteByte(fin)
 		return []byte(b.String()), false, false
 	}
-	focusOff = true
 	if len(kept) == 0 {
 		return nil, true, true
 	}

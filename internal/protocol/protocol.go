@@ -27,6 +27,7 @@ const (
 	OpDaemonStats    = "daemon.stats"
 	OpDaemonStatus   = "daemon.status"
 	OpReloadConfig   = "config.reload"
+	OpCompactCache   = "cache.compact"
 	OpScreenSnapshot = "screen.snapshot"
 
 	StatusOK  = "ok"
@@ -116,12 +117,12 @@ type HistoryTombstoneReq struct {
 }
 
 type Capabilities struct {
-	Protocol   int      `cbor:"protocol"`
-	Ops        []string `cbor:"ops"`
-	NULCompat  bool     `cbor:"nul"`
-	HasCache   bool     `cbor:"cache"`
-	HasPty     bool     `cbor:"pty"`
-	HasTheme   bool     `cbor:"theme"`
+	Protocol  int      `cbor:"protocol"`
+	Ops       []string `cbor:"ops"`
+	NULCompat bool     `cbor:"nul"`
+	HasCache  bool     `cbor:"cache"`
+	HasPty    bool     `cbor:"pty"`
+	HasTheme  bool     `cbor:"theme"`
 }
 
 type VersionRes struct {
@@ -130,21 +131,22 @@ type VersionRes struct {
 }
 
 type Stats struct {
-	PID            int    `cbor:"pid"`
-	UptimeSec      int64  `cbor:"uptime_sec"`
-	HeapAlloc      uint64 `cbor:"heap_alloc"`
-	RSSBytes       uint64 `cbor:"rss_bytes,omitempty"`
-	Sessions       int    `cbor:"sessions"`
-	ActivePTYs     int    `cbor:"active_ptys"`
-	CacheEntries   int    `cbor:"cache_entries"`
-	CacheBytes     int64  `cbor:"cache_bytes"`
-	CacheDirty     bool   `cbor:"cache_dirty"`
-	DBOpenConns    int    `cbor:"db_open_conns"`
-	DBInUse        int    `cbor:"db_in_use"`
-	LastSyncAt     int64  `cbor:"last_sync_at,omitempty"`
-	LastSyncOK     bool   `cbor:"last_sync_ok"`
-	LastSyncClass  string `cbor:"last_sync_class,omitempty"`
-	LastSyncError  string `cbor:"last_sync_error,omitempty"`
+	PID           int    `cbor:"pid"`
+	UptimeSec     int64  `cbor:"uptime_sec"`
+	HeapAlloc     uint64 `cbor:"heap_alloc"`
+	RSSBytes      uint64 `cbor:"rss_bytes,omitempty"`
+	Sessions      int    `cbor:"sessions"`
+	ActivePTYs    int    `cbor:"active_ptys"`
+	CacheEntries  int    `cbor:"cache_entries"`
+	CacheBytes    int64  `cbor:"cache_bytes"`
+	CacheInterned int    `cbor:"cache_interned,omitempty"`
+	CacheDirty    bool   `cbor:"cache_dirty"`
+	DBOpenConns   int    `cbor:"db_open_conns"`
+	DBInUse       int    `cbor:"db_in_use"`
+	LastSyncAt    int64  `cbor:"last_sync_at,omitempty"`
+	LastSyncOK    bool   `cbor:"last_sync_ok"`
+	LastSyncClass string `cbor:"last_sync_class,omitempty"`
+	LastSyncError string `cbor:"last_sync_error,omitempty"`
 }
 
 const maxFrame = 16 << 20

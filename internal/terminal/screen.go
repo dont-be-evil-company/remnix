@@ -89,15 +89,6 @@ func (s *Screen) IsAltScreen() bool {
 	return s.emu.IsAltScreen()
 }
 
-func (s *Screen) modeSet(m ansi.Mode) bool {
-	if s == nil || m == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sticky[m.Mode()]
-}
-
 // idleSnapshot returns leftover sticky DEC modes. forceSticky returns the
 // full allowlist even when the emulator never saw those modes (overlay paint).
 func (s *Screen) idleSnapshot(forceSticky bool) (leftover []ansi.Mode, onAlt, needKeyboard bool) {

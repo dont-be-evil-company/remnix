@@ -6,8 +6,8 @@ import (
 )
 
 type Theme struct {
-	Colors config.Colors
-	Icons  config.Icons
+	Colors   config.Colors
+	Icons    config.Icons
 	Title    lipgloss.Style
 	Muted    lipgloss.Style
 	Accent   lipgloss.Style

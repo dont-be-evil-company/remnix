@@ -69,11 +69,17 @@ func ReadCreate(r io.Reader) (CreateRequest, error) {
 		case "cwd":
 			req.Cwd = v
 		case "cols":
-			fmt.Sscanf(v, "%d", &req.Cols)
+			if _, err := fmt.Sscanf(v, "%d", &req.Cols); err != nil {
+				return CreateRequest{}, fmt.Errorf("terminal: cols: %w", err)
+			}
 		case "rows":
-			fmt.Sscanf(v, "%d", &req.Rows)
+			if _, err := fmt.Sscanf(v, "%d", &req.Rows); err != nil {
+				return CreateRequest{}, fmt.Errorf("terminal: rows: %w", err)
+			}
 		case "env_count":
-			fmt.Sscanf(v, "%d", &envN)
+			if _, err := fmt.Sscanf(v, "%d", &envN); err != nil {
+				return CreateRequest{}, fmt.Errorf("terminal: env_count: %w", err)
+			}
 			for i := 0; i < envN; i++ {
 				el, err := br.ReadLine()
 				if err != nil {

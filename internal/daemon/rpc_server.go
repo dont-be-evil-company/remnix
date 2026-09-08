@@ -261,6 +261,12 @@ func (s *Server) dispatch(req protocol.Request) protocol.Response {
 		}
 		resp, _ := protocol.EncodeOK(req.ID, nil)
 		return resp
+	case protocol.OpCompactCache:
+		resp, err := protocol.EncodeOK(req.ID, s.CompactCache())
+		if err != nil {
+			return protocol.EncodeErr(req.ID, err.Error())
+		}
+		return resp
 	case protocol.OpScreenSnapshot:
 		if s.sessions == nil {
 			return protocol.EncodeErr(req.ID, "no terminal sessions")

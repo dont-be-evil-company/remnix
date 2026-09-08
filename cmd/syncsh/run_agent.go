@@ -10,9 +10,9 @@ import (
 func newAgentCmd() *cobra.Command {
 	var stdio bool
 	cmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Deprecated: ensure the SyncSH daemon is running",
-		Long:  "Compatibility wrapper. Starts or connects to the unified syncsh daemon and exits. Prefer `syncsh daemon`.",
+		Use:        "agent",
+		Short:      "Deprecated: ensure the SyncSH daemon is running",
+		Long:       "Compatibility wrapper. Starts or connects to the unified syncsh daemon and exits. Prefer `syncsh daemon`.",
 		Deprecated: "use syncsh daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgent(cmd, stdio)

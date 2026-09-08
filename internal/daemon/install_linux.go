@@ -33,6 +33,7 @@ After=default.target
 
 [Service]
 ExecStart=%s daemon
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=600

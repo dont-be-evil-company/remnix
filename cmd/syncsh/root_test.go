@@ -24,6 +24,9 @@ func TestUnlockAndDaemonHelp(t *testing.T) {
 		{"version", "--help"},
 		{"inspect", "--help"},
 		{"explore", "--help"},
+		{"daemon", "reload", "--help"},
+		{"daemon", "compact", "--help"},
+		{"daemon", "restart", "--help"},
 	} {
 		cmd := newRootCmd()
 		cmd.SetArgs(args)

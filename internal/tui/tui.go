@@ -63,6 +63,7 @@ var (
 	colTitle    = lipgloss.Color("#CBA6F7")
 	colBadge    = lipgloss.Color("#89B4FA")
 	colRule     = lipgloss.Color("#313244")
+	colArg      = lipgloss.Color("#CDD6F4")
 )
 
 var (

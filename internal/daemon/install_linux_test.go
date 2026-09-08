@@ -18,4 +18,7 @@ func TestUnitContents(t *testing.T) {
 	if !strings.Contains(s, "TimeoutStopSec=600") {
 		t.Fatalf("missing TimeoutStopSec:\n%s", s)
 	}
+	if !strings.Contains(s, "ExecReload=/bin/kill -HUP $MAINPID") {
+		t.Fatalf("missing ExecReload:\n%s", s)
+	}
 }

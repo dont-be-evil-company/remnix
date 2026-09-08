@@ -7,30 +7,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var (
-	colCommand  = lipgloss.Color("#89B4FA")
-	colKeyword  = lipgloss.Color("#CBA6F7")
-	colFlag     = lipgloss.Color("#FAB387")
-	colString   = lipgloss.Color("#A6E3A1")
-	colComment  = lipgloss.Color("#6C7086")
-	colOperator = lipgloss.Color("#F38BA8")
-	colVar      = lipgloss.Color("#89DCEB")
-	colPath     = lipgloss.Color("#94E2D5")
-	colNumber   = lipgloss.Color("#F9E2AF")
-	colArg      = lipgloss.Color("#CDD6F4")
-)
-
-var styleCommand = lipgloss.NewStyle().Foreground(colCommand).Bold(true)
-var styleKeyword = lipgloss.NewStyle().Foreground(colKeyword).Bold(true)
-var styleFlag = lipgloss.NewStyle().Foreground(colFlag)
-var styleString = lipgloss.NewStyle().Foreground(colString)
-var styleComment = lipgloss.NewStyle().Foreground(colComment).Italic(true)
-var styleOperator = lipgloss.NewStyle().Foreground(colOperator)
-var styleVar = lipgloss.NewStyle().Foreground(colVar)
-var stylePath = lipgloss.NewStyle().Foreground(colPath)
-var styleNumber = lipgloss.NewStyle().Foreground(colNumber)
-var styleArg = lipgloss.NewStyle().Foreground(colArg)
-
 var shellKeywords = map[string]struct{}{
 	"if": {}, "then": {}, "else": {}, "elif": {}, "fi": {},
 	"for": {}, "while": {}, "until": {}, "do": {}, "done": {},
@@ -94,10 +70,6 @@ func HighlightCommandTheme(th Theme, cmd string) string {
 		}
 	}
 	return b.String()
-}
-
-func styleWord(word string, cmdPos bool) lipgloss.Style {
-	return styleWordTheme(DefaultTheme(), word, cmdPos)
 }
 
 func styleWordTheme(th Theme, word string, cmdPos bool) lipgloss.Style {

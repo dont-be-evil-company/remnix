@@ -242,18 +242,31 @@ func ReloadConfig() error {
 	return c.Call(protocol.OpReloadConfig, nil, nil)
 }
 
+func CompactCache() (protocol.Stats, error) {
+	c, err := Dial()
+	if err != nil {
+		return protocol.Stats{}, err
+	}
+	defer c.Close()
+	var st protocol.Stats
+	if err := c.Call(protocol.OpCompactCache, nil, &st); err != nil {
+		return protocol.Stats{}, err
+	}
+	return st, nil
+}
+
 func HitsToEntries(hits []protocol.SearchHit) []history.Entry {
 	out := make([]history.Entry, 0, len(hits))
 	for _, h := range hits {
 		e := history.Entry{
-			ID:        h.ID,
-			Command:   h.Command,
-			Cwd:       h.Cwd,
-			DeviceID:  h.DeviceID,
-			SessionID: h.SessionID,
-			Hostname:  h.Hostname,
-			Shell:     h.Shell,
-			StartTS:   time.UnixMilli(h.StartTS).UTC(),
+			ID:         h.ID,
+			Command:    h.Command,
+			Cwd:        h.Cwd,
+			DeviceID:   h.DeviceID,
+			SessionID:  h.SessionID,
+			Hostname:   h.Hostname,
+			Shell:      h.Shell,
+			StartTS:    time.UnixMilli(h.StartTS).UTC(),
 			ExitStatus: h.Exit,
 		}
 		out = append(out, e)

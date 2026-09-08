@@ -7,18 +7,18 @@ import (
 	"sync"
 	"time"
 	"unsafe"
-
 )
 
 type CacheStats struct {
-	Entries       int
-	UniqueCommands int
-	Bytes         int64
-	Dirty         bool
-	RowsScanned   int
-	BuildDuration time.Duration
-	HeapBefore    uint64
-	HeapAfter     uint64
+	Entries         int
+	UniqueCommands  int
+	InternedStrings int
+	Bytes           int64
+	Dirty           bool
+	RowsScanned     int
+	BuildDuration   time.Duration
+	HeapBefore      uint64
+	HeapAfter       uint64
 }
 
 type Cache struct {
@@ -103,6 +103,7 @@ func (c *Cache) Rebuild(ctx context.Context, store *Store) error {
 	c.sorted = next.sorted
 	c.dirty = false
 	c.stats = next.stats
+	c.stats.InternedStrings = len(c.pool.strs)
 	c.mu.Unlock()
 	return nil
 }
@@ -134,6 +135,7 @@ func (c *Cache) ApplyCreated(e Entry) {
 	defer c.mu.Unlock()
 	c.applyCreatedLocked(e)
 	c.resortLocked()
+	c.maybeCompactLocked()
 	c.refreshStatsLocked()
 }
 
@@ -171,6 +173,7 @@ func (c *Cache) ApplyTombstoned(ids []string) {
 		}
 	}
 	c.resortLocked()
+	c.maybeCompactLocked()
 	c.refreshStatsLocked()
 }
 
@@ -192,6 +195,7 @@ func (c *Cache) ApplyTombstoneCommand(command string) {
 	}
 	c.removeAtLocked(idx)
 	c.resortLocked()
+	c.maybeCompactLocked()
 	c.refreshStatsLocked()
 }
 
@@ -226,6 +230,7 @@ func (c *Cache) ApplyBatch(cs ChangeSet) {
 		c.ApplyTombstoneCommandUnlocked(cmd)
 	}
 	c.resortLocked()
+	c.maybeCompactLocked()
 	c.refreshStatsLocked()
 }
 
@@ -265,8 +270,16 @@ func (c *Cache) Stats() CacheStats {
 	st.Dirty = c.dirty
 	st.Entries = len(c.idToCmd)
 	st.UniqueCommands = len(c.recs)
+	st.InternedStrings = c.internedCountLocked()
 	st.Bytes = c.estimateBytesLocked()
 	return st
+}
+
+func (c *Cache) Compact() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.compactPoolLocked()
+	c.refreshStatsLocked()
 }
 
 func (c *Cache) applyCreatedLocked(e Entry) {
@@ -275,9 +288,6 @@ func (c *Cache) applyCreatedLocked(e Entry) {
 	}
 	cmdID := c.pool.intern(e.Command)
 	c.idToCmd[e.ID] = cmdID
-	cwdID := c.pool.intern(e.Cwd)
-	devID := c.pool.intern(e.DeviceID)
-	sessID := c.pool.intern(e.SessionID)
 	start := e.StartTS.UnixMilli()
 	exit := int32(-1)
 	if e.ExitStatus != nil {
@@ -288,18 +298,18 @@ func (c *Cache) applyCreatedLocked(e Entry) {
 		if start >= c.recs[idx].lastStart {
 			c.recs[idx].lastStart = start
 			c.recs[idx].lastExit = exit
-			c.recs[idx].cwd = cwdID
-			c.recs[idx].device = devID
-			c.recs[idx].session = sessID
+			c.recs[idx].cwd = c.pool.intern(e.Cwd)
+			c.recs[idx].device = c.pool.intern(e.DeviceID)
+			c.recs[idx].session = c.pool.intern(e.SessionID)
 		}
 		return
 	}
 	c.byCmd[cmdID] = len(c.recs)
 	c.recs = append(c.recs, cacheRec{
 		cmd:       cmdID,
-		cwd:       cwdID,
-		device:    devID,
-		session:   sessID,
+		cwd:       c.pool.intern(e.Cwd),
+		device:    c.pool.intern(e.DeviceID),
+		session:   c.pool.intern(e.SessionID),
 		lastStart: start,
 		lastExit:  exit,
 		freq:      1,
@@ -370,9 +380,70 @@ func (c *Cache) entryFromLocked(rec cacheRec) Entry {
 	return e
 }
 
+func (c *Cache) internedCountLocked() int {
+	if c.pool == nil {
+		return 0
+	}
+	return len(c.pool.strs)
+}
+
+func (c *Cache) referencedStringCountLocked() int {
+	seen := make(map[int32]struct{}, len(c.recs)*4)
+	for _, rec := range c.recs {
+		seen[rec.cmd] = struct{}{}
+		seen[rec.cwd] = struct{}{}
+		seen[rec.device] = struct{}{}
+		seen[rec.session] = struct{}{}
+	}
+	return len(seen)
+}
+
+func (c *Cache) maybeCompactLocked() {
+	if c.pool == nil || len(c.pool.strs) == 0 {
+		return
+	}
+	live := c.referencedStringCountLocked()
+	if live == 0 || len(c.pool.strs) > live*2 {
+		c.compactPoolLocked()
+	}
+}
+
+func (c *Cache) compactPoolLocked() {
+	if c.pool == nil {
+		c.pool = newStringPool()
+		return
+	}
+	next := newStringPool()
+	oldToNew := make(map[int32]int32, len(c.pool.strs))
+	remap := func(old int32) int32 {
+		if id, ok := oldToNew[old]; ok {
+			return id
+		}
+		id := next.intern(c.pool.get(old))
+		oldToNew[old] = id
+		return id
+	}
+	newByCmd := make(map[int32]int, len(c.recs))
+	for i := range c.recs {
+		c.recs[i].cmd = remap(c.recs[i].cmd)
+		c.recs[i].cwd = remap(c.recs[i].cwd)
+		c.recs[i].device = remap(c.recs[i].device)
+		c.recs[i].session = remap(c.recs[i].session)
+		newByCmd[c.recs[i].cmd] = i
+	}
+	newIDToCmd := make(map[string]int32, len(c.idToCmd))
+	for id, oldCmd := range c.idToCmd {
+		newIDToCmd[id] = remap(oldCmd)
+	}
+	c.pool = next
+	c.byCmd = newByCmd
+	c.idToCmd = newIDToCmd
+}
+
 func (c *Cache) refreshStatsLocked() {
 	c.stats.UniqueCommands = len(c.recs)
 	c.stats.Entries = len(c.idToCmd)
+	c.stats.InternedStrings = c.internedCountLocked()
 	c.stats.Bytes = c.estimateBytesLocked()
 }
 

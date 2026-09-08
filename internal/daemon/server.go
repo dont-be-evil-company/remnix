@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -83,6 +84,11 @@ func (s *Server) rebuildCache() {
 		"dur", st.BuildDuration,
 		"bytes", st.Bytes,
 	)
+	reclaimMemory()
+}
+
+func reclaimMemory() {
+	debug.FreeOSMemory()
 }
 
 func (s *Server) Close() error {
@@ -132,6 +138,51 @@ func (s *Server) ReloadConfig() error {
 	return nil
 }
 
+func (s *Server) CompactCache() protocol.Stats {
+	if s.history != nil {
+		s.history.CompactCache()
+	}
+	reclaimMemory()
+	return s.Stats()
+}
+
+// compactInterval is long enough that FreeOSMemory's stop-the-world GC
+// does not hit interactive suggest/search, and short enough that Ctrl+R
+// spikes and intern churn do not pin RSS for the whole session.
+const compactInterval = 5 * time.Minute
+
+func (s *Server) compactLoop(ctx context.Context) {
+	tick := time.NewTicker(compactInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			s.runPeriodicCompact()
+		}
+	}
+}
+
+func (s *Server) runPeriodicCompact() {
+	internedBefore := 0
+	if s.history != nil {
+		internedBefore = s.history.Cache().Stats().InternedStrings
+	}
+	var rssBefore uint64
+	if rss, err := processRSS(); err == nil {
+		rssBefore = rss
+	}
+	st := s.CompactCache()
+	if st.CacheInterned < internedBefore || (rssBefore > 0 && st.RSSBytes > 0 && st.RSSBytes < rssBefore) {
+		slog.Info("syncsh daemon: cache compact",
+			"interned", st.CacheInterned,
+			"heap", st.HeapAlloc,
+			"rss", st.RSSBytes,
+		)
+	}
+}
+
 func (s *Server) Stats() protocol.Stats {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
@@ -144,6 +195,7 @@ func (s *Server) Stats() protocol.Stats {
 		cs := s.history.Cache().Stats()
 		st.CacheEntries = cs.UniqueCommands
 		st.CacheBytes = cs.Bytes
+		st.CacheInterned = cs.InternedStrings
 		st.CacheDirty = cs.Dirty
 	}
 	if s.sessions != nil {
@@ -189,7 +241,7 @@ func (s *Server) suggestList(prefix, cwd string, cands []history.Entry, limit in
 func (s *Server) Capabilities() protocol.Capabilities {
 	return protocol.Capabilities{
 		Protocol:  protocol.Version,
-		Ops:       []string{protocol.OpPing, protocol.OpVersion, protocol.OpCapabilities, protocol.OpHistoryStart, protocol.OpHistoryEnd, protocol.OpSuggest, protocol.OpSuggestList, protocol.OpHistorySearch, protocol.OpHistoryDelete, protocol.OpHistoryTombEnt, protocol.OpHistoryImport, protocol.OpHistoryStats, protocol.OpSyncNow, protocol.OpDaemonStats, protocol.OpDaemonStatus, protocol.OpReloadConfig, protocol.OpScreenSnapshot},
+		Ops:       []string{protocol.OpPing, protocol.OpVersion, protocol.OpCapabilities, protocol.OpHistoryStart, protocol.OpHistoryEnd, protocol.OpSuggest, protocol.OpSuggestList, protocol.OpHistorySearch, protocol.OpHistoryDelete, protocol.OpHistoryTombEnt, protocol.OpHistoryImport, protocol.OpHistoryStats, protocol.OpSyncNow, protocol.OpDaemonStats, protocol.OpDaemonStatus, protocol.OpReloadConfig, protocol.OpCompactCache, protocol.OpScreenSnapshot},
 		NULCompat: true,
 		HasCache:  true,
 		HasPty:    true,

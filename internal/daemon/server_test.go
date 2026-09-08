@@ -66,6 +66,16 @@ func TestDaemonControlPing(t *testing.T) {
 	if sugg != "echo hi" {
 		t.Fatalf("suggest=%q", sugg)
 	}
+	if err := c.Call(protocol.OpReloadConfig, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var compacted protocol.Stats
+	if err := c.Call(protocol.OpCompactCache, nil, &compacted); err != nil {
+		t.Fatal(err)
+	}
+	if compacted.PID != os.Getpid() {
+		t.Fatalf("compact pid %d", compacted.PID)
+	}
 	cancel()
 	select {
 	case <-errCh:
@@ -81,5 +91,21 @@ func TestStartingTwiceIsIdempotent(t *testing.T) {
 	}
 	if Ping() == nil {
 		t.Fatal("expected no daemon")
+	}
+}
+
+func TestCompactLoopStops(t *testing.T) {
+	s := NewServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		s.compactLoop(ctx)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("compactLoop did not stop")
 	}
 }

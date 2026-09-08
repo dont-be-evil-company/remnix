@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -75,5 +76,63 @@ func TestChangeSetMerge(t *testing.T) {
 	a.Merge(b)
 	if len(a.Created) != 1 || len(a.Tombstoned) != 1 {
 		t.Fatalf("%+v", a)
+	}
+}
+
+func TestCacheCompactDropsDeadInterns(t *testing.T) {
+	c := NewCache()
+	now := time.Now().UTC()
+	c.ApplyCreated(Entry{ID: "1", Command: "old-cmd", StartTS: now, Cwd: "/a", DeviceID: "dev", SessionID: "s1"})
+	c.ApplyCreated(Entry{ID: "2", Command: "keep-cmd", StartTS: now, Cwd: "/b", DeviceID: "dev", SessionID: "s2"})
+	c.ApplyTombstoneCommand("old-cmd")
+	c.Compact()
+	if got := c.Suggest("keep"); len(got) != 1 || got[0].Command != "keep-cmd" {
+		t.Fatalf("keep: %+v", got)
+	}
+	if len(c.Suggest("old")) != 0 {
+		t.Fatal("tombstoned command still suggested")
+	}
+	if n := c.Stats().InternedStrings; n > 4 {
+		t.Fatalf("interned after compact=%d want <=4", n)
+	}
+}
+
+func TestCacheDoesNotInternStaleSession(t *testing.T) {
+	c := NewCache()
+	now := time.Now().UTC()
+	c.ApplyCreated(Entry{ID: "1", Command: "ls", StartTS: now, Cwd: "/a", DeviceID: "d", SessionID: "s1"})
+	before := c.Stats().InternedStrings
+	c.ApplyCreated(Entry{ID: "2", Command: "ls", StartTS: now.Add(-time.Hour), Cwd: "/z", DeviceID: "d2", SessionID: "s-old"})
+	if after := c.Stats().InternedStrings; after != before {
+		t.Fatalf("stale session interned: before=%d after=%d", before, after)
+	}
+	c.ApplyCreated(Entry{ID: "3", Command: "ls", StartTS: now.Add(time.Second), Cwd: "/b", DeviceID: "d", SessionID: "s2"})
+	c.Compact()
+	got := c.Suggest("l")
+	if len(got) != 1 || got[0].SessionID != "s2" || got[0].Cwd != "/b" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestCacheCompactPrunesSessionChurn(t *testing.T) {
+	c := NewCache()
+	now := time.Now().UTC()
+	for i := 0; i < 20; i++ {
+		c.ApplyCreated(Entry{
+			ID:        fmt.Sprintf("%d", i),
+			Command:   "ls",
+			StartTS:   now.Add(time.Duration(i) * time.Second),
+			Cwd:       "/tmp",
+			DeviceID:  "d",
+			SessionID: fmt.Sprintf("sess-%d", i),
+		})
+	}
+	c.Compact()
+	if n := c.Stats().InternedStrings; n > 5 {
+		t.Fatalf("interned=%d after compact, want live rec strings only", n)
+	}
+	got := c.Suggest("l")
+	if len(got) != 1 || got[0].SessionID != "sess-19" {
+		t.Fatalf("%+v", got)
 	}
 }

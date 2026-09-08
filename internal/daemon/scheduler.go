@@ -139,6 +139,7 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 			slog.Warn("syncsh daemon: cache after sync", "err", err)
 			s.history.Cache().MarkDirty()
 			_ = s.history.Rebuild(ctx)
+			reclaimMemory()
 		}
 	}
 	if err := a.MaybeCheckpoint(ctx); err != nil {
@@ -165,6 +166,7 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		if s.history != nil {
 			s.history.Cache().MarkDirty()
 			_ = s.history.Rebuild(ctx)
+			reclaimMemory()
 		}
 	}
 	lock, err := app.AcquireLock()

@@ -201,7 +201,7 @@ in-memory command index; SQLite remains the durable source of truth.
 
 Colors and icons are configurable under `ui` in `config.yaml` (Catppuccin-like
 defaults). `suggest.icons` still works as an alias. After editing config,
-`syncsh daemon` reloads on SIGHUP or the next mtime poll; `syncsh init` must
+`syncsh daemon` reloads on SIGHUP, `syncsh daemon reload`, or the next mtime poll; `syncsh init` must
 be re-sourced for shell-generated glyphs.
 
 ## Synchronization
@@ -316,11 +316,12 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `syncsh remote ...` | List/add/edit/remove/test/reconnect/browse |
 | `syncsh unlock` | SMK into the OS keyring |
 | `syncsh sync` / `sync status` | Pull/push now; health + probe |
-| `syncsh daemon` / `install` / `status` | Background sync |
+| `syncsh daemon` / `install` / `reload` / `compact` / `restart` / `status` | Background sync |
 | `syncsh agent` | Local SQLite RPC for suggest / history |
 | `syncsh key ...` | Slots, rotation, recover |
 | `syncsh search` / `suggest` / `stats` / `inspect` / `import` | Local history |
 | `syncsh gc` | Compact remote objects |
+| `syncsh daemon compact` | Prune the RAM history cache and return unused memory to the OS (also every 5m) |
 | `syncsh database compact` | Checkpoint WAL and vacuum local SQLite |
 | `syncsh doctor` | Read-only diagnostics |
 | `syncsh init zsh\|bash\|fish\|nu` | Shell integration |

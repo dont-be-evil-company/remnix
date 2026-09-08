@@ -45,6 +45,15 @@ func (s *Service) Rebuild(ctx context.Context) error {
 	return s.rebuildLocked(ctx)
 }
 
+func (s *Service) CompactCache() {
+	if s == nil || s.cache == nil {
+		return
+	}
+	s.rebuildMu.Lock()
+	defer s.rebuildMu.Unlock()
+	s.cache.Compact()
+}
+
 func (s *Service) rebuildLocked(ctx context.Context) error {
 	if err := s.cache.Rebuild(ctx, s.store); err != nil {
 		return err

@@ -219,9 +219,10 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 			text = m.items[i-1]
 		}
 		line := icon + " " + text
-		if i == m.cursor {
+		switch i {
+		case m.cursor:
 			line = styleAccent.Render(line)
-		} else if i == 0 {
+		case 0:
 			line = styleMuted.Render(line)
 		}
 		b.WriteString(clampLine(line, inner))

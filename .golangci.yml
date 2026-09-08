@@ -8,7 +8,12 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    paths:
+      - \.direnv/
 formatters:
   enable:
     - gofmt
     - goimports
+  exclusions:
+    paths:
+      - \.direnv/
