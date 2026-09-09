@@ -1,34 +1,34 @@
 package fido2
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"slices"
 
-	"github.com/go-ctap/ctaphid/pkg/ctaptypes"
-	ctapdev "github.com/go-ctap/ctaphid/pkg/device"
-	"github.com/go-ctap/ctaphid/pkg/sugar"
-	"github.com/go-ctap/ctaphid/pkg/webauthntypes"
-	ghid "github.com/go-ctap/hid"
-	"github.com/ldclabs/cose/key"
+	"github.com/telesma-app/ctap/authenticator"
+	"github.com/telesma-app/ctap/backend/hid"
+	"github.com/telesma-app/ctap/cose"
+	"github.com/telesma-app/ctap/credential"
+	"github.com/telesma-app/ctap/extension"
+	"github.com/telesma-app/ctap/protocol"
+	"github.com/telesma-app/ctap/webauthn"
+	ghid "github.com/telesma-app/hid"
 )
 
-const algES256 key.Alg = -7
-
 type hidDevice struct {
-	dev    *ctapdev.Device
+	dev    *authenticator.Device
 	info   Info
 	prompt PINPrompt
 	pin    string
 }
 
 func List() ([]Info, error) {
-	devInfos, err := sugar.EnumerateFIDODevices()
-	if err != nil {
-		return nil, Annotate(err)
-	}
 	var out []Info
-	for _, di := range devInfos {
+	for di, err := range hid.Devices(context.Background()) {
+		if err != nil {
+			return nil, Annotate(err)
+		}
 		d, err := openHID(di, nil)
 		if err != nil {
 			out = append(out, Info{
@@ -44,13 +44,13 @@ func List() ([]Info, error) {
 }
 
 func OpenHMACDevices(prompt PINPrompt) ([]Device, error) {
-	devInfos, err := sugar.EnumerateFIDODevices()
-	if err != nil {
-		return nil, Annotate(err)
-	}
 	var out []Device
 	var last error
-	for _, di := range devInfos {
+	for di, err := range hid.Devices(context.Background()) {
+		if err != nil {
+			last = err
+			break
+		}
 		d, err := openHID(di, prompt)
 		if err != nil {
 			last = err
@@ -78,11 +78,24 @@ func CloseAll(devs []Device) {
 
 func openHID(di *ghid.DeviceInfo, prompt PINPrompt) (*hidDevice, error) {
 	path := hidPath(di)
-	dev, err := ctapdev.New(path)
+	ctx := context.Background()
+	transport, err := hid.Open(ctx, path)
 	if err != nil {
 		return nil, Annotate(fmt.Errorf("open fido2 hid %s: %w", path, err))
 	}
-	gi := dev.GetInfo()
+	dev, err := authenticator.New(ctx, transport)
+	if err != nil {
+		_ = transport.Close()
+		return nil, Annotate(fmt.Errorf("open fido2 hid %s: %w", path, err))
+	}
+	gi, ok := dev.GetInfoCached()
+	if !ok {
+		gi, err = dev.GetInfo(ctx)
+		if err != nil {
+			_ = dev.Close()
+			return nil, Annotate(fmt.Errorf("open fido2 hid %s: %w", path, err))
+		}
+	}
 	h := &hidDevice{
 		dev:    dev,
 		prompt: prompt,
@@ -90,8 +103,8 @@ func openHID(di *ghid.DeviceInfo, prompt PINPrompt) (*hidDevice, error) {
 			Path:       path,
 			Product:    hidProduct(di),
 			AAGUID:     gi.AAGUID.String(),
-			HMACSecret: slices.Contains(gi.Extensions, webauthntypes.ExtensionIdentifierHMACSecret),
-			PINSet:     gi.Options[ctaptypes.OptionClientPIN],
+			HMACSecret: slices.Contains(gi.Extensions, extension.ExtensionIdentifierHMACSecret),
+			PINSet:     gi.Options[protocol.OptionClientPIN],
 		},
 	}
 	if h.info.Product == "" {
@@ -157,28 +170,29 @@ func (h *hidDevice) makeCredential() (credID []byte, aaguid string, err error) {
 	if _, err := rand.Read(userID); err != nil {
 		return nil, "", err
 	}
-	token, err := h.authToken(ctaptypes.PermissionMakeCredential)
+	token, err := h.authToken(protocol.PermissionMakeCredential)
 	if err != nil {
 		return nil, "", err
 	}
 	resp, err := h.dev.MakeCredential(
+		context.Background(),
 		token,
 		[]byte(`{"type":"webauthn.create","origin":"remnix"}`),
-		webauthntypes.PublicKeyCredentialRpEntity{ID: RPID, Name: "remnix"},
-		webauthntypes.PublicKeyCredentialUserEntity{
+		credential.PublicKeyCredentialRpEntity{ID: RPID, Name: "remnix"},
+		credential.PublicKeyCredentialUserEntity{
 			ID:          userID,
 			Name:        "remnix",
 			DisplayName: "remnix",
 		},
-		[]webauthntypes.PublicKeyCredentialParameters{{
-			Type:      webauthntypes.PublicKeyCredentialTypePublicKey,
-			Algorithm: algES256,
+		[]credential.PublicKeyCredentialParameters{{
+			Type:      credential.PublicKeyCredentialTypePublicKey,
+			Algorithm: cose.AlgorithmES256,
 		}},
 		nil,
-		&webauthntypes.CreateAuthenticationExtensionsClientInputs{
-			CreateHMACSecretInputs: &webauthntypes.CreateHMACSecretInputs{HMACCreateSecret: true},
+		&webauthn.CreateAuthenticationExtensionsClientInputs{
+			CreateHMACSecretInputs: &webauthn.CreateHMACSecretInputs{HMACCreateSecret: true},
 		},
-		map[ctaptypes.Option]bool{ctaptypes.OptionUserPresence: true},
+		map[protocol.Option]bool{protocol.OptionUserPresence: true},
 		0,
 		nil,
 	)
@@ -203,28 +217,29 @@ func (h *hidDevice) Derive(credID, salt []byte) ([]byte, error) {
 	if len(salt) != SaltSize {
 		return nil, fmt.Errorf("fido2 hmac salt must be %d bytes", SaltSize)
 	}
-	token, err := h.authToken(ctaptypes.PermissionGetAssertion)
+	token, err := h.authToken(protocol.PermissionGetAssertion)
 	if err != nil {
 		return nil, err
 	}
-	allow := []webauthntypes.PublicKeyCredentialDescriptor{{
-		Type:       webauthntypes.PublicKeyCredentialTypePublicKey,
+	allow := []credential.PublicKeyCredentialDescriptor{{
+		Type:       credential.PublicKeyCredentialTypePublicKey,
 		ID:         credID,
-		Transports: []webauthntypes.AuthenticatorTransport{webauthntypes.AuthenticatorTransportUSB},
+		Transports: []credential.AuthenticatorTransport{credential.AuthenticatorTransportUSB},
 	}}
 	var secret []byte
 	var last error
 	for assertion, err := range h.dev.GetAssertion(
+		context.Background(),
 		token,
 		RPID,
 		[]byte(`{"type":"webauthn.get","origin":"remnix"}`),
 		allow,
-		&webauthntypes.GetAuthenticationExtensionsClientInputs{
-			GetHMACSecretInputs: &webauthntypes.GetHMACSecretInputs{
-				HMACGetSecret: webauthntypes.HMACGetSecretInput{Salt1: salt},
+		&webauthn.GetAuthenticationExtensionsClientInputs{
+			GetHMACSecretInputs: &webauthn.GetHMACSecretInputs{
+				HMACGetSecret: webauthn.HMACGetSecretInput{Salt1: salt},
 			},
 		},
-		map[ctaptypes.Option]bool{ctaptypes.OptionUserPresence: true},
+		map[protocol.Option]bool{protocol.OptionUserPresence: true},
 	) {
 		if err != nil {
 			last = err
@@ -248,16 +263,18 @@ func (h *hidDevice) Derive(credID, salt []byte) ([]byte, error) {
 	return nil, fmt.Errorf("fido2 getAssertion: no hmac-secret output")
 }
 
-func (h *hidDevice) authToken(perm ctaptypes.Permission) ([]byte, error) {
-	gi := h.dev.GetInfo()
-	pinSet := gi.Options[ctaptypes.OptionClientPIN]
-	if !pinSet {
+func (h *hidDevice) authToken(perm protocol.Permission) ([]byte, error) {
+	gi, err := h.dev.GetInfo(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("fido2 getInfo: %w", err)
+	}
+	if !gi.Options[protocol.OptionClientPIN] {
 		return nil, nil
 	}
 	return h.pinToken(perm)
 }
 
-func (h *hidDevice) pinToken(perm ctaptypes.Permission) ([]byte, error) {
+func (h *hidDevice) pinToken(perm protocol.Permission) ([]byte, error) {
 	if h.pin == "" {
 		prompt := h.prompt
 		if prompt == nil {
@@ -269,7 +286,7 @@ func (h *hidDevice) pinToken(perm ctaptypes.Permission) ([]byte, error) {
 		}
 		h.pin = pin
 	}
-	tok, err := h.dev.GetPinUvAuthTokenUsingPIN(h.pin, perm, RPID)
+	tok, err := h.dev.GetPinUvAuthTokenUsingPIN(context.Background(), h.pin, perm, RPID)
 	if err != nil {
 		h.pin = ""
 		return nil, fmt.Errorf("fido2 pin: %w", err)

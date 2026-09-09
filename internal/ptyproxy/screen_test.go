@@ -58,6 +58,7 @@ func TestFetchFromSocket(t *testing.T) {
 		defer c.Close()
 		_, _ = c.Write(Encode(want))
 	}()
+	clearLiveProxyEnv(t)
 	t.Setenv(EnvSocket, path)
 	got, err := Fetch()
 	if err != nil {
@@ -85,6 +86,7 @@ func TestFetchDoesNotWaitForEOF(t *testing.T) {
 		_, _ = c.Write(Encode(want))
 		// Leave the connection open; ReadAll would block until the deadline.
 	}()
+	clearLiveProxyEnv(t)
 	t.Setenv(EnvSocket, path)
 	start := time.Now()
 	got, err := Fetch()
@@ -119,6 +121,7 @@ func TestFetchGeomDoesNotWaitForRows(t *testing.T) {
 		_, _ = c.Write(hdr)
 		<-done
 	}()
+	clearLiveProxyEnv(t)
 	t.Setenv(EnvSocket, path)
 	start := time.Now()
 	got, rest, err := FetchGeom()
@@ -135,10 +138,18 @@ func TestFetchGeomDoesNotWaitForRows(t *testing.T) {
 }
 
 func TestFetchNoProxy(t *testing.T) {
-	t.Setenv(EnvSocket, "")
+	clearLiveProxyEnv(t)
 	if _, err := Fetch(); err != ErrNoProxy {
 		t.Fatalf("got %v", err)
 	}
+}
+
+// clearLiveProxyEnv drops attach-session env so Fetch talks to the test
+// socket (or reports ErrNoProxy) instead of the caller's remnix daemon.
+func clearLiveProxyEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(EnvSocket, "")
+	t.Setenv(EnvSessionID, "")
 }
 
 func TestRestoreAndPlace(t *testing.T) {

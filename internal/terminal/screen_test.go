@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ func TestScreenWriteDADoesNotBlock(t *testing.T) {
 
 func TestScreenAltScreenSplitAndCombined(t *testing.T) {
 	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
 	if s.IsAltScreen() {
 		t.Fatal("fresh emulator is on the main screen")
 	}
@@ -49,6 +51,7 @@ func TestScreenAltScreenSplitAndCombined(t *testing.T) {
 
 func TestIdleResetFromModeBits(t *testing.T) {
 	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
 	s.Write([]byte("\x1b[?1049h\x1b[?2026h\x1b[?1000h"))
 	if !s.IsAltScreen() {
 		t.Fatal("expected alt screen")
@@ -79,6 +82,7 @@ func TestIdleResetFromModeBits(t *testing.T) {
 
 func TestIdleResetHardKillStillOnAlt(t *testing.T) {
 	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
 	s.Write([]byte("\x1b[?1049h\x1b[?1000h"))
 	got := idleReset(s, idleResetOpts{includeAlt: true})
 	if !bytes.Contains(got, []byte("1049l")) {
@@ -92,9 +96,60 @@ func TestIdleResetHardKillStillOnAlt(t *testing.T) {
 
 func TestIdleResetNoAltWhenAlreadyLeft(t *testing.T) {
 	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
 	s.Write([]byte("\x1b[?1049h\x1b[?1049l"))
 	got := idleReset(s, idleResetOpts{})
 	if bytes.Contains(got, []byte("1049l")) {
 		t.Fatalf("includeAlt false must not emit 1049l, got %q", got)
 	}
+}
+
+func TestScreenSnapshotCoalescesStyle(t *testing.T) {
+	s := newScreen(8, 1)
+	t.Cleanup(s.Close)
+	s.Write([]byte("\x1b[31mAAAA\x1b[0m"))
+	row := s.Snapshot().RowANSI[0]
+	if !strings.Contains(row, "AAAA") {
+		t.Fatalf("missing text: %q", row)
+	}
+	nReset := strings.Count(row, "\x1b[0m") + strings.Count(row, ansi.ResetStyle)
+	if nReset > 1 {
+		t.Fatalf("reset between same-style cells (%d): %q", nReset, row)
+	}
+	if !strings.Contains(row, ansi.ResetStyle) && !strings.Contains(row, "\x1b[0m") {
+		t.Fatalf("styled run must end with a reset, got %q", row)
+	}
+}
+
+func TestScreenSnapshotWideCell(t *testing.T) {
+	s := newScreen(8, 1)
+	t.Cleanup(s.Close)
+	s.Write([]byte("你A"))
+	row := s.Snapshot().RowANSI[0]
+	if !strings.Contains(row, "你") || !strings.Contains(row, "A") {
+		t.Fatalf("missing glyphs: %q", row)
+	}
+	plain := stripSGR(row)
+	if !strings.HasPrefix(strings.TrimRight(plain, " "), "你A") {
+		t.Fatalf("wide cell must not insert a placeholder space, got %q", row)
+	}
+}
+
+func stripSGR(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < '@' || s[j] > '~') {
+				j++
+			}
+			if j < len(s) {
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }

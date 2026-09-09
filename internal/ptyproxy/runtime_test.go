@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -41,9 +42,13 @@ func TestEncodeRowCoalescesAdjacentStyle(t *testing.T) {
 	if !strings.Contains(row, "AAAA") {
 		t.Fatalf("missing text: %q", row)
 	}
-	if strings.Count(row, "\x1b[0m") > 1 {
-		t.Fatalf("reset between same-style cells: %q", row)
+	if n := countStyleResets(row); n > 1 {
+		t.Fatalf("reset between same-style cells (%d): %q", n, row)
 	}
+}
+
+func countStyleResets(row string) int {
+	return strings.Count(row, "\x1b[0m") + strings.Count(row, ansi.ResetStyle)
 }
 
 type firstWriteRecorder struct {

@@ -3,9 +3,10 @@ package ptyproxy
 import "os"
 
 const (
-	EnvActive = "REMNIX_PTY_PROXY_ACTIVE"
-	EnvSocket = "REMNIX_PTY_PROXY_SOCKET"
-	EnvTmux   = "REMNIX_PTY_PROXY_TMUX"
+	EnvActive    = "REMNIX_PTY_PROXY_ACTIVE"
+	EnvSocket    = "REMNIX_PTY_PROXY_SOCKET"
+	EnvTmux      = "REMNIX_PTY_PROXY_TMUX"
+	EnvSessionID = "REMNIX_SESSION_ID"
 )
 
 // Active reports whether this process is running inside remnix pty-proxy.

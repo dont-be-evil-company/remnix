@@ -327,55 +327,18 @@ func snapshotFrom(emu *vt.Emulator) Snapshot {
 }
 
 func encodeRow(emu *vt.Emulator, y, w int) string {
-	b := make([]byte, 0, w+8)
-	styled := false
-	havePrev := false
-	var prevStyle uv.Style
-	for x := 0; x < w; {
-		cell := emu.CellAt(x, y)
-		if cell == nil || cell.Width == 0 {
-			if styled {
-				b = append(b, "\x1b[0m"...)
-				styled = false
-				havePrev = false
-			}
-			b = append(b, ' ')
-			x++
-			continue
-		}
-		content := cell.Content
-		if content == "" {
-			content = " "
-		}
-		st := cell.Style
-		if st.IsZero() {
-			if styled {
-				b = append(b, "\x1b[0m"...)
-				styled = false
-				havePrev = false
-			}
-			b = append(b, content...)
+	if w < 1 {
+		return ""
+	}
+	line := make(uv.Line, w)
+	for x := 0; x < w; x++ {
+		if cell := emu.CellAt(x, y); cell != nil {
+			line[x] = *cell
 		} else {
-			if !havePrev {
-				b = append(b, st.String()...)
-			} else if !prevStyle.Equal(&st) {
-				b = append(b, st.Diff(&prevStyle)...)
-			}
-			prevStyle = st
-			havePrev = true
-			styled = true
-			b = append(b, content...)
-		}
-		if cell.Width > 1 {
-			x += cell.Width
-		} else {
-			x++
+			line[x] = uv.EmptyCell
 		}
 	}
-	if styled {
-		b = append(b, "\x1b[0m"...)
-	}
-	return string(b)
+	return line.Render()
 }
 
 func serveSnapshots(scr *shadow) string {

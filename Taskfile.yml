@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-
+---
 version: '3'
 
 tasks:
@@ -7,6 +7,16 @@ tasks:
     desc: Lists all available tasks
     cmds:
       - task --list
+    silent: true
+  clean:deps:
+    desc: Clean dependencies
+    cmds:
+      - go mod tidy
+    silent: true
+  up:deps:
+    desc: Updates dependencies
+    cmds:
+      - go-mod-upgrade
     silent: true
   build:
     desc: Builds the binary
