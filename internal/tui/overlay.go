@@ -206,10 +206,10 @@ func queryCursorPosition(f *os.File, d time.Duration) (row, col int, ok bool) {
 	if _, err := term.MakeRaw(fd); err != nil {
 		return 0, 0, false
 	}
-	defer term.Restore(fd, state)
+	defer func() { _ = term.Restore(fd, state) }()
 
 	_ = f.SetReadDeadline(time.Now().Add(d))
-	defer f.SetReadDeadline(time.Time{})
+	defer func() { _ = f.SetReadDeadline(time.Time{}) }()
 	if _, err := f.WriteString("\x1b[6n"); err != nil {
 		return 0, 0, false
 	}
