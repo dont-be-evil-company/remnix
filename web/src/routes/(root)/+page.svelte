@@ -1,15 +1,8 @@
 <script lang="ts">
 	import '@fortawesome/fontawesome-free/css/all.css';
-	import Prism from 'prismjs';
-	import 'prismjs/plugins/toolbar/prism-toolbar';
-	import 'prismjs/plugins/copy-to-clipboard/prism-copy-to-clipboard';
-	import 'prismjs/components/prism-json';
-	import 'prismjs/components/prism-yaml';
-	import 'prismjs/components/prism-bash';
-	import 'prismjs/components/prism-powershell';
-	import 'prismjs/themes/prism-okaidia.css';
 	import { onMount } from 'svelte';
 	import HeadComponent from '$lib/HeadComponent.svelte';
+	import CodeBlock from '$lib/CodeBlock.svelte';
 	import mentions from './mentions.json';
 
 	interface Mention {
@@ -18,12 +11,8 @@
 		links: { text: string; url: string }[];
 	}
 
-	interface PrismaRegisterButtonContext {
-		element: { parentNode: HTMLElement | null };
-	}
 	const downloadBaseUrl =
 		'https://github.com/dont-be-evil-company/remnix/releases/latest/download/';
-	const websiteBaseUrl = 'https://remnix.app';
 
 	let downloadLink = downloadBaseUrl + 'remnix-linux-amd64';
 
@@ -66,20 +55,6 @@
 
 	onMount(() => {
 		randomOrderMentions = mentions.sort(() => 0.5 - Math.random());
-		Prism.plugins.toolbar.registerButton(
-			'fullscreen-code',
-			function (ctx: PrismaRegisterButtonContext) {
-				const button = document.createElement('button');
-				button.innerHTML = '🔍';
-				button.addEventListener('click', function () {
-					ctx.element.parentNode?.requestFullscreen();
-				});
-
-				return button;
-			}
-		);
-
-		Prism.highlightAll();
 	});
 </script>
 
@@ -153,18 +128,14 @@
 			</select>
 			<div class={installSystem === 'script' ? '' : 'hidden'}>
 				<p class="mb-5">Linux / macOS:</p>
-				<pre><code
-						class="language-bash"
-						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">curl -sSL {websiteBaseUrl}/install.sh | sh</code
-					></pre>
+				<div class="text-left">
+					<CodeBlock lang="bash" code={`curl -sSL https://remnix.app/install.sh | sh`} />
+				</div>
 				<p class="mb-5">Windows (PowerShell):</p>
-				<pre><code
-						class="language-powershell"
-						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">iwr {websiteBaseUrl}/install.ps1 -useb | iex</code
-					></pre>
-				<p class="mb-5">Update later with <code class="language-bash">remnix update</code>.</p>
+				<div class="text-left">
+					<CodeBlock lang="powershell" code={`iwr https://remnix.app/install.ps1 -useb | iex`} />
+				</div>
+				<p class="mb-5">Update later with <code>remnix update</code>.</p>
 			</div>
 			<div class={installSystem === 'manually' ? '' : 'hidden'}>
 				<p class="mb-5">
@@ -180,19 +151,15 @@
 						class="text-secondary">yay</a
 					>
 				</p>
-				<pre><code
-						class="language-bash"
-						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">yay -S remnix-bin</code
-					></pre>
+				<div class="text-left">
+					<CodeBlock lang="bash" code={`yay -S remnix-bin`} />
+				</div>
 				<p class="mb-5">
 					.. or via <a href="https://github.com/morganamilo/paru" class="text-secondary">paru</a>
 				</p>
-				<pre><code
-						class="language-bash"
-						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">paru -S remnix-bin</code
-					></pre>
+				<div class="text-left">
+					<CodeBlock lang="bash" code={`paru -S remnix-bin`} />
+				</div>
 			</div>
 			<div
 				class={installSystem !== 'manually' && installSystem !== 'aur' && installSystem !== 'script'
