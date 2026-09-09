@@ -140,6 +140,7 @@ install_binary() {
     local source_path="$1"
     local install_path="$2"
     local label="$3"
+    local staged_path="${install_path}.new"
 
     print_status "Installing ${label} to ${install_path}..."
 
@@ -150,10 +151,11 @@ install_binary() {
         cp "$install_path" "$backup_path"
     fi
 
-    if cp "$source_path" "$install_path"; then
-        chmod +x "$install_path"
+    # Stage + rename so a running binary (ETXTBSY) can still be replaced.
+    if cp "$source_path" "$staged_path" && chmod +x "$staged_path" && mv -f "$staged_path" "$install_path"; then
         print_success "${label} installed successfully to ${install_path}"
     else
+        rm -f "$staged_path"
         print_error "Failed to install ${label}"
         exit 1
     fi

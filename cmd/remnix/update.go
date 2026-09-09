@@ -212,10 +212,17 @@ func replaceBinary(currentPath, newBinaryPath string) error {
 	if currentGOOS == "windows" {
 		return replaceBinaryWindows(currentPath, newBinaryPath)
 	}
-	if err := os.Remove(currentPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove current binary: %w", err)
+
+	// Stage beside the target and rename into place. Overwriting a running
+	// executable with open(O_TRUNC)/cp fails with ETXTBSY on Linux; rename
+	// only replaces the directory entry and leaves the old inode for the
+	// still-running process (same pattern as remnix-attach during install).
+	stagedPath := currentPath + ".new"
+	if err := copyFile(newBinaryPath, stagedPath); err != nil {
+		return fmt.Errorf("failed to stage new binary: %w", err)
 	}
-	if err := copyFile(newBinaryPath, currentPath); err != nil {
+	if err := os.Rename(stagedPath, currentPath); err != nil {
+		_ = os.Remove(stagedPath)
 		return fmt.Errorf("failed to replace binary: %w", err)
 	}
 	return nil
