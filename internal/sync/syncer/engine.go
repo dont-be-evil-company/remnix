@@ -22,6 +22,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/db"
 	"github.com/dont-be-evil-company/remnix/internal/device"
 	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/sync/ack"
 	"github.com/dont-be-evil-company/remnix/internal/sync/bundle"
 	"github.com/dont-be-evil-company/remnix/internal/sync/event"
@@ -41,6 +42,7 @@ type Options struct {
 	StoreSMKs      func(map[string][]byte)
 	Transport      transport.Transport
 	EndpointID     string
+	EndpointName   string
 }
 
 type Engine struct {
@@ -68,6 +70,21 @@ func (e *Engine) publishedSeqKey() string {
 	return "published_seq:" + e.opts.EndpointID + ":" + e.opts.DeviceID
 }
 
+func (e *Engine) epName() string {
+	if e.opts.EndpointName != "" {
+		return e.opts.EndpointName
+	}
+	return e.opts.EndpointID
+}
+
+func (e *Engine) report(ctx context.Context, msg string) {
+	if name := e.epName(); name != "" {
+		progress.Report(ctx, msg+" ("+name+")")
+		return
+	}
+	progress.Report(ctx, msg)
+}
+
 func New(d *db.DB, opts Options) *Engine {
 	return &Engine{
 		db:      d,
@@ -85,6 +102,7 @@ func (e *Engine) LastChangeSet() history.ChangeSet {
 }
 
 func (e *Engine) Sync(ctx context.Context) error {
+	e.report(ctx, "connecting")
 	if s, ok := e.opts.Transport.(interface {
 		Begin(context.Context) error
 		End(context.Context) error
@@ -95,28 +113,34 @@ func (e *Engine) Sync(ctx context.Context) error {
 		defer func() { _ = s.End(ctx) }()
 	}
 	e.lastChanges = history.ChangeSet{}
+	e.report(ctx, "checking remote")
 	if err := transport.Dedupe(ctx, e.opts.Transport); err != nil {
 		return err
 	}
 	if err := e.pullMetadata(ctx); err != nil {
 		return err
 	}
+	e.report(ctx, "unlocking keys")
 	smks, active, err := e.unlockAll()
 	if err != nil {
 		return err
 	}
+	e.report(ctx, "pulling checkpoint")
 	if err := e.pullCheckpoint(ctx, smks); err != nil {
 		return err
 	}
+	e.report(ctx, "pulling events")
 	if err := e.pullBundles(ctx, smks); err != nil {
 		return err
 	}
+	e.report(ctx, "publishing events")
 	if err := e.publishLocal(ctx, smks[active.GenerationID], active); err != nil {
 		return err
 	}
 	if err := e.publishAck(ctx, ""); err != nil {
 		return err
 	}
+	e.report(ctx, "updating device head")
 	return e.publishDeviceHead(ctx)
 }
 

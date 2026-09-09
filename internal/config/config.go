@@ -110,6 +110,13 @@ type Endpoint struct {
 	Port         int    `yaml:"port,omitempty"`
 }
 
+func (e Endpoint) Label() string {
+	if n := strings.TrimSpace(e.DisplayName); n != "" {
+		return n
+	}
+	return e.ID
+}
+
 func (s Sync) RcloneEngineOrDefault() RcloneEngine {
 	if s.RcloneEngine == "" {
 		return RcloneEngineEmbedded

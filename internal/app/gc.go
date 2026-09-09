@@ -7,6 +7,7 @@ import (
 
 	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
 	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/sync/equalize"
 	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
 	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
@@ -14,6 +15,7 @@ import (
 )
 
 func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) {
+	progress.Report(ctx, "collecting garbage")
 	lock, err := AcquireLock()
 	if err != nil {
 		return gc.Plan{}, err
@@ -63,30 +65,41 @@ func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) 
 }
 
 func (a *App) MaybeCheckpoint(ctx context.Context) error {
+	return a.checkpoint(ctx, false)
+}
+
+func (a *App) ForceCheckpoint(ctx context.Context) error {
+	return a.checkpoint(ctx, true)
+}
+
+func (a *App) checkpoint(ctx context.Context, force bool) error {
 	eps, err := a.resolveEndpoints("")
 	if err != nil {
 		return err
 	}
 	live, openErrs := a.openEndpoints(eps)
-	due := false
-	for _, o := range live {
-		var ok bool
-		err := transport.WithSession(ctx, o.tr, func() error {
-			var e error
-			ok, e = gc.CheckpointDue(ctx, o.tr, a.Config.Sync.GCIntervalDuration())
-			return e
-		})
-		if err != nil {
-			openErrs = append(openErrs, fmt.Errorf("%s: %w", o.ep.ID, err))
-			continue
-		}
-		if ok {
-			due = true
+	due := force
+	if !force {
+		for _, o := range live {
+			var ok bool
+			err := transport.WithSession(ctx, o.tr, func() error {
+				var e error
+				ok, e = gc.CheckpointDue(ctx, o.tr, a.Config.Sync.GCIntervalDuration())
+				return e
+			})
+			if err != nil {
+				openErrs = append(openErrs, fmt.Errorf("%s: %w", o.ep.ID, err))
+				continue
+			}
+			if ok {
+				due = true
+			}
 		}
 	}
 	if !due {
 		return errors.Join(openErrs...)
 	}
+	progress.Report(ctx, "writing checkpoint")
 	lock, err := AcquireLock()
 	if err != nil {
 		return err
@@ -102,7 +115,7 @@ func (a *App) MaybeCheckpoint(ctx context.Context) error {
 	}
 	m, err := eng.CreateCheckpoint(ctx, smks[active.GenerationID], active.GenerationID)
 	if err != nil {
-		if errors.Is(err, syncer.ErrCheckpointNotCaughtUp) {
+		if !force && errors.Is(err, syncer.ErrCheckpointNotCaughtUp) {
 			return errors.Join(openErrs...)
 		}
 		return err

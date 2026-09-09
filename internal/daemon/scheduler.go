@@ -13,6 +13,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/config"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/redact"
 	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
@@ -55,7 +56,11 @@ func (sc *SyncScheduler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			class := sc.server.runSyncCycle(ctx)
+			class := sc.runExclusive(ctx, false)
+			if class == "busy" {
+				timer.Reset(sc.Interval())
+				continue
+			}
 			delay := sc.Interval()
 			if class == string(transport.HealthAuthRequired) {
 				sc.mu.Lock()
@@ -76,7 +81,11 @@ func (sc *SyncScheduler) Run(ctx context.Context) {
 	}
 }
 
-func (sc *SyncScheduler) SyncNow(ctx context.Context) string {
+func (sc *SyncScheduler) SyncNow(ctx context.Context, forceCheckpoint bool) string {
+	return sc.runExclusive(ctx, forceCheckpoint)
+}
+
+func (sc *SyncScheduler) runExclusive(ctx context.Context, forceCheckpoint bool) string {
 	sc.mu.Lock()
 	if sc.running {
 		sc.mu.Unlock()
@@ -89,15 +98,23 @@ func (sc *SyncScheduler) SyncNow(ctx context.Context) string {
 		sc.running = false
 		sc.mu.Unlock()
 	}()
-	return sc.server.runSyncCycle(ctx)
+	return sc.server.runSyncCycle(ctx, forceCheckpoint)
 }
 
-func (s *Server) runSyncCycle(ctx context.Context) string {
+func (s *Server) setStage(msg string) {
+	s.mu.Lock()
+	s.stage = msg
+	s.mu.Unlock()
+}
+
+func (s *Server) runSyncCycle(ctx context.Context, forceCheckpoint bool) string {
 	a := s.app
 	if a == nil {
 		writeStatus(failStatus(errors.New("daemon app not open"), ""))
 		return ""
 	}
+	ctx = progress.With(ctx, s.setStage)
+	defer s.setStage("")
 	if !a.Config.Sync.IsEnabled() {
 		st := Status{OK: true, At: time.Now().Unix(), HumanAt: time.Now().Format(time.RFC3339), Class: "disabled"}
 		writeStatus(st)
@@ -117,6 +134,13 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		s.setLastSync(st)
 		slog.Warn(msg)
 		return ""
+	}
+	if forceCheckpoint && s.history != nil {
+		progress.Report(ctx, "rebuilding history cache")
+		s.history.Cache().MarkDirty()
+		if err := s.history.Rebuild(ctx); err != nil {
+			slog.Warn("remnix daemon: cache rebuild", "err", err)
+		}
 	}
 	syncStart := time.Now()
 	cs, err := a.SyncEngineWithChanges(ctx, nil, nil, []fido2.Device{})
@@ -142,7 +166,20 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 			reclaimMemory()
 		}
 	}
-	if err := a.MaybeCheckpoint(ctx); err != nil {
+	if forceCheckpoint {
+		if err := a.ForceCheckpoint(ctx); err != nil {
+			if interrupted(ctx, err) {
+				slog.Info("remnix daemon: checkpoint interrupted", "err", err)
+				return ""
+			}
+			st := failStatus(fmt.Errorf("checkpoint: %w", err), "")
+			st.SyncMs = syncMs
+			writeStatus(st)
+			s.setLastSync(st)
+			slog.Error("remnix daemon: checkpoint", "err", err, "sync", FormatElapsed(syncMs))
+			return "error"
+		}
+	} else if err := a.MaybeCheckpoint(ctx); err != nil {
 		slog.Warn("remnix daemon: checkpoint", "err", err)
 	}
 	gcStart := time.Now()

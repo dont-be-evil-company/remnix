@@ -64,37 +64,14 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) Call(op string, payload any, out any) error {
-	body, err := protocol.MarshalPayload(payload)
-	if err != nil {
-		return err
-	}
-	req := protocol.Request{
-		Version: protocol.Version,
-		ID:      c.nextID.Add(1),
-		Op:      op,
-		Payload: body,
-	}
-	_ = c.conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := protocol.WriteFrame(c.conn, req); err != nil {
-		return err
-	}
-	var resp protocol.Response
-	if err := protocol.ReadFrame(c.conn, &resp); err != nil {
-		return err
-	}
-	if resp.Status != protocol.StatusOK {
-		if resp.Error == "" {
-			return fmt.Errorf("daemon error")
-		}
-		return fmt.Errorf("%s", resp.Error)
-	}
-	if out == nil {
-		return nil
-	}
-	return protocol.UnmarshalPayload(resp.Payload, out)
+	return c.call(op, "", payload, out, 5*time.Second)
 }
 
 func (c *Client) CallSession(op, sessionID string, payload any, out any) error {
+	return c.call(op, sessionID, payload, out, 5*time.Second)
+}
+
+func (c *Client) call(op, sessionID string, payload any, out any, timeout time.Duration) error {
 	body, err := protocol.MarshalPayload(payload)
 	if err != nil {
 		return err
@@ -106,7 +83,11 @@ func (c *Client) CallSession(op, sessionID string, payload any, out any) error {
 		SessionID: sessionID,
 		Payload:   body,
 	}
-	_ = c.conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if timeout > 0 {
+		_ = c.conn.SetDeadline(time.Now().Add(timeout))
+	} else {
+		_ = c.conn.SetDeadline(time.Time{})
+	}
 	if err := protocol.WriteFrame(c.conn, req); err != nil {
 		return err
 	}
@@ -211,13 +192,26 @@ func TombstoneEntries(entries []history.Entry) error {
 	return c.Call(protocol.OpHistoryTombEnt, protocol.HistoryTombstoneReq{IDs: ids}, nil)
 }
 
-func SyncNow() error {
+func SyncNow(req protocol.SyncNowReq) error {
 	c, err := Ensure()
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	return c.Call(protocol.OpSyncNow, nil, nil)
+	return c.call(protocol.OpSyncNow, "", req, nil, 15*time.Minute)
+}
+
+func PeekStats() (protocol.Stats, error) {
+	c, err := Dial()
+	if err != nil {
+		return protocol.Stats{}, err
+	}
+	defer c.Close()
+	var st protocol.Stats
+	if err := c.Call(protocol.OpDaemonStats, nil, &st); err != nil {
+		return protocol.Stats{}, err
+	}
+	return st, nil
 }
 
 func Stats() (protocol.Stats, error) {

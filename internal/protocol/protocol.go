@@ -116,6 +116,10 @@ type HistoryTombstoneReq struct {
 	IDs []string `cbor:"ids"`
 }
 
+type SyncNowReq struct {
+	Checkpoint bool `cbor:"checkpoint,omitempty"`
+}
+
 type Capabilities struct {
 	Protocol  int      `cbor:"protocol"`
 	Ops       []string `cbor:"ops"`
@@ -147,6 +151,7 @@ type Stats struct {
 	LastSyncOK    bool   `cbor:"last_sync_ok"`
 	LastSyncClass string `cbor:"last_sync_class,omitempty"`
 	LastSyncError string `cbor:"last_sync_error,omitempty"`
+	SyncStage     string `cbor:"sync_stage,omitempty"`
 }
 
 const maxFrame = 16 << 20

@@ -520,5 +520,8 @@ func importEntries(cmd *cobra.Command, a *app.App, entries []history.Entry) erro
 		}
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "imported %d new of %d records\n", inserted, len(entries))
-	return nil
+	if inserted == 0 {
+		return nil
+	}
+	return kickSyncCheckpoint(cmd.Context(), a)
 }

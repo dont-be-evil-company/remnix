@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dont-be-evil-company/remnix/internal/app"
@@ -171,4 +172,58 @@ func TestCheckpointAndGarbageCollect(t *testing.T) {
 	if len(objs) == 0 {
 		t.Fatal("expected a checkpoint on the remote")
 	}
+}
+
+func TestForceCheckpointIgnoresInterval(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
+	a, err := app.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	remote := filepath.Join(root, "remote")
+	if _, err := RunNonInteractive(context.Background(), a, remote, "test", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Sync(context.Background(), nil, nil, []fido2.Device{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ForceCheckpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := countSnapshots(t, remote)
+	if first == 0 {
+		t.Fatal("expected a checkpoint after force")
+	}
+	a.Config.Sync.GCInterval = "24h"
+	if err := a.MaybeCheckpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := countSnapshots(t, remote); got != first {
+		t.Fatalf("MaybeCheckpoint created %d snapshots, want %d", got, first)
+	}
+	if err := a.ForceCheckpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := countSnapshots(t, remote); got <= first {
+		t.Fatalf("ForceCheckpoint did not write a new snapshot: before=%d after=%d", first, got)
+	}
+}
+
+func countSnapshots(t *testing.T, remote string) int {
+	t.Helper()
+	tr := directory.New(remote)
+	objs, err := tr.List(context.Background(), "checkpoints/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, o := range objs {
+		if strings.HasSuffix(o.Key, "/snapshot") || o.Key == "snapshot" {
+			n++
+		}
+	}
+	return n
 }

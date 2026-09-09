@@ -237,9 +237,23 @@ func (s *Server) dispatch(req protocol.Request) protocol.Response {
 		resp, _ := protocol.EncodeOK(req.ID, nil)
 		return resp
 	case protocol.OpSyncNow:
-		class := s.syncer.SyncNow(context.Background())
+		var in protocol.SyncNowReq
+		_ = protocol.UnmarshalPayload(req.Payload, &in)
+		class := s.syncer.SyncNow(context.Background(), in.Checkpoint)
 		if class == "busy" {
 			return protocol.EncodeErr(req.ID, "sync already running")
+		}
+		if class == "error" {
+			st := s.lastSyncCopy()
+			msg := "sync failed"
+			if st.Error != "" {
+				msg = st.Error
+			}
+			return protocol.EncodeErr(req.ID, msg)
+		}
+		st := s.lastSyncCopy()
+		if class != "disabled" && !st.OK && st.Error != "" {
+			return protocol.EncodeErr(req.ID, st.Error)
 		}
 		resp, _ := protocol.EncodeOK(req.ID, class)
 		return resp

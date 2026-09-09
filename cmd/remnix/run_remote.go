@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"charm.land/huh/v2"
+	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/client"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
@@ -19,12 +22,14 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/daemon"
 	"github.com/dont-be-evil-company/remnix/internal/device"
 	"github.com/dont-be-evil-company/remnix/internal/doctor"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/protocol"
 	"github.com/dont-be-evil-company/remnix/internal/redact"
 	"github.com/dont-be-evil-company/remnix/internal/repository"
 	"github.com/dont-be-evil-company/remnix/internal/setup"
 	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
 	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -48,12 +53,29 @@ func tokensFromHardware() []piv.Token {
 }
 
 func runSync(cmd *cobra.Command, endpoint string) error {
+	sp := tui.StartStatus(cmd.ErrOrStderr())
+	ctx := progress.With(cmd.Context(), sp.Set)
+	err := runSyncWork(ctx, cmd, endpoint, sp)
+	sp.Finish(err)
+	if err != nil {
+		return err
+	}
+	daemon.RecordOK()
+	return nil
+}
+
+func runSyncWork(ctx context.Context, cmd *cobra.Command, endpoint string, sp *tui.Status) error {
 	if endpoint == "" {
-		if err := client.SyncNow(); err == nil {
-			daemon.RecordOK()
+		sp.Set("waiting for daemon")
+		err := waitSyncNow(ctx, true, sp)
+		if err == nil {
 			return nil
 		}
+		if ctx.Err() != nil {
+			return err
+		}
 	}
+	sp.Set("opening local database")
 	a, err := openApp()
 	if err != nil {
 		return err
@@ -61,12 +83,67 @@ func runSync(cmd *cobra.Command, endpoint string) error {
 	defer a.Close()
 	var syncErr error
 	if endpoint != "" {
-		syncErr = a.SyncOnly(cmd.Context(), endpoint, recoverySecretFromEnv(), tokensFromHardware(), nil)
+		syncErr = a.SyncOnly(ctx, endpoint, recoverySecretFromEnv(), tokensFromHardware(), nil)
 	} else {
-		syncErr = a.Sync(cmd.Context(), recoverySecretFromEnv(), tokensFromHardware(), nil)
+		syncErr = a.Sync(ctx, recoverySecretFromEnv(), tokensFromHardware(), nil)
 	}
 	if syncErr != nil {
 		return syncErr
+	}
+	return a.ForceCheckpoint(ctx)
+}
+
+func waitSyncNow(ctx context.Context, checkpoint bool, sp *tui.Status) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- waitSyncNowRPC(checkpoint)
+	}()
+	tick := time.NewTicker(150 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+			st, err := client.PeekStats()
+			if err != nil || st.SyncStage == "" || sp == nil {
+				continue
+			}
+			sp.Set(st.SyncStage)
+		}
+	}
+}
+
+func waitSyncNowRPC(checkpoint bool) error {
+	var last error
+	for i := 0; i < 6; i++ {
+		last = client.SyncNow(protocol.SyncNowReq{Checkpoint: checkpoint})
+		if last == nil {
+			return nil
+		}
+		if last.Error() != "sync already running" {
+			return last
+		}
+		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+	}
+	return last
+}
+
+func kickSyncCheckpoint(ctx context.Context, a *app.App) error {
+	if a == nil || !a.Config.Sync.IsEnabled() {
+		return nil
+	}
+	if err := waitSyncNowRPC(true); err == nil {
+		daemon.RecordOK()
+		return nil
+	}
+	if err := a.Sync(ctx, recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
+		return err
+	}
+	if err := a.ForceCheckpoint(ctx); err != nil {
+		return err
 	}
 	daemon.RecordOK()
 	return nil
@@ -532,7 +609,7 @@ func runDaemonInstall(cmd *cobra.Command, _ []string) error {
 	if err := daemon.Install(); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "sync daemon installed for this user session")
+	fmt.Fprintln(cmd.OutOrStdout(), "daemon installed for this user session")
 	return nil
 }
 
@@ -540,7 +617,7 @@ func runDaemonUninstall(cmd *cobra.Command, _ []string) error {
 	if err := daemon.Uninstall(); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "sync daemon autostart removed")
+	fmt.Fprintln(cmd.OutOrStdout(), "daemon autostart removed")
 	return nil
 }
 
@@ -624,5 +701,5 @@ func offerDaemonInstall(cmd *cobra.Command) {
 		fmt.Fprintln(cmd.ErrOrStderr(), "you can retry with: remnix daemon install")
 		return
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "sync daemon installed for this user session")
+	fmt.Fprintln(cmd.OutOrStdout(), "daemon installed for this user session")
 }

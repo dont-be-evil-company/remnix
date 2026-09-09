@@ -15,6 +15,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
 	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/sync/equalize"
 	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
 	"github.com/dont-be-evil-company/remnix/internal/transport"
@@ -71,6 +72,10 @@ func (a *App) newEngine(tr transport.Transport, endpointID string, secret []byte
 		}
 	}
 	cached, _ := keyring.Get(a.Config.DeviceID)
+	name := endpointID
+	if ep, ok := a.Config.Sync.Endpoint(endpointID); ok {
+		name = ep.Label()
+	}
 	return syncer.New(a.DB, syncer.Options{
 		DeviceID:       a.Config.DeviceID,
 		DeviceName:     a.Config.DeviceName,
@@ -82,8 +87,9 @@ func (a *App) newEngine(tr transport.Transport, endpointID string, secret []byte
 		StoreSMKs: func(smks map[string][]byte) {
 			_ = keyring.Set(a.Config.DeviceID, smks)
 		},
-		Transport:  tr,
-		EndpointID: endpointID,
+		Transport:    tr,
+		EndpointID:   endpointID,
+		EndpointName: name,
 	})
 }
 
@@ -188,6 +194,7 @@ func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Toke
 	}
 	live, errs := a.openEndpoints(eps)
 	for _, o := range live {
+		progress.Report(ctx, "syncing "+o.ep.Label())
 		eng := a.newEngine(o.tr, o.ep.ID, secret, tokens, fido)
 		if err := eng.Sync(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", o.ep.ID, err))
@@ -197,6 +204,7 @@ func (a *App) syncUnlocked(ctx context.Context, secret []byte, tokens []piv.Toke
 		anyOK = true
 	}
 	if anyOK && onlyID == "" && len(live) > 1 {
+		progress.Report(ctx, "mirroring endpoints")
 		named := make([]equalize.Named, 0, len(live))
 		for _, o := range live {
 			named = append(named, equalize.Named{ID: o.ep.ID, Transport: o.tr})

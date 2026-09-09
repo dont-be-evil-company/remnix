@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
 	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
@@ -22,6 +23,7 @@ func Equalize(ctx context.Context, endpoints []Named) error {
 	if len(endpoints) < 2 {
 		return nil
 	}
+	progress.Report(ctx, "mirroring endpoints")
 	var closers []func()
 	defer func() {
 		for i := len(closers) - 1; i >= 0; i-- {

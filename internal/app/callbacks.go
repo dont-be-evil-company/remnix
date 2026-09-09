@@ -12,12 +12,17 @@ import (
 	"strings"
 
 	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/progress"
 	"github.com/dont-be-evil-company/remnix/internal/redact"
 )
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func runCallbacks(ctx context.Context, cmds []string) error {
+	if len(cmds) == 0 {
+		return nil
+	}
+	progress.Report(ctx, "running callbacks")
 	var errs []error
 	home, err := os.UserHomeDir()
 	if err != nil {

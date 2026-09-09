@@ -27,6 +27,7 @@ type Server struct {
 	started   time.Time
 	mu        sync.Mutex
 	lastSync  Status
+	stage     string
 	cfgMu     sync.RWMutex
 	controlLn net.Listener
 	termLn    net.Listener
@@ -208,11 +209,13 @@ func (s *Server) Stats() protocol.Stats {
 	}
 	s.mu.Lock()
 	last := s.lastSync
+	stage := s.stage
 	s.mu.Unlock()
 	st.LastSyncAt = last.At
 	st.LastSyncOK = last.OK
 	st.LastSyncClass = last.Class
 	st.LastSyncError = last.Error
+	st.SyncStage = stage
 	if rss, err := processRSS(); err == nil {
 		st.RSSBytes = rss
 	}

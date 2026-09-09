@@ -16,5 +16,5 @@ func runOnce(ctx context.Context) string {
 	}
 	defer a.Close()
 	s := &Server{app: a, history: history.NewService(history.NewStore(a.DB), history.NewCache(), a.DB.SQL, a.Config.DeviceID, nil, nil)}
-	return s.runSyncCycle(ctx)
+	return s.runSyncCycle(ctx, false)
 }
