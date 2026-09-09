@@ -135,6 +135,16 @@ func RunSuggestOn(opts SuggestMenuOptions, r Remote) (cmd string, run bool, err 
 		return "", false, err
 	}
 	cmd, run, _ = selectionFrom(final)
+	switch got := final.(type) {
+	case suggestModel:
+		if got.ContinueSelected() {
+			return ContinuePrefix + cmd, false, nil
+		}
+	case *suggestModel:
+		if got != nil && got.ContinueSelected() {
+			return ContinuePrefix + cmd, false, nil
+		}
+	}
 	return cmd, run, nil
 }
 

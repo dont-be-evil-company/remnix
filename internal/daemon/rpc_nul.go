@@ -131,7 +131,59 @@ func (s *Server) serveNULOne(r *bufio.Reader, w io.Writer) error {
 			return nulWriteErr(w, err.Error())
 		}
 		return nulWriteOK(w, sel)
+	case "suggest-complete-interactive":
+		prefix, err := nulReadField(r)
+		if err != nil {
+			return err
+		}
+		cwd, err := nulReadField(r)
+		if err != nil {
+			return err
+		}
+		sessionID, err := nulReadField(r)
+		if err != nil {
+			return err
+		}
+		sel, err := s.suggestCompleteInteractive(prefix, cwd, sessionID, func() (items, descrs []string, abort bool, err error) {
+			return readSuggestCompleteItems(r)
+		})
+		if err != nil {
+			return nulWriteErr(w, err.Error())
+		}
+		return nulWriteOK(w, sel)
 	default:
 		return nulWriteErr(w, fmt.Sprintf("unknown op %q", op))
 	}
+}
+
+func readSuggestCompleteItems(r *bufio.Reader) (items, descrs []string, abort bool, err error) {
+	nRaw, err := nulReadField(r)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	n, _ := strconv.Atoi(nRaw)
+	if n < 0 {
+		return nil, nil, true, nil
+	}
+	if n > 512 {
+		n = 512
+	}
+	items = make([]string, 0, n)
+	descrs = make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		item, err := nulReadField(r)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		descr, err := nulReadField(r)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+		descrs = append(descrs, descr)
+	}
+	return items, descrs, false, nil
 }

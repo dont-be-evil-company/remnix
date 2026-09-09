@@ -79,13 +79,13 @@ func newInspectCmd() *cobra.Command {
 }
 
 func newSuggestCmd() *cobra.Command {
-	var prefix, cwd, resultFile string
+	var prefix, cwd, resultFile, itemsFile string
 	var list, interactive bool
 	cmd := &cobra.Command{
 		Use:   "suggest",
 		Short: "Print the best history prefix match for inline shell suggestions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSuggest(cmd, prefix, cwd, list, interactive, resultFile)
+			return runSuggest(cmd, prefix, cwd, list, interactive, resultFile, itemsFile)
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed command prefix")
@@ -93,6 +93,7 @@ func newSuggestCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&list, "list", false, "print ranked prefix matches, one per line")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open the suggestion overlay TUI")
 	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
+	cmd.Flags().StringVar(&itemsFile, "items-file", "", "newline-separated completion lines for the overlay (instead of history)")
 	return cmd
 }
 

@@ -288,7 +288,7 @@ func TestZshSuggestMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"suggest-list",
+		"__syncsh_suggest_fetch_ghost",
 		"__syncsh_suggest_menu_box",
 		"┌",
 		"__syncsh_suggest_suffix",
@@ -304,20 +304,24 @@ func TestZshSuggestMenu(t *testing.T) {
 		"bindkey '^N'",
 		"bindkey '^P'",
 		"bindkey '\\e'",
-		"__syncsh_rpc_list",
-		"[0-9]##",
+		"__syncsh_rpc suggest",
 		"__syncsh_menu_hl_sel",
 		"__syncsh_menu_hl_desc",
 		"fg=#F5C2E7",
 		"bg=#313244",
 		"fg=#CDD6F4",
-		"--list",
 		"█",
 		"░",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("missing %q", want)
 		}
+	}
+	if strings.Contains(on, "__syncsh_suggest_kinds+=(history)") {
+		t.Fatal("LSP menu must not list history rows")
+	}
+	if strings.Contains(on, "suggest-list") || strings.Contains(on, "__syncsh_rpc_list") || strings.Contains(on, "--list") {
+		t.Fatal("LSP menu must not fetch suggest-list")
 	}
 	if strings.Contains(on, "_main_complete") || strings.Contains(on, "__syncsh_compadd") || strings.Contains(on, "zle -C __syncsh_comp_list") {
 		t.Fatal("compsys capture must be omitted when completions are off")
@@ -345,6 +349,10 @@ func TestZshSuggestCompletions(t *testing.T) {
 	}
 	for _, want := range []string{
 		"__syncsh_suggest_completions",
+		"__syncsh_comp_applied_lines",
+		"__syncsh_comp_line_descrs",
+		`BUFFER="$BUFFER "`,
+		`${rest//[[:space:]]/}`,
 		"syncsh-suggest-complete",
 		"_main_complete",
 		"__syncsh_compadd",
@@ -392,6 +400,12 @@ func TestZshSuggestCompletions(t *testing.T) {
 	}
 	if !strings.Contains(on, "syncsh-suggest-complete") {
 		t.Fatal("Tab must request compsys completions")
+	}
+	if strings.Contains(on, "__syncsh_suggest_kinds+=(history)") {
+		t.Fatal("LSP menu must not list history rows")
+	}
+	if strings.Contains(on, "__syncsh_suggest_fetch_hist") || strings.Contains(on, "suggest-list") {
+		t.Fatal("completions menu must not fetch history rows")
 	}
 	if strings.Contains(on, "if (( ${+functions[__syncsh_suggest_completions]} )); then") {
 		t.Fatal("typing must not capture compsys on every redraw")
@@ -471,11 +485,42 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(over, "__syncsh_suggest_menu_box") || strings.Contains(over, "_main_complete") {
-		t.Fatal("proxy-on must not emit POSTDISPLAY menu or compsys capture")
+	if strings.Contains(over, "__syncsh_suggest_menu_box") {
+		t.Fatal("proxy-on must not emit POSTDISPLAY menu")
+	}
+	if !strings.Contains(over, `_main_complete`) || !strings.Contains(over, `__syncsh_comp_applied_lines`) {
+		t.Fatal("proxy-on overlay must capture compsys completions")
+	}
+	if !strings.Contains(over, `BUFFER="$BUFFER "`) {
+		t.Fatal("command-only buffers must retry compsys with a trailing space")
+	}
+	if strings.Contains(over, "bindkey $'\\t' syncsh-suggest-complete") {
+		t.Fatal("proxy-on must not bind Tab to the POSTDISPLAY completer")
 	}
 	if !strings.Contains(over, "suggest --interactive") || !strings.Contains(over, "bindkey '^@'") {
 		t.Fatal("proxy-on must bind Ctrl+Space overlay menu")
+	}
+	if !strings.Contains(over, "__syncsh_overlay_complete_begin") {
+		t.Fatal("proxy-on Ctrl+Space must open the overlay before compsys so a spinner can paint")
+	}
+	menuAt := strings.Index(over, "syncsh-suggest-menu()")
+	if menuAt < 0 {
+		t.Fatal("missing syncsh-suggest-menu")
+	}
+	menu := over[menuAt:]
+	beginAt := strings.Index(menu, "__syncsh_overlay_complete_begin")
+	compAt := strings.Index(menu, "__syncsh_suggest_completions")
+	if beginAt < 0 || compAt < 0 || beginAt > compAt {
+		t.Fatal("spinner overlay must start before compsys capture")
+	}
+	if !strings.Contains(over, "__syncsh_rpc_write") || !strings.Contains(over, "__syncsh_overlay_complete_finish") {
+		t.Fatal("proxy-on must stream completion items after the overlay is open")
+	}
+	if !strings.Contains(over, "__syncsh_continue__:") {
+		t.Fatal("proxy-on Ctrl+Space must drill into a suggestion and reload completions")
+	}
+	if !strings.Contains(over, `[[ $LBUFFER == *[[:space:]] ]] || LBUFFER="$LBUFFER "`) {
+		t.Fatal("ctrl+space continue must add a trailing space so the next completer runs")
 	}
 	if !strings.Contains(over, "suggest-interactive") {
 		t.Fatal("proxy-on Ctrl+Space must try daemon overlay RPC")

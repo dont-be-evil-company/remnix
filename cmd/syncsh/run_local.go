@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/mistweaverco/syncsh/internal/app"
@@ -238,9 +240,9 @@ func runInspect(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, resultFile string) error {
+func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, resultFile, itemsFile string) error {
 	if interactive {
-		return runSuggestInteractive(cmd, prefix, cwd, resultFile)
+		return runSuggestInteractive(cmd, prefix, cwd, resultFile, itemsFile)
 	}
 	if prefix == "" {
 		return nil
@@ -311,25 +313,63 @@ func loadSuggestList(prefix, cwd string) ([]string, error) {
 	}, a.Config.Suggest.MenuLimit()), nil
 }
 
-func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile string) error {
-	items, err := loadSuggestList(prefix, cwd)
-	if err != nil {
-		return err
-	}
+func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFile string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	itemIco := cfg.Suggest.IconHistory()
+	var items, descrs []string
+	if itemsFile != "" {
+		items, descrs, err = loadSuggestItemsFile(itemsFile)
+		if err != nil {
+			return err
+		}
+		itemIco = cfg.Suggest.IconCompletion()
+	} else {
+		items, err = loadSuggestList(prefix, cwd)
+		if err != nil {
+			return err
+		}
 	}
 	h := cfg.Suggest.MenuLimit() + 3
 	return tui.RunSuggestMenu(tui.SuggestMenuOptions{
 		Prefix:        prefix,
 		Items:         items,
+		Descrs:        descrs,
 		TypedIcon:     cfg.Suggest.IconTyped(),
 		HistoryIcon:   cfg.Suggest.IconHistory(),
+		ItemIcon:      itemIco,
 		OverlayHeight: h,
 		Widget:        true,
 		ResultFile:    resultFile,
 	}, cmd.OutOrStdout())
+}
+
+func loadSuggestItemsFile(path string) (items, descrs []string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimRight(sc.Text(), "\r")
+		if line == "" {
+			continue
+		}
+		cmd, descr, _ := strings.Cut(line, "\t")
+		if cmd == "" {
+			continue
+		}
+		items = append(items, cmd)
+		descrs = append(descrs, descr)
+		if len(items) >= 512 {
+			break
+		}
+	}
+	return items, descrs, sc.Err()
 }
 
 func runPtyProxy(shellPath string) error {

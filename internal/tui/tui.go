@@ -489,6 +489,10 @@ func (m model) RunSelected() bool {
 // shell integration can execute it (Atuin's __atuin_accept__: protocol).
 const AcceptPrefix = "__syncsh_accept__:"
 
+// ContinuePrefix means the shell should insert the command and reopen the
+// suggest overlay with fresh completions for that prefix.
+const ContinuePrefix = "__syncsh_continue__:"
+
 // FormatSelection is the widget RPC payload: accept-prefix when Enter should
 // run the command. No trailing newline (NUL fields keep it).
 func FormatSelection(cmd string, run bool) string {

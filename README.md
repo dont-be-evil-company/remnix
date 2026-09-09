@@ -128,31 +128,33 @@ suggest:
     - Right
 ```
 
-Set `enabled: false` to keep Ctrl+R without ghost text. Set `menu: true` to show a
-small list under the prompt while typing (zsh, no pty-proxy). The first row is
-always the text you typed (no item is selected until you navigate). Ghost text
-still previews the best history match; accept keys (Right, Tab, ...) insert only
-that ghost suffix. Up/Down (and Ctrl-P/N) start at the first completion or
-history row and rewrite the line to that suggestion; Enter runs it. Esc restores
-the typed line and dismisses the list. `menu_max` is the number of suggestion
-rows shown at once (the typed row stays pinned). Set `completions: true` to also
-list the shell’s own completers (carapace, git, and anything else registered
-with compsys), with descriptions when the completer provides them. Completions
-sit directly under the typed row; history follows. Typing only queries history;
-press Tab to load completions into the float (Tab again cycles; results are
-cached until the line changes). The full completion list is scrollable; a thumb
+Set `enabled: false` to keep Ctrl+R without ghost text. Set `menu: true` to enable
+the zsh POSTDISPLAY picker (no pty-proxy). Ghost text still previews the best
+history match from the local database; accept keys (Right, Tab, ...) insert only
+that ghost suffix. History stays ghost text: it is not listed in the dropdown.
+Set `completions: true` to list the shell’s own completers (carapace, git, and
+anything else registered with compsys), with descriptions when the completer
+provides them. The first row is always the text you typed (no item is selected
+until you navigate). Completions sit directly under that typed row. Press Tab to
+load them into the float (Tab again cycles; results are cached until the line
+changes). Up/Down (and Ctrl-P/N) start at the first completion and rewrite the
+line to that suggestion; Enter runs it. Esc restores the typed line and
+dismisses the list. `menu_max` is the number of suggestion rows shown at once
+(the typed row stays pinned). The full completion list is scrollable; a thumb
 on the right edge of the box shows where you are. Capture stops at 512 matches
 so a huge path completion cannot freeze the prompt. Icons are configurable so
-history and completions stay distinguishable.
+typed, history (overlay), and completions stay distinguishable.
 
 ### Terminal proxy (overlay TUIs)
 
 On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `syncsh init`
 high in the shell rc. `init` then `exec`s `syncsh-attach`, a tiny helper that
 connects to the SyncSH daemon. The daemon owns the inner PTY, the shadow
-screen, and the Ctrl+R / Ctrl+Space overlay TUIs. The shell widget asks the
-daemon over RPC (`search-interactive`); keys and paint stay on the existing
-attach stream so a second Go process is not spawned. Set
+screen, and the Ctrl+R / Ctrl+Space overlay TUIs. On zsh, Ctrl+Space lists
+compsys completions (git, gcloud, carapace, ...) instead of history; history
+stays ghost text. The shell widget asks the daemon over RPC
+(`search-interactive` / `suggest-complete-interactive`); keys and paint stay
+on the existing attach stream so a second Go process is not spawned. Set
 `SYNCSH_PTY_PROXY_LEGACY=1` to use the old per-terminal `syncsh pty-proxy`
 Go process for one release. Without a daemon session, the same widgets fall
 back to a local `syncsh search --interactive` TUI.

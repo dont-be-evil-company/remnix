@@ -134,21 +134,31 @@ __syncsh_agent_ensure() {
   return 1
 }
 
-__syncsh_rpc() {
+__syncsh_rpc_write() {
   emulate -L zsh
   __syncsh_agent_ensure || return 1
-  local op=$1 f out in
-  shift
+  local f out
   out=${__syncsh_out:-$__syncsh_fd}
-  in=${__syncsh_in:-$__syncsh_fd}
-  print -n -u $out -- "$op"$'\0' || { __syncsh_agent_reset; return 1 }
+  print -n -u $out -- "$1"$'\0' || { __syncsh_agent_reset; return 1 }
+  shift
   for f in "$@"; do
     print -n -u $out -- "$f"$'\0' || { __syncsh_agent_reset; return 1 }
   done
-  local st
+  return 0
+}
+
+__syncsh_rpc_read() {
+  emulate -L zsh
+  local in st
+  in=${__syncsh_in:-$__syncsh_fd}
   IFS= read -r -d $'\0' -u $in st || { __syncsh_agent_reset; return 1 }
   IFS= read -r -d $'\0' -u $in REPLY || { __syncsh_agent_reset; return 1 }
   [[ $st == ok ]]
+}
+
+__syncsh_rpc() {
+  emulate -L zsh
+  __syncsh_rpc_write "$@" && __syncsh_rpc_read
 }
 
 __syncsh_preexec() {
@@ -448,6 +458,7 @@ fi
 	if opts.SuggestMenu {
 		if opts.PtyProxyEnabled {
 			out += zshOverlayMenu()
+			out += zshSuggestCompletions(false)
 		} else {
 			out += zshSuggestMenu(opts)
 		}
@@ -485,13 +496,11 @@ typeset -gi __syncsh_suggest_idx=0
 typeset -gi __syncsh_suggest_off=2
 typeset -gi __syncsh_suggest_view=0
 typeset -gi __syncsh_suggest_bar=0
-typeset -ga __syncsh_rpc_items
 typeset -g __syncsh_suggest_suffix=""
 typeset -g __syncsh_suggest_typed=""
 typeset -g __syncsh_suggest_ghost=""
 typeset -gi __syncsh_suggest_inner=0
 typeset -gi __syncsh_suggest_desc_col=0
-typeset -ga __syncsh_suggest_hist
 typeset -gi __syncsh_suggest_menu_max=%d
 typeset -g __syncsh_suggest_icon_typed=%s
 typeset -g __syncsh_suggest_icon_history=%s
@@ -499,16 +508,18 @@ typeset -g __syncsh_suggest_icon_completion=%s
 `, max, zshQuote(typed), zshQuote(histIcon), zshQuote(compIcon))
 	out += zshSuggestMenuBody()
 	if opts.SuggestCompletions {
-		out += zshSuggestCompletions()
+		out += zshSuggestCompletions(true)
 	}
 	return out
 }
 
-func zshSuggestCompletions() string {
-	return `
+func zshSuggestCompletions(bindTab bool) string {
+	out := `
 typeset -ga __syncsh_comp_values
 typeset -ga __syncsh_comp_inserts
 typeset -ga __syncsh_comp_descrs
+typeset -ga __syncsh_comp_lines
+typeset -ga __syncsh_comp_line_descrs
 typeset -g __syncsh_comp_cache_key=""
 typeset -ga __syncsh_comp_cache_values
 typeset -ga __syncsh_comp_cache_inserts
@@ -734,8 +745,38 @@ __syncsh_suggest_completions() {
   [[ -n ${__syncsh_in_comp:-} ]] && return
   (( ${+_comps} )) || return
   __syncsh_in_comp=1
-  zle __syncsh_comp_list >/dev/null 2>&1 || true
-  unset __syncsh_in_comp
+  {
+    zle __syncsh_comp_list >/dev/null 2>&1 || true
+    # Command-only / exact-word buffers often yield no next-token matches
+    # until a trailing space starts that command's completer. A sole
+    # "gcloud storage " row (typed plus whitespace) used to skip the retry
+    # and reopen the same leaf instead of buckets/cp/cat.
+    if (( ${+functions[__syncsh_comp_applied_lines]} )); then
+      __syncsh_comp_applied_lines "$BUFFER"
+    fi
+    local -i need_space=0
+    if [[ -n $BUFFER && $BUFFER != *[[:space:]] ]]; then
+      need_space=1
+      local s rest
+      for s in "${__syncsh_comp_lines[@]}"; do
+        rest="${s#"$BUFFER"}"
+        if [[ -n ${rest//[[:space:]]/} ]]; then
+          need_space=0
+          break
+        fi
+      done
+    fi
+    if (( need_space )); then
+      local orig="$BUFFER" origc=$CURSOR
+      BUFFER="$BUFFER "
+      CURSOR=$#BUFFER
+      zle __syncsh_comp_list >/dev/null 2>&1 || true
+      BUFFER="$orig"
+      CURSOR=$origc
+    fi
+  } always {
+    unset __syncsh_in_comp
+  }
 }
 
 __syncsh_comp_cache_store() {
@@ -754,6 +795,32 @@ __syncsh_comp_cache_clear() {
   unset __syncsh_comp_lbuffer __syncsh_comp_rbuffer __syncsh_comp_prefix __syncsh_comp_suffix __syncsh_comp_ctx
 }
 
+__syncsh_comp_applied_lines() {
+  emulate -L zsh
+  local typed="${1:-$BUFFER}" m insert line
+  local -i i
+  __syncsh_comp_lines=()
+  __syncsh_comp_line_descrs=()
+  for (( i=1; i<=$#__syncsh_comp_values; i++ )); do
+    m="${__syncsh_comp_values[i]}"
+    [[ -n $m ]] || continue
+    insert="${__syncsh_comp_inserts[i]:-$m}"
+    if (( ${+__syncsh_comp_lbuffer} )); then
+      line="${__syncsh_comp_lbuffer%$__syncsh_comp_prefix}${insert}${__syncsh_comp_rbuffer#$__syncsh_comp_suffix}"
+    else
+      line="$insert"
+    fi
+    [[ -n $line && $line != "$typed" ]] || continue
+    __syncsh_comp_lines+=("$line")
+    __syncsh_comp_line_descrs+=("${__syncsh_comp_descrs[i]:-}")
+  done
+}
+
+`
+	if !bindTab {
+		return out
+	}
+	out += `
 syncsh-suggest-complete() {
   emulate -L zsh
   if (( __syncsh_suggest_idx > 0 )); then
@@ -775,7 +842,7 @@ syncsh-suggest-complete() {
   # Open the dropdown (idx>0); otherwise apply keeps a single-line ghost only.
   __syncsh_suggest_idx=1
   __syncsh_suggest_off=2
-  __syncsh_suggest_fetch_hist
+  __syncsh_suggest_fetch_ghost
   __syncsh_suggest_rebuild
   zle redisplay
 }
@@ -784,6 +851,7 @@ zle -N syncsh-suggest-complete
 bindkey $'\t' syncsh-suggest-complete
 bindkey -M viins $'\t' syncsh-suggest-complete
 `
+	return out
 }
 
 func zshSuggestMenuBody() string {
@@ -794,34 +862,6 @@ typeset -g __syncsh_menu_hl_border='fg=#585B70,bg=#1E1E2E'
 typeset -g __syncsh_menu_hl_row='fg=#CDD6F4,bg=#1E1E2E'
 typeset -g __syncsh_menu_hl_sel='fg=#F5C2E7,bold,bg=#313244'
 typeset -g __syncsh_menu_hl_desc='fg=#585B70,bg=#1E1E2E'
-
-__syncsh_rpc_list() {
-  emulate -L zsh
-  __syncsh_agent_ensure || return 1
-  local op=$1 f out in n
-  shift
-  out=${__syncsh_out:-$__syncsh_fd}
-  in=${__syncsh_in:-$__syncsh_fd}
-  print -n -u $out -- "$op"$'\0' || { __syncsh_agent_reset; return 1 }
-  for f in "$@"; do
-    print -n -u $out -- "$f"$'\0' || { __syncsh_agent_reset; return 1 }
-  done
-  local st
-  IFS= read -r -d $'\0' -u $in st || { __syncsh_agent_reset; return 1 }
-  IFS= read -r -d $'\0' -u $in n || { __syncsh_agent_reset; return 1 }
-  if [[ $st != ok || $n != [0-9]## ]]; then
-    __syncsh_agent_reset
-    return 1
-  fi
-  (( n > 64 )) && n=64
-  __syncsh_rpc_items=()
-  local -i i
-  for (( i=1; i<=n; i++ )); do
-    IFS= read -r -d $'\0' -u $in f || { __syncsh_agent_reset; return 1 }
-    __syncsh_rpc_items+=("$f")
-  done
-  return 0
-}
 
 __syncsh_suggest_highlight() {
   region_highlight=(${region_highlight:#*memo=syncsh-suggest*})
@@ -877,7 +917,6 @@ __syncsh_suggest_clear() {
   __syncsh_suggest_kinds=()
   __syncsh_suggest_descrs=()
   __syncsh_suggest_lines=()
-  __syncsh_suggest_hist=()
   __syncsh_suggest_idx=0
   __syncsh_suggest_off=2
   __syncsh_suggest_view=0
@@ -928,7 +967,7 @@ __syncsh_suggest_fmt_row() {
   emulate -L zsh
   local -i i=$1 valw=$2 descw=$3 iconw=$4
   local s kind icon marker descr
-  kind="${__syncsh_suggest_kinds[i]:-history}"
+  kind="${__syncsh_suggest_kinds[i]:-completion}"
   __syncsh_suggest_kind_icon "$kind"
   icon="$REPLY"
   icon="${(r:iconw:)icon}"
@@ -1064,33 +1103,26 @@ __syncsh_suggest_apply() {
   __syncsh_suggest_highlight
 }
 
-__syncsh_suggest_fetch_hist() {
+__syncsh_suggest_fetch_ghost() {
   emulate -L zsh
-  local -a hist filtered
-  local s line
-  hist=()
-  if __syncsh_rpc_list suggest-list "$BUFFER" "$PWD"; then
-    hist=("${__syncsh_rpc_items[@]}")
+  local s=""
+  if __syncsh_rpc suggest "$BUFFER" "$PWD"; then
+    s="$REPLY"
   else
-    while IFS= read -r line; do
-      [[ -n $line ]] && hist+=("$line")
-    done < <("$__syncsh_bin" suggest --prefix "$BUFFER" --cwd "$PWD" --list 2>/dev/null)
+    s="$("$__syncsh_bin" suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
   fi
-  filtered=()
-  for s in "${hist[@]}"; do
-    if [[ $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
-      filtered+=("$s")
-    fi
-  done
-  __syncsh_suggest_hist=("${filtered[@]}")
+  if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
+    __syncsh_suggest_ghost="$s"
+  else
+    __syncsh_suggest_ghost=""
+  fi
 }
 
 __syncsh_suggest_rebuild() {
   emulate -L zsh
-  local -a hist cvals cdescrs cinserts
-  local typed s m d hs applied insert
-  local -i i dup
-  hist=("${__syncsh_suggest_hist[@]}")
+  local -a cvals cdescrs cinserts
+  local typed m d applied insert
+  local -i i
   cvals=()
   cdescrs=()
   cinserts=()
@@ -1103,8 +1135,7 @@ __syncsh_suggest_rebuild() {
   __syncsh_suggest_kinds=()
   __syncsh_suggest_descrs=()
   __syncsh_suggest_lines=()
-  __syncsh_suggest_ghost=""
-  if (( $#hist == 0 && $#cvals == 0 )); then
+  if (( $#cvals == 0 )); then
     __syncsh_suggest_apply
     return
   fi
@@ -1123,26 +1154,11 @@ __syncsh_suggest_rebuild() {
       applied="$insert"
     fi
     [[ -n $applied && $applied != "$typed" ]] || continue
-    dup=0
-    for hs in "${hist[@]}"; do
-      if [[ $applied == "$hs" ]]; then
-        dup=1
-        break
-      fi
-    done
-    (( dup )) && continue
     d="${cdescrs[i]:-}"
     __syncsh_suggest_items+=("$m")
     __syncsh_suggest_kinds+=(completion)
     __syncsh_suggest_descrs+=("$d")
     __syncsh_suggest_lines+=("$applied")
-  done
-  for s in "${hist[@]}"; do
-    __syncsh_suggest_items+=("$s")
-    __syncsh_suggest_kinds+=(history)
-    __syncsh_suggest_descrs+=("")
-    __syncsh_suggest_lines+=("$s")
-    [[ -z $__syncsh_suggest_ghost ]] && __syncsh_suggest_ghost="$s"
   done
   __syncsh_suggest_scroll
   __syncsh_suggest_apply
@@ -1169,7 +1185,7 @@ __syncsh_suggest_update() {
   if [[ ${__syncsh_comp_cache_key:-} != "$BUFFER" ]]; then
     (( ${+functions[__syncsh_comp_cache_clear]} )) && __syncsh_comp_cache_clear
   fi
-  __syncsh_suggest_fetch_hist
+  __syncsh_suggest_fetch_ghost
   __syncsh_suggest_rebuild
 }
 
@@ -1282,25 +1298,115 @@ func zshQuote(s string) string {
 
 func zshOverlayMenu() string {
 	return `
+__syncsh_overlay_complete_begin() {
+  emulate -L zsh
+  local prefix=$1
+  [[ -n ${SYNCSH_SESSION_ID:-} ]] || return 1
+  __syncsh_rpc_write suggest-complete-interactive "$prefix" "$PWD" "$SYNCSH_SESSION_ID"
+}
+
+__syncsh_overlay_complete_finish() {
+  emulate -L zsh
+  local n=$1
+  shift
+  __syncsh_rpc_write "$n" "$@" && __syncsh_rpc_read
+}
+
+__syncsh_overlay_complete() {
+  emulate -L zsh
+  local prefix=$1 n=$2
+  shift 2
+  [[ -n ${SYNCSH_SESSION_ID:-} ]] || return 1
+  if __syncsh_rpc suggest-complete-interactive "$prefix" "$PWD" "$SYNCSH_SESSION_ID" "$n" "$@"; then
+    return 0
+  fi
+  if [[ -n ${__syncsh_attach:-} ]]; then
+    REPLY=$("$__syncsh_attach" --rpc suggest-complete-interactive "$prefix" "$PWD" "$SYNCSH_SESSION_ID" "$n" "$@" 2>/dev/null) || return 1
+    return 0
+  fi
+  return 1
+}
+
 syncsh-suggest-menu() {
-  local selected run=0
+  local selected run=0 tmp drilled=0 again=1 started=0
+  local -a items
   __syncsh_suggest_suppress=1
   if (( ${+functions[__syncsh_suggest_clear]} )); then
     __syncsh_suggest_clear
     zle redisplay
   fi
   zle -I
-  if ! __syncsh_overlay suggest-interactive "$BUFFER"; then
-    __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || {
-      __syncsh_suggest_suppress=0
-      return
-    }
-  fi
-  selected="$REPLY"
-  if [[ "$selected" == __syncsh_accept__:* ]]; then
-    selected="${selected#__syncsh_accept__:}"
-    run=1
-  fi
+  while (( again )); do
+    again=0
+    items=()
+    started=0
+    if __syncsh_overlay_complete_begin "$BUFFER"; then
+      started=1
+    fi
+    if (( ${+functions[__syncsh_suggest_completions]} )); then
+      __syncsh_suggest_completions
+      __syncsh_comp_applied_lines "$BUFFER"
+      items=("${__syncsh_comp_lines[@]}")
+    fi
+    if (( started )); then
+      if (( $#items == 0 && drilled )); then
+        __syncsh_overlay_complete_finish -1 || true
+        break
+      fi
+      local -a payload descrs
+      local -i i
+      descrs=("${__syncsh_comp_line_descrs[@]}")
+      payload=()
+      for (( i=1; i<=$#items; i++ )); do
+        payload+=("${items[i]}" "${descrs[i]:-}")
+      done
+      __syncsh_overlay_complete_finish "$#items" "${payload[@]}" || break
+    elif (( $#items == 0 )); then
+      (( drilled )) && break
+      if ! __syncsh_overlay suggest-interactive "$BUFFER"; then
+        __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || break
+      fi
+    else
+      local -a payload descrs
+      local -i i
+      descrs=("${__syncsh_comp_line_descrs[@]}")
+      payload=()
+      for (( i=1; i<=$#items; i++ )); do
+        payload+=("${items[i]}" "${descrs[i]:-}")
+      done
+      if ! __syncsh_overlay_complete "$BUFFER" "$#items" "${payload[@]}"; then
+        tmp="${TMPDIR:-/tmp}/syncsh-suggest-$$"
+        : >"$tmp" 2>/dev/null || tmp=""
+        if [[ -z $tmp ]]; then
+          break
+        fi
+        for (( i=1; i<=$#items; i++ )); do
+          print -r -- "${items[i]}"$'\t'"${descrs[i]:-}"
+        done >"$tmp"
+        __syncsh_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" --items-file "$tmp" || {
+          rm -f "$tmp"
+          break
+        }
+        rm -f "$tmp"
+      fi
+    fi
+    selected="$REPLY"
+    if [[ "$selected" == __syncsh_continue__:* ]]; then
+      selected="${selected#__syncsh_continue__:}"
+      [[ -n $selected ]] || break
+      LBUFFER="$selected"
+      [[ $LBUFFER == *[[:space:]] ]] || LBUFFER="$LBUFFER "
+      RBUFFER=""
+      zle redisplay
+      drilled=1
+      again=1
+      continue
+    fi
+    if [[ "$selected" == __syncsh_accept__:* ]]; then
+      selected="${selected#__syncsh_accept__:}"
+      run=1
+    fi
+  done
   if [[ -n "$selected" ]]; then
     LBUFFER="$selected"
     RBUFFER=""
