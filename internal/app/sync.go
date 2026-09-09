@@ -8,20 +8,20 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/sync/equalize"
-	"github.com/mistweaverco/syncsh/internal/sync/syncer"
-	"github.com/mistweaverco/syncsh/internal/transport"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
-	rclonetr "github.com/mistweaverco/syncsh/internal/transport/rclone"
-	"github.com/mistweaverco/syncsh/internal/transport/rsync"
-	"github.com/mistweaverco/syncsh/internal/transport/scp"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/sync/equalize"
+	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
+	rclonetr "github.com/dont-be-evil-company/remnix/internal/transport/rclone"
+	"github.com/dont-be-evil-company/remnix/internal/transport/rsync"
+	"github.com/dont-be-evil-company/remnix/internal/transport/scp"
 )
 
 func (a *App) EnqueueHistoryCreated(e history.Entry) error {
@@ -66,7 +66,7 @@ func (a *App) TombstoneEntries(entries []history.Entry) error {
 func (a *App) newEngine(tr transport.Transport, endpointID string, secret []byte, tokens []piv.Token, fido []fido2.Device) *syncer.Engine {
 	host, _ := os.Hostname()
 	if len(secret) == 0 {
-		if env := os.Getenv("SYNCSH_RECOVERY_KEY"); env != "" {
+		if env := os.Getenv("REMNIX_RECOVERY_KEY"); env != "" {
 			secret, _ = recovery.Decode(env)
 		}
 	}
@@ -112,7 +112,7 @@ func (a *App) OpenTransport(ep config.Endpoint) (transport.Transport, error) {
 	case "", config.TypeDirectory:
 		p := config.Expand(ep.Path)
 		if p == "" {
-			return nil, fmt.Errorf("endpoint %s: directory path is not configured; run syncsh setup", ep.ID)
+			return nil, fmt.Errorf("endpoint %s: directory path is not configured; run remnix setup", ep.ID)
 		}
 		return directory.New(p), nil
 	case config.TypeRsync:
@@ -122,14 +122,14 @@ func (a *App) OpenTransport(ep config.Endpoint) (transport.Transport, error) {
 			spec = config.Expand(ep.Path)
 		}
 		if spec == "" {
-			return nil, fmt.Errorf("endpoint %s: rsync remote is not configured; run syncsh setup", ep.ID)
+			return nil, fmt.Errorf("endpoint %s: rsync remote is not configured; run remnix setup", ep.ID)
 		}
 		return rsync.New(spec, work), nil
 	case config.TypeSCP:
 		work := filepath.Join(config.DataDir(), "stage-scp-"+ep.ID)
 		host := config.Expand(ep.Host)
 		if host == "" {
-			return nil, fmt.Errorf("endpoint %s: scp host is not configured; run syncsh setup", ep.ID)
+			return nil, fmt.Errorf("endpoint %s: scp host is not configured; run remnix setup", ep.ID)
 		}
 		return scp.New(host, config.Expand(ep.User), config.Expand(ep.Path), work, ep.Port), nil
 	case config.TypeRclone:

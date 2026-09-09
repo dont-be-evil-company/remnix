@@ -1,5 +1,5 @@
 -- 0001_initial.sql
--- versioned local schema for syncsh v1
+-- versioned local schema for remnix v1
 -- schema_migrations is owned by the migration runner
 
 CREATE TABLE devices (

@@ -54,7 +54,7 @@ func NewConfigSessionWith(backendType, name string, params rc.Params) *ConfigSes
 }
 
 func StagedName() string {
-	return "syncsh-tmp-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	return "remnix-tmp-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 }
 
 func (s *ConfigSession) Step(ctx context.Context, result string) (*Question, error) {

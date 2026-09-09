@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 func testService(t *testing.T) *Service {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
-	t.Setenv("SYNCSH_RUNTIME_DIR", filepath.Join(root, "run"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_RUNTIME_DIR", filepath.Join(root, "run"))
 	cfg := config.Default()
 	cfg.DeviceID = "dev1"
 	cfg.DeviceName = "test"

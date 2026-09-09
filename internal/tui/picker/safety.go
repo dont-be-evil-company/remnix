@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func ValidateDirName(name string) error {

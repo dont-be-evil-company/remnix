@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	service = "syncsh"
+	service = "remnix"
 	version = 1
 )
 

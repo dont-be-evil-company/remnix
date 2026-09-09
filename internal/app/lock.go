@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dont-be-evil-company/remnix/internal/config"
 	"github.com/gofrs/flock"
-	"github.com/mistweaverco/syncsh/internal/config"
 )
 
 type Lock struct {
@@ -24,7 +24,7 @@ func AcquireLock() (*Lock, error) {
 		return nil, fmt.Errorf("acquire lock: %w", err)
 	}
 	if !locked {
-		return nil, fmt.Errorf("another syncsh process holds %s", path)
+		return nil, fmt.Errorf("another remnix process holds %s", path)
 	}
 	return &Lock{flock: l}, nil
 }

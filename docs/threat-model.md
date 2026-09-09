@@ -31,4 +31,4 @@ breaks.
 Additional controls: portable YAML has no credentials; rclone.conf lives in the
 data directory (0600) beside local.yaml, not in the commit-safe config dir;
 logs, doctor, daemon status, and callback tails pass through `internal/redact`;
-history insert skips `SYNCSH_RECOVERY_KEY=` and similar.
+history insert skips `REMNIX_RECOVERY_KEY=` and similar.

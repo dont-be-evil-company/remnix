@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func ExpandPath(s string) string {

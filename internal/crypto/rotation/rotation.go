@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
 )
 
 func AddYubiKey(m generations.Manifest, smk []byte, tok piv.Token) (generations.Manifest, error) {

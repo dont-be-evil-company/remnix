@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/transport"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
 	"github.com/rclone/rclone/fs/object"
@@ -283,12 +283,12 @@ func TestMkdirBucketBasedCreatesKeepObject(t *testing.T) {
 	f := newDupFs()
 	f.features.BucketBased = true
 	tr := &Transport{fs: f, remote: "s3"}
-	if err := tr.Mkdir(context.Background(), "syncsh"); err != nil {
+	if err := tr.Mkdir(context.Background(), "remnix"); err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, o := range f.files {
-		if o.remote == "syncsh/"+dirKeepName {
+		if o.remote == "remnix/"+dirKeepName {
 			found = true
 			break
 		}
@@ -302,7 +302,7 @@ func TestMkdirBucketBasedCreatesKeepObject(t *testing.T) {
 	}
 	ok := false
 	for _, d := range dirs {
-		if d == "syncsh" || strings.HasSuffix(d, "/syncsh") {
+		if d == "remnix" || strings.HasSuffix(d, "/remnix") {
 			ok = true
 		}
 	}
@@ -663,14 +663,14 @@ func TestDedupeMergesDuplicateRepoRootFolders(t *testing.T) {
 	f := newDupFs()
 	f.rootID = "live"
 	f.features.Command = f.Command
-	live := &dupDir{f: f, id: "live", remote: "syncsh", parent: "drive-root"}
-	stale := &dupDir{f: f, id: "stale", remote: "syncsh", parent: "drive-root"}
+	live := &dupDir{f: f, id: "live", remote: "remnix", parent: "drive-root"}
+	stale := &dupDir{f: f, id: "stale", remote: "remnix", parent: "drive-root"}
 	ckLive := &dupDir{f: f, id: "ck-live", remote: "checkpoints", parent: "live"}
 	ckStale := &dupDir{f: f, id: "ck-stale", remote: "checkpoints", parent: "stale"}
 	old := &dupDir{f: f, id: "old", remote: "checkpoints/old", parent: "ck-stale"}
 	neu := &dupDir{f: f, id: "new", remote: "checkpoints/new", parent: "ck-live"}
 	f.dirs = []*dupDir{live, stale, ckLive, ckStale, old, neu}
-	tr := &Transport{fs: f, remote: "dup", root: "syncsh"}
+	tr := &Transport{fs: f, remote: "dup", root: "remnix"}
 
 	root, err := f.List(context.Background(), "")
 	if err != nil {
@@ -690,14 +690,14 @@ func TestDedupeMergesDuplicateRepoRootFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nSyncsh := 0
+	nRemnix := 0
 	for _, d := range f.dirs {
-		if d.remote == "syncsh" {
-			nSyncsh++
+		if d.remote == "remnix" {
+			nRemnix++
 		}
 	}
-	if nSyncsh != 1 {
-		t.Fatalf("syncsh folders after dedupe: %d", nSyncsh)
+	if nRemnix != 1 {
+		t.Fatalf("remnix folders after dedupe: %d", nRemnix)
 	}
 
 	children, err := f.List(context.Background(), "checkpoints")

@@ -34,8 +34,8 @@ path so acks and device metadata replace instead of stacking.
 `repository.Probe` inspects `metadata/manifest` **and** `keys/generations/`
 so a stray file is not treated as a live repository.
 
-Create (`syncsh setup`) refuses Valid / Partial / UnsupportedVersion remotes.
-Join (`syncsh device add`) **requires** Valid and never calls
+Create (`remnix setup`) refuses Valid / Partial / UnsupportedVersion remotes.
+Join (`remnix device add`) **requires** Valid and never calls
 `InitializeRemote`.
 
 Garbage collection deletes superseding event objects after every required

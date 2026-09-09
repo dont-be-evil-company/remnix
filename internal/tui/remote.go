@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 // Size is a terminal size in cells, used for WINCH while a remote overlay runs.

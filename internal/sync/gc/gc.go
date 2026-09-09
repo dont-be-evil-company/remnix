@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/sync/ack"
-	"github.com/mistweaverco/syncsh/internal/sync/bundle"
-	"github.com/mistweaverco/syncsh/internal/sync/checkpoint"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/sync/ack"
+	"github.com/dont-be-evil-company/remnix/internal/sync/bundle"
+	"github.com/dont-be-evil-company/remnix/internal/sync/checkpoint"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 type Plan struct {

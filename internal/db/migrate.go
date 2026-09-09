@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/db/migrations"
+	"github.com/dont-be-evil-company/remnix/internal/db/migrations"
 )
 
 type Migration struct {

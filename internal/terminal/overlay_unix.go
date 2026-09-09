@@ -7,7 +7,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 const (

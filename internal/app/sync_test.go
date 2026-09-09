@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/rotation"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 func TestMain(m *testing.M) {
@@ -69,10 +69,10 @@ func TestRunCallbacksExpandsEnvAndTilde(t *testing.T) {
 	t.Setenv("HOME", home)
 	marker := filepath.Join(home, "from-tilde")
 	envMarker := filepath.Join(home, "from-env")
-	t.Setenv("SYNCSH_CB_MARK", envMarker)
+	t.Setenv("REMNIX_CB_MARK", envMarker)
 	if err := runCallbacks(context.Background(), []string{
 		"touch ~/from-tilde",
-		"touch $SYNCSH_CB_MARK",
+		"touch $REMNIX_CB_MARK",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +86,8 @@ func TestRunCallbacksExpandsEnvAndTilde(t *testing.T) {
 
 func TestSyncRunsCallbacksAndReleasesLock(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +162,8 @@ func TestSyncRunsCallbacksAndReleasesLock(t *testing.T) {
 
 func TestSyncSkipsCallbacksWhenEngineFails(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)
@@ -191,8 +191,8 @@ func TestSyncSkipsCallbacksWhenEngineFails(t *testing.T) {
 
 func TestEnqueueHistoryCreatedSkipsRemote(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)
@@ -213,8 +213,8 @@ func TestEnqueueHistoryCreatedSkipsRemote(t *testing.T) {
 
 func TestTombstoneEntriesSkipsRemote(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)
@@ -247,8 +247,8 @@ func TestTombstoneEntriesSkipsRemote(t *testing.T) {
 
 func TestSyncFansOutToTwoDirectoryEndpoints(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)
@@ -297,8 +297,8 @@ func TestSyncFansOutToTwoDirectoryEndpoints(t *testing.T) {
 
 func TestSyncContinuesWhenOneEndpointFails(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := Open()
 	if err != nil {
 		t.Fatal(err)

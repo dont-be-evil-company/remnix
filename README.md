@@ -1,12 +1,12 @@
-# `syncsh`
+# `remnix`
 
 Encrypted, server-free shell history. Commands live in a local SQLite database.
 Synchronization is optional: a background daemon can copy **encrypted** event
 bundles to storage you already have (Google Drive, Dropbox, S3, a folder, ...)
-using an embedded rclone engine. There is no syncsh cloud and no account.
+using an embedded rclone engine. There is no remnix cloud and no account.
 
 Remote storage is untrusted. Encryption, key wrapping, and merge happen in
-syncsh - rclone only reads and writes objects.
+remnix - rclone only reads and writes objects.
 
 ## Install
 
@@ -26,10 +26,10 @@ encrypt** (checkpoint snapshot + event bundle) against 1 000 000 unique
 commands:
 
 ```sh
-SYNCSH_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
+REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
 ```
 
-Use `SYNCSH_SCALE_N=10000` for a shorter dry run. `-short` skips the test.
+Use `REMNIX_SCALE_N=10000` for a shorter dry run. `-short` skips the test.
 Timings print with `-v`. See [docs/architecture.md](docs/architecture.md#scale-test).
 
 ## Quick start
@@ -37,7 +37,7 @@ Timings print with `-v`. See [docs/architecture.md](docs/architecture.md#scale-t
 ### New history
 
 ```sh
-syncsh setup
+remnix setup
 ```
 
 The wizard:
@@ -52,24 +52,24 @@ Then enable the shell widget:
 
 ```sh
 # zsh - add to ~/.zshrc
-eval "$(syncsh init zsh)"
+eval "$(remnix init zsh)"
 
 # bash - add to ~/.bashrc
-eval "$(syncsh init bash)"
+eval "$(remnix init bash)"
 
 # fish - add to ~/.config/fish/config.fish
-syncsh init fish | source
+remnix init fish | source
 
 # nushell: source is parse-time, so do not generate and source in the same file.
 # env.nu (runs before config.nu is parsed):
 mkdir ~/.cache
-^syncsh init nu | save --force ~/.cache/syncsh.nu
+^remnix init nu | save --force ~/.cache/remnix.nu
 # config.nu, near the top if pty_proxy is on:
-source ~/.cache/syncsh.nu
+source ~/.cache/remnix.nu
 ```
 
-Prefer typing the recovery key interactively. Putting `SYNCSH_RECOVERY_KEY=...`
-on the command line is recorded by the shell; syncsh skips inserting those
+Prefer typing the recovery key interactively. Putting `REMNIX_RECOVERY_KEY=...`
+on the command line is recorded by the shell; remnix skips inserting those
 commands into history, but they may still appear in your original histfile.
 
 ### Join another device
@@ -78,7 +78,7 @@ Do **not** run `setup` again against the same remote. That would mint a second
 Sync Master Key and make old history unreadable.
 
 ```sh
-syncsh device add --name "$(hostname)"
+remnix device add --name "$(hostname)"
 ```
 
 The wizard configures or imports the same rclone remote, browses to the existing
@@ -86,19 +86,19 @@ folder, and **requires a valid repository** before joining. Unlock with the
 original recovery key and/or the enrolled security key:
 
 ```sh
-syncsh unlock
-eval "$(syncsh init zsh)"
+remnix unlock
+eval "$(remnix init zsh)"
 ```
 
-Copying `~/.config/syncsh/config.yaml` is still valid. Do **not** copy
+Copying `~/.config/remnix/config.yaml` is still valid. Do **not** copy
 `local.yaml`; this machine gets its own device id.
 
 ### Local-only
 
-Choose “Use syncsh locally without synchronization” in `syncsh setup`, or later:
+Choose “Use remnix locally without synchronization” in `remnix setup`, or later:
 
 ```sh
-syncsh config sync
+remnix config sync
 ```
 
 Disable sync keeps local history. Remote data is not deleted.
@@ -107,7 +107,7 @@ Disable sync keeps local history. Remote data is not deleted.
 
 On zsh, `init` installs **Ctrl+R** search and **inline suggestions** (ghost
 text). Right arrow accepts when the cursor is at the end of the line.
-Suggestions talk to a long-lived `syncsh agent` over a unix socket (or a
+Suggestions talk to a long-lived `remnix agent` over a unix socket (or a
 coproc fallback) so the shell does not spawn a process on every keystroke.
 The agent is started on first use. Configure accept keys in `config.yaml`:
 
@@ -147,22 +147,22 @@ typed, history (overlay), and completions stay distinguishable.
 
 ### Terminal proxy (overlay TUIs)
 
-On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `syncsh init`
-high in the shell rc. `init` then `exec`s `syncsh-attach`, a tiny helper that
-connects to the SyncSH daemon. The daemon owns the inner PTY, the shadow
+On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `remnix init`
+high in the shell rc. `init` then `exec`s `remnix-attach`, a tiny helper that
+connects to the remnix daemon. The daemon owns the inner PTY, the shadow
 screen, and the Ctrl+R / Ctrl+Space overlay TUIs. On zsh, Ctrl+Space lists
 compsys completions (git, gcloud, carapace, ...) instead of history; history
 stays ghost text. The shell widget asks the daemon over RPC
 (`search-interactive` / `suggest-complete-interactive`); keys and paint stay
 on the existing attach stream so a second Go process is not spawned. Set
-`SYNCSH_PTY_PROXY_LEGACY=1` to use the old per-terminal `syncsh pty-proxy`
+`REMNIX_PTY_PROXY_LEGACY=1` to use the old per-terminal `remnix pty-proxy`
 Go process for one release. Without a daemon session, the same widgets fall
-back to a local `syncsh search --interactive` TUI.
+back to a local `remnix search --interactive` TUI.
 `pty_proxy.height` is a percent of the terminal (for example `40` or `40%`).
 Omit it, or set `100%`, for a fullscreen overlay. Smaller values still keep
 at least five history rows plus the header, rule, help line, and input box.
 
-After changing hooks, re-run `eval "$(syncsh init zsh)"` (or start a new
+After changing hooks, re-run `eval "$(remnix init zsh)"` (or start a new
 shell). Installing a new binary is not enough.
 
 Ghost text stays in each shell’s line editor:
@@ -174,27 +174,27 @@ Ghost text stays in each shell’s line editor:
 | fish | not supported (no `POSTDISPLAY`) | yes | when `suggest.menu` is on |
 | nu | not supported | yes | when `suggest.menu` is on |
 
-Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(syncsh init ...)"`
+Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(remnix init ...)"`
 near the top of the rc file so only the proxy re-execs, not the rest of your
-startup. For Nushell, put `^syncsh init nu | save --force ~/.cache/syncsh.nu`
-in `env.nu` and `source ~/.cache/syncsh.nu` with a literal path at the top of
+startup. For Nushell, put `^remnix init nu | save --force ~/.cache/remnix.nu`
+in `env.nu` and `source ~/.cache/remnix.nu` with a literal path at the top of
 `config.nu`. Regenerating in `config.nu` itself cannot work: `source` is
 parse-time and will not see the file written on that same run.
 
 ## Search / suggestions
 
 ```sh
-syncsh                            # TUI (unique commands)
-syncsh search --interactive       # Ctrl+R widget
-syncsh search git
-syncsh search --explain git
-syncsh suggest --prefix 'git st' --cwd "$PWD"
-syncsh suggest --prefix 'git st' --cwd "$PWD" --list
-syncsh suggest --interactive --prefix 'git st' --cwd "$PWD"
-syncsh stats
-syncsh inspect                    # history stats TUI (`explore` alias)
-syncsh import histfile ~/.histfile
-syncsh import atuin ~/.local/share/atuin/history.db
+remnix                            # TUI (unique commands)
+remnix search --interactive       # Ctrl+R widget
+remnix search git
+remnix search --explain git
+remnix suggest --prefix 'git st' --cwd "$PWD"
+remnix suggest --prefix 'git st' --cwd "$PWD" --list
+remnix suggest --interactive --prefix 'git st' --cwd "$PWD"
+remnix stats
+remnix inspect                    # history stats TUI (`explore` alias)
+remnix import histfile ~/.histfile
+remnix import atuin ~/.local/share/atuin/history.db
 ```
 
 Ranking is a deterministic weighted score: match quality (prefix over fuzzy),
@@ -203,7 +203,7 @@ in-memory command index; SQLite remains the durable source of truth.
 
 Colors and icons are configurable under `ui` in `config.yaml` (Catppuccin-like
 defaults). `suggest.icons` still works as an alias. After editing config,
-`syncsh daemon` reloads on SIGHUP, `syncsh daemon reload`, or the next mtime poll; `syncsh init` must
+`remnix daemon` reloads on SIGHUP, `remnix daemon reload`, or the next mtime poll; `remnix init` must
 be re-sourced for shell-generated glyphs.
 
 ## Synchronization
@@ -212,18 +212,18 @@ Embedded rclone is the default transport. Existing `directory`, `rsync`, and
 `scp` configs keep working and are **not** auto-converted.
 
 ```sh
-syncsh config                 # wizard: enable/disable, transport, callbacks
-syncsh remote list
-syncsh remote add
-syncsh remote test
-syncsh remote reconnect <name>   # iCloud / OAuth expiry
-syncsh sync
-syncsh sync status
+remnix config                 # wizard: enable/disable, transport, callbacks
+remnix remote list
+remnix remote add
+remnix remote test
+remnix remote reconnect <name>   # iCloud / OAuth expiry
+remnix sync
+remnix sync status
 ```
 
-Credentials live in `$XDG_DATA_HOME/syncsh/rclone.conf` (mode 0600), next to
+Credentials live in `$XDG_DATA_HOME/remnix/rclone.conf` (mode 0600), next to
 `local.yaml`. Portable `config.yaml` only stores remote **names** and paths -
-it stays commit-safe. A leftover `rclone.conf` under `~/.config/syncsh/` is
+it stays commit-safe. A leftover `rclone.conf` under `~/.config/remnix/` is
 moved on startup.
 
 Post-sync `sync.callbacks` (for example an external `rclone sync` of a
@@ -234,38 +234,38 @@ Files:
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/syncsh/config.yaml` | Portable settings (no secrets) |
-| `~/.local/share/syncsh/rclone.conf` | rclone credentials (not for git) |
-| `~/.local/share/syncsh/local.yaml` | This machine’s device id and name |
-| `~/.local/share/syncsh/history.db` | Local history and key metadata |
-| `~/.local/share/syncsh/daemon-status.json` | Last daemon sync result |
-| `$XDG_RUNTIME_DIR/syncsh/control.sock` | Unified daemon control RPC (suggest / history / overlay / stats) |
-| `$XDG_RUNTIME_DIR/syncsh/terminal.sock` | Daemon terminal attach socket |
-| `~/.local/share/syncsh/setup-state.json` | Crash-safe setup marker |
+| `~/.config/remnix/config.yaml` | Portable settings (no secrets) |
+| `~/.local/share/remnix/rclone.conf` | rclone credentials (not for git) |
+| `~/.local/share/remnix/local.yaml` | This machine’s device id and name |
+| `~/.local/share/remnix/history.db` | Local history and key metadata |
+| `~/.local/share/remnix/daemon-status.json` | Last daemon sync result |
+| `$XDG_RUNTIME_DIR/remnix/control.sock` | Unified daemon control RPC (suggest / history / overlay / stats) |
+| `$XDG_RUNTIME_DIR/remnix/terminal.sock` | Daemon terminal attach socket |
+| `~/.local/share/remnix/setup-state.json` | Crash-safe setup marker |
 
-Override locations with `SYNCSH_CONFIG_DIR` and `SYNCSH_DATA_DIR`. Paths in
+Override locations with `REMNIX_CONFIG_DIR` and `REMNIX_DATA_DIR`. Paths in
 user configuration (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
 
 ## Keys / recovery
 
 Each device wraps a **Sync Master Key** (`SMK`) in slots: a `bech32` recovery
-key (`syncsh1...`), optional FIDO2 `hmac-secret`, optional YubiKey PIV. The
-daemon stores the unwrapped SMK in the OS keyring after `syncsh unlock`.
+key (`remnix1...`), optional FIDO2 `hmac-secret`, optional YubiKey PIV. The
+daemon stores the unwrapped SMK in the OS keyring after `remnix unlock`.
 
 ```sh
-syncsh unlock
-syncsh key status
-syncsh key fido add
-syncsh key yubikey add
-syncsh key recovery rotate
-syncsh key rotate
-syncsh key recover [generation-id]
+remnix unlock
+remnix key status
+remnix key fido add
+remnix key yubikey add
+remnix key recovery rotate
+remnix key rotate
+remnix key recover [generation-id]
 ```
 
 If `setup` was run twice on the same remote:
 
 ```sh
-syncsh key recover
+remnix key recover
 ```
 
 See [docs/cryptography.md](docs/cryptography.md).
@@ -276,25 +276,25 @@ When every active device has acknowledged a checkpoint, older event bundles
 can be deleted. A device that never acks blocks GC - retire it.
 
 ```sh
-syncsh gc --dry-run
-syncsh device retire <device-id>
-syncsh device prune <device-id>
+remnix gc --dry-run
+remnix device retire <device-id>
+remnix device prune <device-id>
 ```
 
 ## Diagnostics
 
 ```sh
-syncsh doctor
-syncsh database compact
-syncsh sync status
-syncsh daemon status
-syncsh version --verbose    # includes pinned rclone engine
+remnix doctor
+remnix database compact
+remnix sync status
+remnix daemon status
+remnix version --verbose    # includes pinned rclone engine
 ```
 
 `doctor` reports config, SQLite size and b-tree usage, keys, transport, repository probe, and partial
-setup. `syncsh database compact` checkpoints the WAL and vacuums the local history database.
+setup. `remnix database compact` checkpoints the WAL and vacuums the local history database.
 The daemon never opens a browser; auth failures back off and suggest
-`syncsh remote reconnect`. `syncsh daemon status` (and `doctor`) include human
+`remnix remote reconnect`. `remnix daemon status` (and `doctor`) include human
 durations for the last tick, for example `sync=1m6s gc=12ms`.
 
 ## Advanced
@@ -312,22 +312,22 @@ Protocol, threat model, wizard keys, and rclone internals:
 
 | Command | Purpose |
 | --- | --- |
-| `syncsh setup` | First device: identity, transport, SMK |
-| `syncsh device add` | Join an existing remote |
-| `syncsh config` / `config sync` | Reusable configuration wizard |
-| `syncsh remote ...` | List/add/edit/remove/test/reconnect/browse |
-| `syncsh unlock` | SMK into the OS keyring |
-| `syncsh sync` / `sync status` | Pull/push now; health + probe |
-| `syncsh daemon` / `install` / `reload` / `compact` / `restart` / `status` | Background sync |
-| `syncsh agent` | Local SQLite RPC for suggest / history |
-| `syncsh key ...` | Slots, rotation, recover |
-| `syncsh search` / `suggest` / `stats` / `inspect` / `import` | Local history |
-| `syncsh gc` | Compact remote objects |
-| `syncsh daemon compact` | Prune the RAM history cache and return unused memory to the OS (also every 5m) |
-| `syncsh database compact` | Checkpoint WAL and vacuum local SQLite |
-| `syncsh doctor` | Read-only diagnostics |
-| `syncsh init zsh\|bash\|fish\|nu` | Shell integration |
-| `syncsh version` | Version (`-v` includes rclone) |
+| `remnix setup` | First device: identity, transport, SMK |
+| `remnix device add` | Join an existing remote |
+| `remnix config` / `config sync` | Reusable configuration wizard |
+| `remnix remote ...` | List/add/edit/remove/test/reconnect/browse |
+| `remnix unlock` | SMK into the OS keyring |
+| `remnix sync` / `sync status` | Pull/push now; health + probe |
+| `remnix daemon` / `install` / `reload` / `compact` / `restart` / `status` | Background sync |
+| `remnix agent` | Local SQLite RPC for suggest / history |
+| `remnix key ...` | Slots, rotation, recover |
+| `remnix search` / `suggest` / `stats` / `inspect` / `import` | Local history |
+| `remnix gc` | Compact remote objects |
+| `remnix daemon compact` | Prune the RAM history cache and return unused memory to the OS (also every 5m) |
+| `remnix database compact` | Checkpoint WAL and vacuum local SQLite |
+| `remnix doctor` | Read-only diagnostics |
+| `remnix init zsh\|bash\|fish\|nu` | Shell integration |
+| `remnix version` | Version (`-v` includes rclone) |
 
-`SYNCSH_RECOVERY_KEY` is accepted by sync, unlock, device add, and key
+`REMNIX_RECOVERY_KEY` is accepted by sync, unlock, device add, and key
 commands that need to unwrap the SMK.

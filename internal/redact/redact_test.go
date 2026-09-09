@@ -7,7 +7,7 @@ import (
 )
 
 func TestString(t *testing.T) {
-	in := `token=abc123 password: hunter2 SYNCSH_RECOVERY_KEY=syncsh1abcde`
+	in := `token=abc123 password: hunter2 REMNIX_RECOVERY_KEY=remnix1abcde`
 	got := String(in)
 	if strings.Contains(got, "abc123") || strings.Contains(got, "hunter2") {
 		t.Fatalf("leaked: %s", got)

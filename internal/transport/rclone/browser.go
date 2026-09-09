@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mistweaverco/syncsh/internal/tui/picker"
+	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
 )
 
 type BrowserFS struct {
@@ -72,7 +72,7 @@ func (b *BrowserFS) Remove(ctx context.Context, p string, recursive bool) error 
 	base := path.Base(p)
 	switch base {
 	case "metadata", "keys", "events", "checkpoints", "acks":
-		return fmt.Errorf("refusing to delete syncsh repository path %s", base)
+		return fmt.Errorf("refusing to delete remnix repository path %s", base)
 	}
 	if !recursive {
 		return b.tr.fs.Rmdir(ctx, strings.Trim(p, "/"))

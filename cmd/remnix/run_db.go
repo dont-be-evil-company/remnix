@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 	"github.com/spf13/cobra"
 )
 

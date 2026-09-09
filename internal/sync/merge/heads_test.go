@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 )
 
 func TestHeadStoreSetIsMonotonic(t *testing.T) {

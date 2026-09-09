@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 var (

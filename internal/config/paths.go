@@ -6,10 +6,10 @@ import (
 	"strconv"
 )
 
-const appName = "syncsh"
+const appName = "remnix"
 
 func ConfigDir() string {
-	if d := os.Getenv("SYNCSH_CONFIG_DIR"); d != "" {
+	if d := os.Getenv("REMNIX_CONFIG_DIR"); d != "" {
 		return d
 	}
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
@@ -23,7 +23,7 @@ func ConfigDir() string {
 }
 
 func DataDir() string {
-	if d := os.Getenv("SYNCSH_DATA_DIR"); d != "" {
+	if d := os.Getenv("REMNIX_DATA_DIR"); d != "" {
 		return d
 	}
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
@@ -41,7 +41,7 @@ func ConfigPath() string {
 }
 
 // RcloneConfigPath is the machine-local rclone credential file. It lives next
-// to local.yaml in the data directory so ~/.config/syncsh/config.yaml can be
+// to local.yaml in the data directory so ~/.config/remnix/config.yaml can be
 // committed without tokens.
 func RcloneConfigPath() string {
 	return filepath.Join(DataDir(), "rclone.conf")
@@ -115,7 +115,7 @@ func DatabasePath() string {
 }
 
 func LockPath() string {
-	return filepath.Join(DataDir(), "syncsh.lock")
+	return filepath.Join(DataDir(), "remnix.lock")
 }
 
 func DaemonStatusPath() string {
@@ -125,7 +125,7 @@ func DaemonStatusPath() string {
 // RuntimeDir is where the shell-agent unix socket lives. Prefer the session
 // runtime dir so the socket disappears on logout.
 func RuntimeDir() string {
-	if d := os.Getenv("SYNCSH_RUNTIME_DIR"); d != "" {
+	if d := os.Getenv("REMNIX_RUNTIME_DIR"); d != "" {
 		return d
 	}
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {

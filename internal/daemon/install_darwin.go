@@ -14,7 +14,7 @@ func plistPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", "sh.syncsh.daemon.plist"), nil
+	return filepath.Join(home, "Library", "LaunchAgents", "sh.remnix.daemon.plist"), nil
 }
 
 func install(bin string) error {
@@ -30,7 +30,7 @@ func install(bin string) error {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>sh.syncsh.daemon</string>
+  <string>sh.remnix.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>%s</string>
@@ -73,7 +73,7 @@ func query() (InstallState, error) {
 		st.Installed = true
 		st.Detail = "LaunchAgent installed"
 	}
-	out, err := exec.Command("launchctl", "list", "sh.syncsh.daemon").Output()
+	out, err := exec.Command("launchctl", "list", "sh.remnix.daemon").Output()
 	if err == nil && len(out) > 0 {
 		st.Running = true
 		st.Detail = "LaunchAgent loaded"

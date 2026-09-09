@@ -3,8 +3,8 @@ package generations
 import (
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
 )
 
 func TestManifestSignVerify(t *testing.T) {

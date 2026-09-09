@@ -331,10 +331,10 @@ func (m suggestModel) View() tea.View {
 		h = max(1, m.overlayH)
 	}
 
-	header := styleTitle.Render("syncsh") + "  " + styleMuted.Render("suggestions")
+	header := styleTitle.Render("remnix") + "  " + styleMuted.Render("suggestions")
 	if m.loading {
 		frame := suggestSpinFrames[m.spinFrame%len(suggestSpinFrames)]
-		header = styleTitle.Render("syncsh") + "  " + styleMuted.Render("suggestions") + "  " + styleAccent.Render(frame)
+		header = styleTitle.Render("remnix") + "  " + styleMuted.Render("suggestions") + "  " + styleAccent.Render(frame)
 	}
 	help := styleHelpKey.Render("enter") + styleHelp.Render(" insert  ") +
 		styleHelpKey.Render("ctrl+space") + styleHelp.Render(" complete  ") +

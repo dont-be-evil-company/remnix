@@ -9,20 +9,20 @@ func bash(bin string, opts Options) string {
 	q := zshQuote(bin)
 	attach := opts.AttachBin
 	if attach == "" {
-		attach = "syncsh-attach"
+		attach = "remnix-attach"
 	}
 	aq := zshQuote(attach)
 	extra := ""
 	if opts.SuggestMenu {
 		extra += `
-__syncsh_suggest_menu() {
+__remnix_suggest_menu() {
   local selected
-  if ! __syncsh_overlay suggest-interactive "$READLINE_LINE"; then
-    __syncsh_widget_run suggest --interactive --prefix "$READLINE_LINE" --cwd "$PWD" || return
+  if ! __remnix_overlay suggest-interactive "$READLINE_LINE"; then
+    __remnix_widget_run suggest --interactive --prefix "$READLINE_LINE" --cwd "$PWD" || return
   fi
   selected=$REPLY
-  if [[ "$selected" == __syncsh_accept__:* ]]; then
-    READLINE_LINE="${selected#__syncsh_accept__:}"
+  if [[ "$selected" == __remnix_accept__:* ]]; then
+    READLINE_LINE="${selected#__remnix_accept__:}"
     READLINE_POINT=${#READLINE_LINE}
     bind '"\C-x\C-n": accept-line'
   elif [[ -n "$selected" ]]; then
@@ -33,116 +33,116 @@ __syncsh_suggest_menu() {
     bind '"\C-x\C-n": ""'
   fi
 }
-bind -x '"\C-x\C-s": __syncsh_suggest_menu'
+bind -x '"\C-x\C-s": __remnix_suggest_menu'
 bind '"\C-@": "\C-x\C-s\C-x\C-n"'
 `
 	}
 	if opts.SuggestEnabled {
 		extra += `
 if [[ -n ${BLE_VERSION-} ]] && declare -f bleopt >/dev/null 2>&1; then
-  function ble/complete/auto-complete/source:syncsh {
+  function ble/complete/auto-complete/source:remnix {
     local prefix=${_ble_edit_str-} suggestion
     [[ -n $prefix ]] || return 1
-    if __syncsh_rpc suggest "$prefix" "$PWD"; then
+    if __remnix_rpc suggest "$prefix" "$PWD"; then
       suggestion=$REPLY
     else
-      suggestion=$("$__syncsh_bin" suggest --prefix "$prefix" --cwd "$PWD" 2>/dev/null) || return 1
+      suggestion=$("$__remnix_bin" suggest --prefix "$prefix" --cwd "$PWD" 2>/dev/null) || return 1
     fi
     [[ $suggestion == "$prefix"* && $suggestion != "$prefix" ]] || return 1
     ble/complete/auto-complete/enter-source "$suggestion" 2>/dev/null || return 1
   }
-  bleopt complete_auto_complete_source=syncsh:history 2>/dev/null || true
+  bleopt complete_auto_complete_source=remnix:history 2>/dev/null || true
 fi
 `
 	}
-	return fmt.Sprintf(`# syncsh bash integration
+	return fmt.Sprintf(`# remnix bash integration
 # Add to ~/.bashrc: eval "$(%s init bash)"
 
-__syncsh_bin=%s
-__syncsh_attach=%s
-__syncsh_session="${__syncsh_session:-$$-$(date +%%s)}"
+__remnix_bin=%s
+__remnix_attach=%s
+__remnix_session="${__remnix_session:-$$-$(date +%%s)}"
 
-__syncsh_widget_run() {
+__remnix_widget_run() {
   local st
-  REPLY=$("$__syncsh_bin" "$@" 3>&1 1>&2 2>&3 3>&-)
+  REPLY=$("$__remnix_bin" "$@" 3>&1 1>&2 2>&3 3>&-)
   st=$?
   return $st
 }
 
-__syncsh_overlay() {
+__remnix_overlay() {
   local op=$1 query=$2
-  [[ -n ${SYNCSH_SESSION_ID:-} ]] || return 1
-  if __syncsh_rpc "$op" "$query" "$PWD" "$SYNCSH_SESSION_ID"; then
+  [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  if __remnix_rpc "$op" "$query" "$PWD" "$REMNIX_SESSION_ID"; then
     return 0
   fi
-  if [[ -n ${__syncsh_attach:-} ]]; then
-    REPLY=$("$__syncsh_attach" --rpc "$op" "$query" "$PWD" "$SYNCSH_SESSION_ID" 2>/dev/null) || return 1
+  if [[ -n ${__remnix_attach:-} ]]; then
+    REPLY=$("$__remnix_attach" --rpc "$op" "$query" "$PWD" "$REMNIX_SESSION_ID" 2>/dev/null) || return 1
     return 0
   fi
   return 1
 }
 
-__syncsh_agent_reset() {
-  unset __syncsh_agent __syncsh_agent_PID __syncsh_fd
+__remnix_agent_reset() {
+  unset __remnix_agent __remnix_agent_PID __remnix_fd
 }
 
-__syncsh_agent_ensure() {
-  if [[ -n ${SYNCSH_CONTROL_FD:-} ]]; then
-    __syncsh_fd=$SYNCSH_CONTROL_FD
+__remnix_agent_ensure() {
+  if [[ -n ${REMNIX_CONTROL_FD:-} ]]; then
+    __remnix_fd=$REMNIX_CONTROL_FD
     return 0
   fi
-  if [[ -n ${__syncsh_fd:-} ]]; then
+  if [[ -n ${__remnix_fd:-} ]]; then
     return 0
   fi
-  "$__syncsh_bin" daemon >/dev/null 2>&1 &
+  "$__remnix_bin" daemon >/dev/null 2>&1 &
   return 0
 }
 
-__syncsh_rpc() {
+__remnix_rpc() {
   local op=$1
   shift
-  if [[ -n ${SYNCSH_CONTROL_FD:-} ]]; then
-    printf '%%s\0' "$op" "$@" >&"${SYNCSH_CONTROL_FD}" || return 1
+  if [[ -n ${REMNIX_CONTROL_FD:-} ]]; then
+    printf '%%s\0' "$op" "$@" >&"${REMNIX_CONTROL_FD}" || return 1
     local st
-    IFS= read -r -d $'\0' st <&"${SYNCSH_CONTROL_FD}" || return 1
-    IFS= read -r -d $'\0' REPLY <&"${SYNCSH_CONTROL_FD}" || return 1
+    IFS= read -r -d $'\0' st <&"${REMNIX_CONTROL_FD}" || return 1
+    IFS= read -r -d $'\0' REPLY <&"${REMNIX_CONTROL_FD}" || return 1
     [[ $st == ok ]]
     return
   fi
   return 1
 }
 
-__syncsh_preexec() {
+__remnix_preexec() {
   if [[ -n "${COMP_LINE:-}" ]]; then
     return
   fi
   local cmd
   cmd="$(HISTTIMEFORMAT= history 1 2>/dev/null | sed 's/^ *[0-9]* *//')"
-  [[ -z "$cmd" || "$cmd" == "${__syncsh_last_cmd:-}" ]] && return
-  __syncsh_last_cmd="$cmd"
-  if __syncsh_rpc start "$cmd" "$PWD" "$__syncsh_session" bash; then
-    __syncsh_id="$REPLY"
+  [[ -z "$cmd" || "$cmd" == "${__remnix_last_cmd:-}" ]] && return
+  __remnix_last_cmd="$cmd"
+  if __remnix_rpc start "$cmd" "$PWD" "$__remnix_session" bash; then
+    __remnix_id="$REPLY"
     return
   fi
-  __syncsh_id="$("$__syncsh_bin" history start --command "$cmd" --cwd "$PWD" --session "$__syncsh_session" --shell bash 2>/dev/null)" || true
+  __remnix_id="$("$__remnix_bin" history start --command "$cmd" --cwd "$PWD" --session "$__remnix_session" --shell bash 2>/dev/null)" || true
 }
 
-__syncsh_precmd() {
+__remnix_precmd() {
   local code=$?
-  if [[ -n "${__syncsh_id:-}" ]]; then
-    __syncsh_rpc end "$__syncsh_id" "$code" || "$__syncsh_bin" history end --id "$__syncsh_id" --exit "$code" >/dev/null 2>&1 || true
-    unset __syncsh_id
+  if [[ -n "${__remnix_id:-}" ]]; then
+    __remnix_rpc end "$__remnix_id" "$code" || "$__remnix_bin" history end --id "$__remnix_id" --exit "$code" >/dev/null 2>&1 || true
+    unset __remnix_id
   fi
 }
 
-__syncsh_search() {
+__remnix_search() {
   local selected
-  if ! __syncsh_overlay search-interactive "$READLINE_LINE"; then
-    __syncsh_widget_run search --interactive --query "$READLINE_LINE" --cwd "$PWD" || return
+  if ! __remnix_overlay search-interactive "$READLINE_LINE"; then
+    __remnix_widget_run search --interactive --query "$READLINE_LINE" --cwd "$PWD" || return
   fi
   selected=$REPLY
-  if [[ "$selected" == __syncsh_accept__:* ]]; then
-    READLINE_LINE="${selected#__syncsh_accept__:}"
+  if [[ "$selected" == __remnix_accept__:* ]]; then
+    READLINE_LINE="${selected#__remnix_accept__:}"
     READLINE_POINT=${#READLINE_LINE}
     bind '"\C-x\C-n": accept-line'
   elif [[ -n "$selected" ]]; then
@@ -154,51 +154,51 @@ __syncsh_search() {
   fi
 }
 
-trap '__syncsh_preexec' DEBUG
-if [[ "${PROMPT_COMMAND:-}" != *__syncsh_precmd* ]]; then
-  PROMPT_COMMAND="__syncsh_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+trap '__remnix_preexec' DEBUG
+if [[ "${PROMPT_COMMAND:-}" != *__remnix_precmd* ]]; then
+  PROMPT_COMMAND="__remnix_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
 fi
 bind '"\C-x\C-n": ""'
-bind -x '"\C-x\C-r": __syncsh_search'
+bind -x '"\C-x\C-r": __remnix_search'
 bind '"\C-r": "\C-x\C-r\C-x\C-n"'
-__syncsh_agent_ensure >/dev/null 2>&1 || true
+__remnix_agent_ensure >/dev/null 2>&1 || true
 %s`, bin, q, aq, extra)
 }
 
 func fish(bin string, opts Options) string {
 	attach := opts.AttachBin
 	if attach == "" {
-		attach = "syncsh-attach"
+		attach = "remnix-attach"
 	}
 	extra := ""
 	if opts.SuggestMenu {
 		extra = `
-function syncsh-suggest-menu
+function remnix-suggest-menu
     set -l query (commandline --current-buffer)
     commandline --current-buffer --replace -- ''
-    if not __syncsh_overlay_rpc suggest-interactive "$query" "$PWD"
-        __syncsh_widget_run suggest --interactive --prefix "$query" --cwd "$PWD"
+    if not __remnix_overlay_rpc suggest-interactive "$query" "$PWD"
+        __remnix_widget_run suggest --interactive --prefix "$query" --cwd "$PWD"
         or begin
             commandline --current-buffer --replace -- "$query"
             commandline -f repaint
             return
         end
     end
-    __syncsh_apply_selected "$query"
+    __remnix_apply_selected "$query"
 end
-__syncsh_bind ctrl-space syncsh-suggest-menu
+__remnix_bind ctrl-space remnix-suggest-menu
 `
 	}
-	return fmt.Sprintf(`# syncsh fish integration
+	return fmt.Sprintf(`# remnix fish integration
 # Add to ~/.config/fish/config.fish: %s init fish | source
 
-set -g __syncsh_bin %s
-set -g __syncsh_attach %s
-if not set -q __syncsh_session
-    set -g __syncsh_session "$fish_pid"-(date +%%s)
+set -g __remnix_bin %s
+set -g __remnix_attach %s
+if not set -q __remnix_session
+    set -g __remnix_session "$fish_pid"-(date +%%s)
 end
 
-function __syncsh_bind
+function __remnix_bind
     bind $argv
     bind -M insert $argv
 end
@@ -208,25 +208,25 @@ end
 # foreground command, not a (...) capture, and attach /dev/tty: fish bind
 # functions capture stdout, which would skip the overlay and force alt-screen.
 # With pty-proxy, /dev/tty is the inner slave (Ctty).
-function __syncsh_widget_run
+function __remnix_widget_run
     set -l tmp (mktemp)
     or return 1
-    $__syncsh_bin $argv --result-file $tmp </dev/tty >/dev/tty
+    $__remnix_bin $argv --result-file $tmp </dev/tty >/dev/tty
     set -l st $status
-    set -g __syncsh_widget_out ''
+    set -g __remnix_widget_out ''
     if test -f $tmp
-        set -g __syncsh_widget_out (string collect -- < $tmp | string trim)
+        set -g __remnix_widget_out (string collect -- < $tmp | string trim)
         command rm -f -- $tmp
     end
     return $st
 end
 
-function __syncsh_apply_selected
+function __remnix_apply_selected
     set -l fallback $argv[1]
-    set -l selected (string collect -- $__syncsh_widget_out | string trim)
+    set -l selected (string collect -- $__remnix_widget_out | string trim)
     set -l run 0
-    if string match -q '__syncsh_accept__:*' -- $selected
-        set selected (string replace -r '^__syncsh_accept__:' '' -- $selected)
+    if string match -q '__remnix_accept__:*' -- $selected
+        set selected (string replace -r '^__remnix_accept__:' '' -- $selected)
         set run 1
     end
     if test -z "$selected"
@@ -244,77 +244,77 @@ function __syncsh_apply_selected
     end
 end
 
-function __syncsh_agent_ensure
-    $__syncsh_bin daemon >/dev/null 2>&1 &
+function __remnix_agent_ensure
+    $__remnix_bin daemon >/dev/null 2>&1 &
 end
 
-function __syncsh_rpc
-    if not set -q SYNCSH_CONTROL_FD
+function __remnix_rpc
+    if not set -q REMNIX_CONTROL_FD
         return 1
     end
-    printf '%%s\0' $argv >&$SYNCSH_CONTROL_FD
+    printf '%%s\0' $argv >&$REMNIX_CONTROL_FD
     or return 1
     set -l st
-    read --null st <&$SYNCSH_CONTROL_FD
+    read --null st <&$REMNIX_CONTROL_FD
     or return 1
-    read --null -g REPLY <&$SYNCSH_CONTROL_FD
+    read --null -g REPLY <&$REMNIX_CONTROL_FD
     or return 1
     test "$st" = ok
 end
 
-function __syncsh_overlay_rpc
+function __remnix_overlay_rpc
     set -l op $argv[1]
     set -l query $argv[2]
     set -l cwd $argv[3]
-    if not set -q SYNCSH_SESSION_ID
+    if not set -q REMNIX_SESSION_ID
         return 1
     end
-    if __syncsh_rpc $op $query $cwd $SYNCSH_SESSION_ID
-        set -g __syncsh_widget_out $REPLY
+    if __remnix_rpc $op $query $cwd $REMNIX_SESSION_ID
+        set -g __remnix_widget_out $REPLY
         return 0
     end
     set -l tmp (mktemp)
     or return 1
-    $__syncsh_attach --rpc $op $query $cwd $SYNCSH_SESSION_ID >$tmp 2>/dev/null
+    $__remnix_attach --rpc $op $query $cwd $REMNIX_SESSION_ID >$tmp 2>/dev/null
     set -l st $status
-    set -g __syncsh_widget_out (string collect -- < $tmp | string trim)
+    set -g __remnix_widget_out (string collect -- < $tmp | string trim)
     command rm -f -- $tmp
     test $st -eq 0
 end
 
-function __syncsh_preexec --on-event fish_preexec
-    if __syncsh_rpc start "$argv[1]" "$PWD" "$__syncsh_session" fish
-        set -g __syncsh_id $REPLY
+function __remnix_preexec --on-event fish_preexec
+    if __remnix_rpc start "$argv[1]" "$PWD" "$__remnix_session" fish
+        set -g __remnix_id $REPLY
         return
     end
-    set -g __syncsh_id ($__syncsh_attach --rpc start "$argv[1]" "$PWD" "$__syncsh_session" fish 2>/dev/null)
-    or set -g __syncsh_id ($__syncsh_bin history start --command "$argv[1]" --cwd "$PWD" --session "$__syncsh_session" --shell fish 2>/dev/null)
+    set -g __remnix_id ($__remnix_attach --rpc start "$argv[1]" "$PWD" "$__remnix_session" fish 2>/dev/null)
+    or set -g __remnix_id ($__remnix_bin history start --command "$argv[1]" --cwd "$PWD" --session "$__remnix_session" --shell fish 2>/dev/null)
 end
 
-function __syncsh_postexec --on-event fish_postexec
+function __remnix_postexec --on-event fish_postexec
     set -l code $status
-    if set -q __syncsh_id
-        $__syncsh_attach --rpc end "$__syncsh_id" "$code" >/dev/null 2>&1
-        or $__syncsh_bin history end --id "$__syncsh_id" --exit $code >/dev/null 2>&1
-        set -e __syncsh_id
+    if set -q __remnix_id
+        $__remnix_attach --rpc end "$__remnix_id" "$code" >/dev/null 2>&1
+        or $__remnix_bin history end --id "$__remnix_id" --exit $code >/dev/null 2>&1
+        set -e __remnix_id
     end
 end
 
-function syncsh-search
+function remnix-search
     set -l query (commandline --current-buffer)
     commandline --current-buffer --replace -- ''
-    if not __syncsh_overlay_rpc search-interactive "$query" "$PWD"
-        __syncsh_widget_run search --interactive --query "$query" --cwd "$PWD"
+    if not __remnix_overlay_rpc search-interactive "$query" "$PWD"
+        __remnix_widget_run search --interactive --query "$query" --cwd "$PWD"
         or begin
             commandline --current-buffer --replace -- "$query"
             commandline -f repaint
             return
         end
     end
-    __syncsh_apply_selected "$query"
+    __remnix_apply_selected "$query"
 end
-__syncsh_bind \cr syncsh-search
-__syncsh_agent_ensure
+__remnix_bind \cr remnix-search
+__remnix_agent_ensure
 %s`, bin, zshQuote(bin), zshQuote(attach), extra)
 }
 
@@ -323,55 +323,55 @@ func nu(bin string, opts Options) string {
 	q = strings.ReplaceAll(q, `"`, `\"`)
 	attach := opts.AttachBin
 	if attach == "" {
-		attach = "syncsh-attach"
+		attach = "remnix-attach"
 	}
 	aq := strings.ReplaceAll(attach, `\`, `\\`)
 	aq = strings.ReplaceAll(aq, `"`, `\"`)
 	menu := ""
 	if opts.SuggestMenu {
 		menu = `
-def --env syncsh-suggest-menu [] {
+def --env remnix-suggest-menu [] {
   let query = (commandline)
   commandline edit --replace ""
-  let selected = (__syncsh_overlay_or_tui "suggest-interactive" $query)
-  if ($selected | str starts-with "__syncsh_err__") {
+  let selected = (__remnix_overlay_or_tui "suggest-interactive" $query)
+  if ($selected | str starts-with "__remnix_err__") {
     commandline edit --replace $query
     return
   }
-  if ($selected | str starts-with "__syncsh_accept__:") {
-    commandline edit --replace --accept ($selected | str replace -r '^__syncsh_accept__:' '')
+  if ($selected | str starts-with "__remnix_accept__:") {
+    commandline edit --replace --accept ($selected | str replace -r '^__remnix_accept__:' '')
   } else if not ($selected | is-empty) {
     commandline edit --replace $selected
   } else {
     commandline edit --replace $query
   }
 }
-__syncsh_rebind {
-  name: syncsh_suggest_menu
+__remnix_rebind {
+  name: remnix_suggest_menu
   modifier: control
   keycode: space
   mode: [emacs, vi_insert, vi_normal]
-  event: { send: executehostcommand, cmd: "syncsh-suggest-menu" }
+  event: { send: executehostcommand, cmd: "remnix-suggest-menu" }
 }
 `
 	}
-	return fmt.Sprintf(`# syncsh nushell integration
+	return fmt.Sprintf(`# remnix nushell integration
 # source is parse-time: it cannot see a file written later in the same script.
 # Generate from env.nu (evaluated before config.nu is parsed):
 #   mkdir ~/.cache
-#   ^syncsh init nu | save --force ~/.cache/syncsh.nu
+#   ^remnix init nu | save --force ~/.cache/remnix.nu
 # Then this literal line at the top of config.nu (required if pty_proxy is on):
-#   source ~/.cache/syncsh.nu
+#   source ~/.cache/remnix.nu
 
-let __syncsh_bin = "%[1]s"
-let __syncsh_attach = "%[3]s"
-$env.__syncsh_session = ($env.__syncsh_session? | default $"($nu.pid)-(date now | format date '%%s')")
+let __remnix_bin = "%[1]s"
+let __remnix_attach = "%[3]s"
+$env.__remnix_session = ($env.__remnix_session? | default $"($nu.pid)-(date now | format date '%%s')")
 
-do { ^$"($__syncsh_bin)" daemon } | ignore
+do { ^$"($__remnix_bin)" daemon } | ignore
 
 # Replace an existing modifier+keycode binding (Nushell's default Ctrl+R is
 # history_menu; appending a second Ctrl+R leaves that grid in place).
-def --env __syncsh_rebind [binding: record] {
+def --env __remnix_rebind [binding: record] {
   $env.config = ($env.config | default {} | upsert keybindings {|c|
     let rest = (
       $c.keybindings? | default [] | where {|k|
@@ -385,9 +385,9 @@ def --env __syncsh_rebind [binding: record] {
   })
 }
 
-def __syncsh_overlay_or_tui [op: string, query: string] {
-  if ($env.SYNCSH_SESSION_ID? | default "") != "" {
-    let rpc = (do { ^$"($__syncsh_attach)" --rpc $op $query $env.PWD $env.SYNCSH_SESSION_ID } | complete)
+def __remnix_overlay_or_tui [op: string, query: string] {
+  if ($env.REMNIX_SESSION_ID? | default "") != "" {
+    let rpc = (do { ^$"($__remnix_attach)" --rpc $op $query $env.PWD $env.REMNIX_SESSION_ID } | complete)
     if $rpc.exit_code == 0 {
       return ($rpc.stdout | str trim)
     }
@@ -395,15 +395,15 @@ def __syncsh_overlay_or_tui [op: string, query: string] {
   let tmp = (^mktemp | str trim)
   let ran = (
     if $op == "suggest-interactive" {
-      do { ^$"($__syncsh_bin)" suggest --interactive --prefix $query --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty } | complete
+      do { ^$"($__remnix_bin)" suggest --interactive --prefix $query --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty } | complete
     } else {
-      do { ^$"($__syncsh_bin)" search --interactive --query $query --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty } | complete
+      do { ^$"($__remnix_bin)" search --interactive --query $query --cwd $env.PWD --result-file $tmp o> /dev/tty e> /dev/tty } | complete
     }
   )
   let selected = (try { open --raw $tmp } catch { "" } | str trim)
   try { rm $tmp }
   if $ran.exit_code != 0 {
-    return "__syncsh_err__"
+    return "__remnix_err__"
   }
   $selected
 }
@@ -415,42 +415,42 @@ $env.config = ($env.config | default {} | upsert hooks {|c|
       ($h.pre_execution? | default []) | append {||
         let cmd = (commandline)
         if not ($cmd | is-empty) {
-          if ($env.SYNCSH_CONTROL_FD? | default "") != "" {
-            $env.__syncsh_id = (^$"($__syncsh_attach)" --rpc start $cmd $env.PWD $env.__syncsh_session nu | str trim)
+          if ($env.REMNIX_CONTROL_FD? | default "") != "" {
+            $env.__remnix_id = (^$"($__remnix_attach)" --rpc start $cmd $env.PWD $env.__remnix_session nu | str trim)
           } else {
-            $env.__syncsh_id = (^$"($__syncsh_attach)" --rpc start $cmd $env.PWD $env.__syncsh_session nu | str trim)
+            $env.__remnix_id = (^$"($__remnix_attach)" --rpc start $cmd $env.PWD $env.__remnix_session nu | str trim)
           }
         }
       }
     }
   | upsert pre_prompt {|h|
       ($h.pre_prompt? | default []) | append {||
-        if ($env.__syncsh_id? | default "") != "" {
-          ^$"($__syncsh_attach)" --rpc end $env.__syncsh_id $env.LAST_EXIT_CODE
-          hide-env -i __syncsh_id
+        if ($env.__remnix_id? | default "") != "" {
+          ^$"($__remnix_attach)" --rpc end $env.__remnix_id $env.LAST_EXIT_CODE
+          hide-env -i __remnix_id
         }
       }
     }
 })
 
-__syncsh_rebind {
-  name: syncsh_search
+__remnix_rebind {
+  name: remnix_search
   modifier: control
   keycode: char_r
   mode: [emacs, vi_insert, vi_normal]
-  event: { send: executehostcommand, cmd: "syncsh-search" }
+  event: { send: executehostcommand, cmd: "remnix-search" }
 }
 
-def syncsh-search [] {
+def remnix-search [] {
   let query = (commandline)
   commandline edit --replace ""
-  let selected = (__syncsh_overlay_or_tui "search-interactive" $query)
-  if ($selected | str starts-with "__syncsh_err__") {
+  let selected = (__remnix_overlay_or_tui "search-interactive" $query)
+  if ($selected | str starts-with "__remnix_err__") {
     commandline edit --replace $query
     return
   }
-  if ($selected | str starts-with "__syncsh_accept__:") {
-    commandline edit --replace --accept ($selected | str replace -r '^__syncsh_accept__:' '')
+  if ($selected | str starts-with "__remnix_accept__:") {
+    commandline edit --replace --accept ($selected | str replace -r '^__remnix_accept__:' '')
   } else if not ($selected | is-empty) {
     commandline edit --replace $selected
   } else {

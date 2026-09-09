@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func (s *Server) watchSignals(ctx context.Context) {
@@ -29,9 +29,9 @@ func (s *Server) watchSignals(ctx context.Context) {
 			return
 		case <-ch:
 			if err := s.ReloadConfig(); err != nil {
-				slog.Warn("syncsh daemon: reload config", "err", err)
+				slog.Warn("remnix daemon: reload config", "err", err)
 			} else {
-				slog.Info("syncsh daemon: config reloaded")
+				slog.Info("remnix daemon: config reloaded")
 			}
 		case <-tick.C:
 			st, err := os.Stat(config.ConfigPath())
@@ -41,7 +41,7 @@ func (s *Server) watchSignals(ctx context.Context) {
 			if st.ModTime().After(mtime) {
 				mtime = st.ModTime()
 				if err := s.ReloadConfig(); err != nil {
-					slog.Warn("syncsh daemon: reload config", "err", err)
+					slog.Warn("remnix daemon: reload config", "err", err)
 				}
 			}
 		}

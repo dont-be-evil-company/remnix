@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
 )
 
 func TestBootstrapAndCredentialRotation(t *testing.T) {

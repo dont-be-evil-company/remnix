@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
 )
 
 const (

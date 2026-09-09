@@ -14,10 +14,10 @@ tasks:
       - make build
     silent: true
   install:
-    desc: Installs the syncsh to $HOME/.local/bin/syncsh
+    desc: Installs the remnix to $HOME/.local/bin/remnix
     cmds:
-      - mv ./bin/syncsh $HOME/.local/bin/syncsh
-      - mv ./bin/syncsh-attach $HOME/.local/bin/syncsh-attach
+      - mv ./bin/remnix $HOME/.local/bin/remnix
+      - mv ./bin/remnix-attach $HOME/.local/bin/remnix-attach
     silent: true
   fmt:
     desc: Formats all files

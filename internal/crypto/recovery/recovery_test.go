@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
 )
 
 func TestRecoveryWrapIndependent(t *testing.T) {
@@ -20,7 +20,7 @@ func TestRecoveryWrapIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enc[:6] != "syncsh" {
+	if enc[:6] != "remnix" {
 		t.Fatalf("encoding %s", enc)
 	}
 	got, err := Decode(enc)

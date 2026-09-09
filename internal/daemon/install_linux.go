@@ -23,12 +23,12 @@ func unitPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "syncsh-daemon.service"), nil
+	return filepath.Join(dir, "remnix-daemon.service"), nil
 }
 
 func unitContents(bin string) string {
 	return fmt.Sprintf(`[Unit]
-Description=syncsh core daemon
+Description=remnix core daemon
 After=default.target
 
 [Service]
@@ -45,10 +45,10 @@ WantedBy=default.target
 
 func socketUnitContents() string {
 	return `[Unit]
-Description=syncsh daemon control socket
+Description=remnix daemon control socket
 
 [Socket]
-ListenStream=%t/syncsh/control.sock
+ListenStream=%t/remnix/control.sock
 SocketMode=0600
 DirectoryMode=0700
 
@@ -72,18 +72,18 @@ func install(bin string) error {
 	if err := os.WriteFile(path, []byte(unitContents(bin)), 0o644); err != nil {
 		return err
 	}
-	sockPath := filepath.Join(dir, "syncsh-daemon.socket")
+	sockPath := filepath.Join(dir, "remnix-daemon.socket")
 	_ = os.WriteFile(sockPath, []byte(socketUnitContents()), 0o644)
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-	_ = exec.Command("systemctl", "--user", "enable", "--now", "syncsh-daemon.socket").Run()
-	if err := exec.Command("systemctl", "--user", "enable", "--now", "syncsh-daemon.service").Run(); err != nil {
-		return fmt.Errorf("wrote %s but could not enable user unit (start it with: systemctl --user enable --now syncsh-daemon.service): %w", path, err)
+	_ = exec.Command("systemctl", "--user", "enable", "--now", "remnix-daemon.socket").Run()
+	if err := exec.Command("systemctl", "--user", "enable", "--now", "remnix-daemon.service").Run(); err != nil {
+		return fmt.Errorf("wrote %s but could not enable user unit (start it with: systemctl --user enable --now remnix-daemon.service): %w", path, err)
 	}
 	return nil
 }
 
 func uninstall() error {
-	_ = exec.Command("systemctl", "--user", "disable", "--now", "syncsh-daemon.service").Run()
+	_ = exec.Command("systemctl", "--user", "disable", "--now", "remnix-daemon.service").Run()
 	path, err := unitPath()
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func query() (InstallState, error) {
 	if _, err := os.Stat(path); err == nil {
 		st.Installed = true
 	}
-	out, err := exec.Command("systemctl", "--user", "is-active", "syncsh-daemon.service").Output()
+	out, err := exec.Command("systemctl", "--user", "is-active", "remnix-daemon.service").Output()
 	if err == nil && strings.TrimSpace(string(out)) == "active" {
 		st.Running = true
 		st.Detail = "systemd user unit active"

@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/protocol"
-	"github.com/mistweaverco/syncsh/internal/search"
-	"github.com/mistweaverco/syncsh/internal/terminal"
-	"github.com/mistweaverco/syncsh/internal/version"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/terminal"
+	"github.com/dont-be-evil-company/remnix/internal/version"
 )
 
 type Server struct {
@@ -74,11 +74,11 @@ func (s *Server) rebuildCache() {
 		return
 	}
 	if err := s.history.Rebuild(context.Background()); err != nil {
-		slog.Error("syncsh daemon: cache rebuild", "err", err)
+		slog.Error("remnix daemon: cache rebuild", "err", err)
 		return
 	}
 	st := s.history.Cache().Stats()
-	slog.Info("syncsh daemon: cache ready",
+	slog.Info("remnix daemon: cache ready",
 		"rows", st.RowsScanned,
 		"commands", st.UniqueCommands,
 		"dur", st.BuildDuration,
@@ -175,7 +175,7 @@ func (s *Server) runPeriodicCompact() {
 	}
 	st := s.CompactCache()
 	if st.CacheInterned < internedBefore || (rssBefore > 0 && st.RSSBytes > 0 && st.RSSBytes < rssBefore) {
-		slog.Info("syncsh daemon: cache compact",
+		slog.Info("remnix daemon: cache compact",
 			"interned", st.CacheInterned,
 			"heap", st.HeapAlloc,
 			"rss", st.RSSBytes,

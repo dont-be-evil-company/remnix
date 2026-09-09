@@ -17,7 +17,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 	"golang.org/x/term"
 )
 
@@ -34,7 +34,7 @@ func Run(shellPath string) error {
 	in := os.Stdin
 	out := os.Stdout
 	if !term.IsTerminal(int(in.Fd())) || !term.IsTerminal(int(out.Fd())) {
-		// nu config.nu and `syncsh init fish | source` often exec us with a
+		// nu config.nu and `remnix init fish | source` often exec us with a
 		// pipe on stdin/stdout. /dev/tty is still the outer terminal.
 		tin, tout, err := openOuterTTY()
 		if err != nil {
@@ -381,13 +381,13 @@ func encodeRow(emu *vt.Emulator, y, w int) string {
 func serveSnapshots(scr *shadow) string {
 	path := config.PtyProxySocketPath()
 	if err := os.MkdirAll(config.RuntimeDir(), 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "syncsh pty-proxy: socket dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "remnix pty-proxy: socket dir: %v\n", err)
 		return ""
 	}
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "syncsh pty-proxy: bind %s: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "remnix pty-proxy: bind %s: %v\n", path, err)
 		return ""
 	}
 	_ = os.Chmod(path, 0o600)

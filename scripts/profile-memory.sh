@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Record SyncSH RSS/PSS for 1, 5, 10, and 20 idle attached shells.
+# Record remnix RSS/PSS for 1, 5, 10, and 20 idle attached shells.
 # Usage:
 #   scripts/profile-memory.sh [legacy|daemon] [counts...]
-#   SYNCSH_BIN=./bin/syncsh scripts/profile-memory.sh
+#   REMNIX_BIN=./bin/remnix scripts/profile-memory.sh
 #
 # legacy  - current architecture: agent + N pty-proxy processes (default)
-# daemon  - unified daemon + N syncsh-attach helpers
+# daemon  - unified daemon + N remnix-attach helpers
 
 set -euo pipefail
 
@@ -18,12 +18,12 @@ fi
 counts=("${@:-1 5 10 20}")
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-bin="${SYNCSH_BIN:-$root/bin/syncsh}"
-attach_bin="${SYNCSH_ATTACH_BIN:-$root/bin/syncsh-attach}"
-runtime="${SYNCSH_PROFILE_RUNTIME:-$(mktemp -d -t syncsh-profile.XXXXXX)}"
-workdir="${SYNCSH_PROFILE_WORKDIR:-$(mktemp -d -t syncsh-profile-work.XXXXXX)}"
-shell_bin="${SYNCSH_PROFILE_SHELL:-/bin/sh}"
-heap="${SYNCSH_HEAP_PROFILE:-}"
+bin="${REMNIX_BIN:-$root/bin/remnix}"
+attach_bin="${REMNIX_ATTACH_BIN:-$root/bin/remnix-attach}"
+runtime="${REMNIX_PROFILE_RUNTIME:-$(mktemp -d -t remnix-profile.XXXXXX)}"
+workdir="${REMNIX_PROFILE_WORKDIR:-$(mktemp -d -t remnix-profile-work.XXXXXX)}"
+shell_bin="${REMNIX_PROFILE_SHELL:-/bin/sh}"
+heap="${REMNIX_HEAP_PROFILE:-}"
 
 cleanup() {
   if [[ -n "${child_pids:-}" ]]; then
@@ -42,13 +42,13 @@ trap cleanup EXIT
 
 if [[ ! -x "$bin" ]]; then
   echo "building $bin" >&2
-  (cd "$root" && go build -tags piv -o "$bin" ./cmd/syncsh)
+  (cd "$root" && go build -tags piv -o "$bin" ./cmd/remnix)
 fi
 
-export SYNCSH_RUNTIME_DIR="$runtime"
-export SYNCSH_DATA_DIR="${SYNCSH_DATA_DIR:-$workdir/data}"
-export SYNCSH_CONFIG_DIR="${SYNCSH_CONFIG_DIR:-$workdir/cfg}"
-mkdir -p "$SYNCSH_DATA_DIR" "$SYNCSH_CONFIG_DIR" "$runtime"
+export REMNIX_RUNTIME_DIR="$runtime"
+export REMNIX_DATA_DIR="${REMNIX_DATA_DIR:-$workdir/data}"
+export REMNIX_CONFIG_DIR="${REMNIX_CONFIG_DIR:-$workdir/cfg}"
+mkdir -p "$REMNIX_DATA_DIR" "$REMNIX_CONFIG_DIR" "$runtime"
 
 rss_kb() {
   local pid="$1"
@@ -152,7 +152,7 @@ else
   start_legacy_agent || echo "warning: agent socket not ready" >&2
 fi
 
-printf '%-10s %-14s %-16s %-16s %-16s\n' "terminals" "daemon_rss_kb" "attach_rss_kb" "proxy_rss_kb" "total_syncsh_kb"
+printf '%-10s %-14s %-16s %-16s %-16s\n' "terminals" "daemon_rss_kb" "attach_rss_kb" "proxy_rss_kb" "total_remnix_kb"
 printf '%s\n' "----------------------------------------------------------------------"
 
 for n in "${counts[@]}"; do
@@ -171,12 +171,12 @@ for n in "${counts[@]}"; do
     [[ -n "$pid" ]] || continue
     cmd="$(cmdline "$pid")"
     case "$cmd" in
-      *' syncsh daemon'*|*' daemon') heavy_pids+=("$pid") ;;
-      *' syncsh agent'*|*' agent') heavy_pids+=("$pid") ;;
-      *' syncsh pty-proxy'*|*' pty-proxy '*) proxy_pids+=("$pid"); heavy_pids+=("$pid") ;;
-      *syncsh-attach*) attach_pids+=("$pid") ;;
+      *' remnix daemon'*|*' daemon') heavy_pids+=("$pid") ;;
+      *' remnix agent'*|*' agent') heavy_pids+=("$pid") ;;
+      *' remnix pty-proxy'*|*' pty-proxy '*) proxy_pids+=("$pid"); heavy_pids+=("$pid") ;;
+      *remnix-attach*) attach_pids+=("$pid") ;;
     esac
-  done < <(pgrep -f 'syncsh|syncsh-attach' || true)
+  done < <(pgrep -f 'remnix|remnix-attach' || true)
 
   echo
   echo "=== $n terminals ==="

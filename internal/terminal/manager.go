@@ -5,8 +5,8 @@ import (
 	"net"
 	"sync"
 
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/protocol"
 )
 
 type RPC struct {

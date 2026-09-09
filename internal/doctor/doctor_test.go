@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/setup"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/setup"
 )
 
 func TestMain(m *testing.M) {
@@ -20,8 +20,8 @@ func TestMain(m *testing.M) {
 
 func TestDoctorReportsFIDO2HID(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)

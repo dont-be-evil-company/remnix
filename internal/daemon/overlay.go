@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
-	"github.com/mistweaverco/syncsh/internal/terminal"
-	"github.com/mistweaverco/syncsh/internal/tui"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/terminal"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 )
 
 func (s *Server) overlayPercent() int {

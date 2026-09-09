@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/browser"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/redact"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/transport"
-	rclonetr "github.com/mistweaverco/syncsh/internal/transport/rclone"
-	"github.com/mistweaverco/syncsh/internal/transport/rclone/providers"
-	"github.com/mistweaverco/syncsh/internal/tui/picker"
+	"github.com/dont-be-evil-company/remnix/internal/browser"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
+	rclonetr "github.com/dont-be-evil-company/remnix/internal/transport/rclone"
+	"github.com/dont-be-evil-company/remnix/internal/transport/rclone/providers"
+	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
 	"github.com/rclone/rclone/fs/rc"
 )
 
@@ -80,7 +80,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			}
 			backend = t
 		}
-		logical = "syncsh-" + def.ID
+		logical = "remnix-" + def.ID
 		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Remote name").Value(&logical))).RunWithContext(ctx)
 		params, err = collectProviderParams(ctx, def)
 		if err != nil {
@@ -135,7 +135,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			form := huh.NewForm(huh.NewGroup(
 				huh.NewInput().
 					Title("Prefix to list").
-					Description("ListBucket was denied at this path. If IAM uses s3:prefix, enter that prefix (for example syncsh). Leave empty to abort.").
+					Description("ListBucket was denied at this path. If IAM uses s3:prefix, enter that prefix (for example remnix). Leave empty to abort.").
 					Value(&extra),
 			))
 			if err := form.RunWithContext(ctx); err != nil {
@@ -186,7 +186,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 	if err != nil {
 		return config.Endpoint{}, err
 	}
-	fmt.Fprintln(os.Stderr, "Checking for syncsh metadata (not a full Drive scan)...")
+	fmt.Fprintln(os.Stderr, "Checking for remnix metadata (not a full Drive scan)...")
 	rep, err := repository.Probe(ctx, rooted)
 	if err != nil {
 		return config.Endpoint{}, err
@@ -239,7 +239,7 @@ func maybeImportRemote(ctx context.Context) (string, error) {
 		return "", err
 	}
 	dst := src
-	_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Name inside syncsh").Value(&dst))).RunWithContext(ctx)
+	_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Name inside remnix").Value(&dst))).RunWithContext(ctx)
 	if err := rclonetr.ImportUserRemote(src, dst); err != nil {
 		return "", err
 	}
@@ -262,7 +262,7 @@ func promptBucketPath(ctx context.Context) (string, error) {
 			Value(&bucket),
 		huh.NewInput().
 			Title("Prefix").
-			Description("Optional. Required if IAM ListBucket is limited with s3:prefix (for example syncsh). You can still pick a subfolder next.").
+			Description("Optional. Required if IAM ListBucket is limited with s3:prefix (for example remnix). You can still pick a subfolder next.").
 			Value(&prefix),
 	))
 	if err := form.RunWithContext(ctx); err != nil {
@@ -295,7 +295,7 @@ func pickRcloneFolder(ctx context.Context, tr *rclonetr.Transport, logical strin
 		title = "Choose folder / prefix in " + root + " on " + logical + "  (Enter opens, Space/Ctrl+Enter selects, n creates a folder)"
 	}
 	if join {
-		title += " - pick the existing syncsh folder"
+		title += " - pick the existing remnix folder"
 	}
 	res, err := picker.Run(rclonetr.NewBrowser(tr), picker.Options{
 		Title:       title,
@@ -318,7 +318,7 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 		case join && rep.Result == repository.Valid:
 			return path, rooted, rep, nil
 		case !join && (rep.Result == repository.Valid || rep.Result == repository.Partial || rep.Result == repository.UnsupportedVersion):
-			return path, rooted, rep, fmt.Errorf("this folder already looks like a syncsh repository (%s); use 'syncsh device add' to join", rep.Result)
+			return path, rooted, rep, fmt.Errorf("this folder already looks like a remnix repository (%s); use 'remnix device add' to join", rep.Result)
 		case !join && rep.Result == repository.Empty && path != "":
 			// A bare S3/GCS bucket (no prefix) is not a dedicated repo folder.
 			if strings.Contains(strings.Trim(path, "/"), "/") || !rooted.Capabilities().VirtualDirs {
@@ -328,15 +328,15 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 		action := "subfolder"
 		desc := fmt.Sprintf("This path is %s (%s).", rep.Result, redact.String(rep.Message))
 		if join {
-			desc += " Join needs an existing syncsh repository. Create a subfolder named syncsh, or pick another folder."
+			desc += " Join needs an existing remnix repository. Create a subfolder named remnix, or pick another folder."
 		} else {
-			desc += " Create a dedicated syncsh subfolder so other files on this remote are not scanned."
+			desc += " Create a dedicated remnix subfolder so other files on this remote are not scanned."
 		}
 		form := huh.NewForm(huh.NewGroup(
-			huh.NewSelect[string]().Title("This folder is not a syncsh repository yet").
+			huh.NewSelect[string]().Title("This folder is not a remnix repository yet").
 				Description(desc).
 				Options(
-					huh.NewOption(`Create a "syncsh" subfolder here`, "subfolder"),
+					huh.NewOption(`Create a "remnix" subfolder here`, "subfolder"),
 					huh.NewOption("Use this folder anyway", "use"),
 					huh.NewOption("Cancel", "cancel"),
 				).Value(&action),
@@ -349,16 +349,16 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 			return path, rooted, rep, fmt.Errorf("cancelled")
 		case "use":
 			if join && rep.Result != repository.Valid {
-				return path, rooted, rep, fmt.Errorf("join requires a valid syncsh repository (got %s): %s", rep.Result, rep.Message)
+				return path, rooted, rep, fmt.Errorf("join requires a valid remnix repository (got %s): %s", rep.Result, rep.Message)
 			}
 			return path, rooted, rep, nil
 		default:
-			if err := rooted.Mkdir(ctx, "syncsh"); err != nil {
+			if err := rooted.Mkdir(ctx, "remnix"); err != nil {
 				return path, rooted, rep, err
 			}
-			sub := "syncsh"
+			sub := "remnix"
 			if path != "" {
-				sub = strings.Trim(path, "/") + "/syncsh"
+				sub = strings.Trim(path, "/") + "/remnix"
 			}
 			next, err := rclonetr.Open(ctx, section, sub)
 			if err != nil {
@@ -371,7 +371,7 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 			}
 			path, rooted, rep = sub, next, nrep
 			if join && nrep.Result != repository.Valid {
-				return sub, next, nrep, fmt.Errorf("created %s but it is not an existing repository (got %s). Run syncsh setup on the first device, or pick the folder that already contains metadata/", sub, nrep.Result)
+				return sub, next, nrep, fmt.Errorf("created %s but it is not an existing repository (got %s). Run remnix setup on the first device, or pick the folder that already contains metadata/", sub, nrep.Result)
 			}
 			if !join {
 				return sub, next, nrep, nil

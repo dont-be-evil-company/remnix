@@ -18,7 +18,7 @@ func startupCmd() (string, error) {
 		}
 		appdata = filepath.Join(home, "AppData", "Roaming")
 	}
-	return filepath.Join(appdata, `Microsoft\Windows\Start Menu\Programs\Startup`, "syncsh-daemon.cmd"), nil
+	return filepath.Join(appdata, `Microsoft\Windows\Start Menu\Programs\Startup`, "remnix-daemon.cmd"), nil
 }
 
 func install(bin string) error {
@@ -34,12 +34,12 @@ func install(bin string) error {
 		return err
 	}
 	tr := fmt.Sprintf(`"%s" daemon`, bin)
-	_ = exec.Command("schtasks", "/Create", "/TN", "syncsh-daemon", "/TR", tr, "/SC", "ONLOGON", "/F").Run()
+	_ = exec.Command("schtasks", "/Create", "/TN", "remnix-daemon", "/TR", tr, "/SC", "ONLOGON", "/F").Run()
 	return nil
 }
 
 func uninstall() error {
-	_ = exec.Command("schtasks", "/Delete", "/TN", "syncsh-daemon", "/F").Run()
+	_ = exec.Command("schtasks", "/Delete", "/TN", "remnix-daemon", "/F").Run()
 	path, err := startupCmd()
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func query() (InstallState, error) {
 		st.Installed = true
 		st.Detail = "Startup folder command installed"
 	}
-	if err := exec.Command("schtasks", "/Query", "/TN", "syncsh-daemon").Run(); err == nil {
+	if err := exec.Command("schtasks", "/Query", "/TN", "remnix-daemon").Run(); err == nil {
 		st.Installed = true
 		st.Detail = "logon scheduled task installed"
 	}

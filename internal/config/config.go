@@ -466,7 +466,7 @@ func rejectLegacyConfig(data []byte) error {
 	if !legacy {
 		return nil
 	}
-	return fmt.Errorf("config format is no longer supported; run syncsh setup")
+	return fmt.Errorf("config format is no longer supported; run remnix setup")
 }
 
 func nodePresent(n yaml.Node) bool {

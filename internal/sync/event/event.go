@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 const CurrentVersion = 1

@@ -11,7 +11,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -38,7 +38,7 @@ func Annotate(err error) error {
 		strings.Contains(s, "connecting to pcsc"):
 		return fmt.Errorf("%w\n\nThe YubiKey is invisible until pcscd is running, even if the token is plugged in.\nStart it and retry:\n  sudo systemctl start pcscd.socket\n  sudo systemctl start pcscd\nThen check with: pcsc_scan", err)
 	case strings.Contains(s, "not available in this build"):
-		return fmt.Errorf("%w\nRebuild with PIV support: go build -tags piv ./cmd/syncsh", err)
+		return fmt.Errorf("%w\nRebuild with PIV support: go build -tags piv ./cmd/remnix", err)
 	default:
 		return err
 	}
@@ -47,7 +47,7 @@ func Annotate(err error) error {
 func WrapSMK(pub crypto.PublicKey, smk []byte) (params, wrapped []byte, err error) {
 	switch k := pub.(type) {
 	case *rsa.PublicKey:
-		ct, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, k, smk, []byte("syncsh-piv"))
+		ct, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, k, smk, []byte("remnix-piv"))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -80,7 +80,7 @@ func wrapECDH(pub *ecdsa.PublicKey, smk []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	ct, err := envelope.Seal(key, nonce, smk, []byte("syncsh-piv-ecdh"))
+	ct, err := envelope.Seal(key, nonce, smk, []byte("remnix-piv-ecdh"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -94,7 +94,7 @@ func UnwrapSMK(tok Token, params, wrapped []byte) ([]byte, error) {
 }
 
 func deriveWrapKey(secret []byte) ([]byte, error) {
-	r := hkdf.New(sha256.New, secret, []byte("syncsh-piv"), []byte("wrap-v1"))
+	r := hkdf.New(sha256.New, secret, []byte("remnix-piv"), []byte("wrap-v1"))
 	key := make([]byte, envelope.SMKSize)
 	if _, err := io.ReadFull(r, key); err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func (f *FakeToken) Public() (crypto.PublicKey, error) {
 	return &f.key.PublicKey, nil
 }
 func (f *FakeToken) Decrypt(ciphertext []byte) ([]byte, error) {
-	return rsa.DecryptOAEP(sha256.New(), rand.Reader, f.key, ciphertext, []byte("syncsh-piv"))
+	return rsa.DecryptOAEP(sha256.New(), rand.Reader, f.key, ciphertext, []byte("remnix-piv"))
 }
 
 type FakeFactory struct {

@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/bech32"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
 	"golang.org/x/crypto/hkdf"
 )
 
-const hrp = "syncsh"
+const hrp = "remnix"
 
 func Generate() ([]byte, error) {
 	secret := make([]byte, 32)
@@ -50,7 +50,7 @@ func Decode(s string) ([]byte, error) {
 }
 
 func wrapKey(secret []byte) ([]byte, error) {
-	r := hkdf.New(sha256.New, secret, []byte("syncsh-recovery"), []byte("wrap-v1"))
+	r := hkdf.New(sha256.New, secret, []byte("remnix-recovery"), []byte("wrap-v1"))
 	key := make([]byte, envelope.SMKSize)
 	if _, err := io.ReadFull(r, key); err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func WrapSMK(secret, smk []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	ct, err := envelope.Seal(key, nonce, smk, []byte("syncsh-recovery-slot"))
+	ct, err := envelope.Seal(key, nonce, smk, []byte("remnix-recovery-slot"))
 	if err != nil {
 		return nil, err
 	}
@@ -87,5 +87,5 @@ func UnwrapSMK(secret, wrapped []byte) ([]byte, error) {
 	}
 	nonce := wrapped[:envelope.NonceSize]
 	ct := wrapped[envelope.NonceSize:]
-	return envelope.Open(key, nonce, ct, []byte("syncsh-recovery-slot"))
+	return envelope.Open(key, nonce, ct, []byte("remnix-recovery-slot"))
 }

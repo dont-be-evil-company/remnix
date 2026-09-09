@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 func TestOverlayGeomWaitIsShort(t *testing.T) {
@@ -128,7 +128,7 @@ func TestSearchViewOverlayIsInlineNotAltScreen(t *testing.T) {
 	if len(lines) > 7 {
 		t.Fatalf("overlay view should be RectH lines, got %d: %q", len(lines), v.Content)
 	}
-	if !strings.Contains(lines[0], "syncsh") {
+	if !strings.Contains(lines[0], "remnix") {
 		t.Fatalf("tui should start at line 0 of the popup, got %q", lines[0])
 	}
 }

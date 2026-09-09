@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 func inspectFixture() InspectOptions {

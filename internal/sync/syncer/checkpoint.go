@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/sync/checkpoint"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/sync/checkpoint"
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
 )
 
 var ErrCheckpointNotCaughtUp = errors.New("local frontier does not dominate newest checkpoint")

@@ -3,8 +3,8 @@ package bundle
 import (
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
 )
 
 func TestPackUnpack(t *testing.T) {

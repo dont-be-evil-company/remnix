@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
 )
 
 func TestSnapshotRoundTrip(t *testing.T) {
@@ -82,7 +82,7 @@ func TestSnapshotRoundTripInvalidUTF8(t *testing.T) {
 }
 
 func TestSnapshotStaysCompact(t *testing.T) {
-	cmds := []string{"ls", "git status", "cd ~/projects/personal/syncsh", "make test", "vim README.md"}
+	cmds := []string{"ls", "git status", "cd ~/projects/personal/remnix", "make test", "vim README.md"}
 	entries := make([]history.Entry, 5000)
 	for i := range entries {
 		seq := int64(i + 1)
@@ -90,7 +90,7 @@ func TestSnapshotStaysCompact(t *testing.T) {
 			ID:             fmt.Sprintf("01a00815-65ae-7f07-a449-%012d", i),
 			Command:        fmt.Sprintf("%s #%d", cmds[i%len(cmds)], i%80),
 			StartTS:        time.Unix(int64(1_700_000_000+i*3), 0).UTC(),
-			Cwd:            "/home/marco/projects/personal/syncsh",
+			Cwd:            "/home/marco/projects/personal/remnix",
 			SessionID:      fmt.Sprintf("sess-%d", i/40),
 			Hostname:       "bonobo",
 			DeviceID:       "01a00814-7f94-7c97-86c4-5f62fbfc2f14",
@@ -180,7 +180,7 @@ func TestUnpackJSONEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err := envelope.Seal(smk, nonce, raw, []byte("syncsh-checkpoint"))
+	ct, err := envelope.Seal(smk, nonce, raw, []byte("remnix-checkpoint"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestUnpackJSONEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err = envelope.Seal(smk, nonce, gz, []byte("syncsh-checkpoint"))
+	ct, err = envelope.Seal(smk, nonce, gz, []byte("remnix-checkpoint"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestUnpackV1CBOREntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err := envelope.Seal(smk, nonce, raw, []byte("syncsh-checkpoint"))
+	ct, err := envelope.Seal(smk, nonce, raw, []byte("remnix-checkpoint"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestUnpackV1CBOREntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err = envelope.Seal(smk, nonce, gz, []byte("syncsh-checkpoint"))
+	ct, err = envelope.Seal(smk, nonce, gz, []byte("remnix-checkpoint"))
 	if err != nil {
 		t.Fatal(err)
 	}

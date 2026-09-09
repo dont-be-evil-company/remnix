@@ -24,7 +24,7 @@ jobs:
             arch=${pair#*/}
             ext=""
             if [ "$os" = windows ]; then ext=".exe"; fi
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" -o "dist/syncsh-${os}-${arch}${ext}" ./cmd/syncsh
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" -o "dist/remnix-${os}-${arch}${ext}" ./cmd/remnix
           done
           (cd dist && sha256sum * > SHA256SUMS)
       - name: Release

@@ -546,14 +546,14 @@ func (m Model) handleDest(key string) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case ChoiceCreateSubfolder:
-			p := m.fs.Join(m.dest.Path, "syncsh")
+			p := m.fs.Join(m.dest.Path, "remnix")
 			_ = m.fs.Mkdir(context.Background(), p)
 			m.selected = p
 			m.choice = ch
 			m.quitting = true
 			return m, tea.Quit
 		case ChoiceUse:
-			if m.dest.Kind == DestSyncshSubdirExists {
+			if m.dest.Kind == DestRemnixSubdirExists {
 				m.selected = m.dest.Subdir
 			} else {
 				m.selected = m.dest.Path
@@ -659,13 +659,13 @@ func destMessage(d DestReport) string {
 	case DestEmpty:
 		return "Use " + d.Path
 	case DestUnrelated:
-		return "The selected folder is not empty.\n\nsyncsh will create files and directories such as:\n  metadata/\n  keys/\n  events/\n  checkpoints/\n  acks/"
+		return "The selected folder is not empty.\n\nremnix will create files and directories such as:\n  metadata/\n  keys/\n  events/\n  checkpoints/\n  acks/"
 	case DestValidRepo:
-		return "An existing syncsh repository was found here."
+		return "An existing remnix repository was found here."
 	case DestPartialRepo, DestUnsupported:
-		return "This folder contains files that look like an incomplete or damaged\nsyncsh repository.\n\n" + d.Probe.Message
-	case DestSyncshSubdirExists:
-		return "A \"syncsh\" subfolder already exists."
+		return "This folder contains files that look like an incomplete or damaged\nremnix repository.\n\n" + d.Probe.Message
+	case DestRemnixSubdirExists:
+		return "A \"remnix\" subfolder already exists."
 	default:
 		return d.Probe.Message
 	}
@@ -674,12 +674,12 @@ func destMessage(d DestReport) string {
 func destChoiceLabel(ch DestChoice, d DestReport) string {
 	switch ch {
 	case ChoiceUse:
-		if d.Kind == DestSyncshSubdirExists {
+		if d.Kind == DestRemnixSubdirExists {
 			return "Use " + d.Subdir
 		}
 		return "Use " + d.Path
 	case ChoiceCreateSubfolder:
-		return `Create a "syncsh" subfolder here`
+		return `Create a "remnix" subfolder here`
 	case ChoiceSelectAnother:
 		return "Select another folder"
 	case ChoiceProceedAnyway:

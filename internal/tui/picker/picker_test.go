@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 func TestValidateDirName(t *testing.T) {
@@ -39,8 +39,8 @@ func TestCanDeleteProtected(t *testing.T) {
 	}
 	cfg := filepath.Join(t.TempDir(), "cfg")
 	data := filepath.Join(t.TempDir(), "data")
-	t.Setenv("SYNCSH_CONFIG_DIR", cfg)
-	t.Setenv("SYNCSH_DATA_DIR", data)
+	t.Setenv("REMNIX_CONFIG_DIR", cfg)
+	t.Setenv("REMNIX_DATA_DIR", data)
 	if err := os.MkdirAll(cfg, 0o700); err != nil {
 		t.Fatal(err)
 	}

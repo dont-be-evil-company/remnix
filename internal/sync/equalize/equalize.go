@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 type Named struct {

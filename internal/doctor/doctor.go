@@ -7,23 +7,23 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/daemon"
+	"github.com/dont-be-evil-company/remnix/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/setup"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
-	"github.com/mistweaverco/syncsh/internal/daemon"
-	"github.com/mistweaverco/syncsh/internal/db"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/redact"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/setup"
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
-	"github.com/mistweaverco/syncsh/internal/transport"
 )
 
 type Report struct {
@@ -109,7 +109,7 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	if st, err := setup.LoadState(); err != nil {
 		check(false, "setup-state: "+err.Error())
 	} else if st != nil && st.Phase != "" {
-		check(false, fmt.Sprintf("partial setup: phase=%s generation=%s (retry syncsh setup, or delete setup-state.json to start over)", st.Phase, st.GenerationID))
+		check(false, fmt.Sprintf("partial setup: phase=%s generation=%s (retry remnix setup, or delete setup-state.json to start over)", st.Phase, st.GenerationID))
 	}
 
 	if !a.Config.Sync.IsEnabled() {
@@ -213,11 +213,11 @@ func reportHardware(check func(bool, string), hasFIDOSlot bool) {
 	pivToks, pivErr := (piv.HardwareFactory{}).List()
 	switch {
 	case pivErr != nil && len(infos) > 0:
-		check(true, "piv: not available (FIDO-only Security Keys have no PIV applet; use syncsh key fido add over USB HID, not pcscd)")
+		check(true, "piv: not available (FIDO-only Security Keys have no PIV applet; use remnix key fido add over USB HID, not pcscd)")
 	case pivErr != nil:
 		check(true, "piv: "+pivErr.Error())
 	case len(pivToks) == 0 && len(infos) > 0:
-		check(true, "piv: no YubiKey PIV tokens; Security Keys are FIDO2-only - enroll with syncsh key fido add")
+		check(true, "piv: no YubiKey PIV tokens; Security Keys are FIDO2-only - enroll with remnix key fido add")
 	default:
 		check(true, fmt.Sprintf("piv tokens: %d", len(pivToks)))
 	}
@@ -232,7 +232,7 @@ func reportKeyringAndDaemon(check func(bool, string), deviceID string) {
 		if err := keyring.Available(); err != nil {
 			check(false, "keyring: "+err.Error())
 		} else {
-			check(true, "keyring: empty (run syncsh unlock once with recovery or FIDO)")
+			check(true, "keyring: empty (run remnix unlock once with recovery or FIDO)")
 		}
 	default:
 		check(true, fmt.Sprintf("keyring: %d generation key(s) stored", len(smks)))

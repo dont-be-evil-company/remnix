@@ -704,17 +704,17 @@ cstr_set :: proc(s: cstring) -> bool {
 }
 
 sock_path :: proc() -> string {
-	if rt := posix.getenv("SYNCSH_RUNTIME_DIR"); cstr_set(rt) {
+	if rt := posix.getenv("REMNIX_RUNTIME_DIR"); cstr_set(rt) {
 		return fmt.tprintf("%s/terminal.sock", rt)
 	}
 	if rt := posix.getenv("XDG_RUNTIME_DIR"); cstr_set(rt) {
-		return fmt.tprintf("%s/syncsh/terminal.sock", rt)
+		return fmt.tprintf("%s/remnix/terminal.sock", rt)
 	}
 	tmp := posix.getenv("TMPDIR")
 	if !cstr_set(tmp) {
 		tmp = "/tmp"
 	}
-	return fmt.tprintf("%s/syncsh/terminal.sock", tmp)
+	return fmt.tprintf("%s/remnix/terminal.sock", tmp)
 }
 
 connect_sock :: proc(path: string) -> posix.FD {
@@ -736,7 +736,7 @@ connect_sock :: proc(path: string) -> posix.FD {
 	return fd
 }
 
-exec_fallback :: proc(shell, syncsh: cstring) -> ! {
+exec_fallback :: proc(shell, remnix: cstring) -> ! {
 	restore_tty()
 	if wake_rd >= 0 {
 		posix.close(wake_rd)
@@ -754,8 +754,8 @@ exec_fallback :: proc(shell, syncsh: cstring) -> ! {
 		posix.close(tty_fd)
 		tty_fd = -1
 	}
-	if cstr_set(syncsh) {
-		posix.execl(syncsh, syncsh, "pty-proxy", "--shell", shell, nil)
+	if cstr_set(remnix) {
+		posix.execl(remnix, remnix, "pty-proxy", "--shell", shell, nil)
 	}
 	posix.execl(shell, shell, nil)
 	posix.execl("/bin/sh", "sh", nil)
@@ -799,7 +799,7 @@ write_create :: proc(sock: posix.FD, shell: string, cols, rows: u32) -> bool {
 	return write_all(sock, {'\n'})
 }
 
-try_start_daemon :: proc(syncsh: cstring) -> bool {
+try_start_daemon :: proc(remnix: cstring) -> bool {
 	pid := posix.fork()
 	if pid < 0 {
 		return false
@@ -814,24 +814,24 @@ try_start_daemon :: proc(syncsh: cstring) -> bool {
 				posix.close(devnull)
 			}
 		}
-		posix.execl(syncsh, syncsh, "daemon", nil)
+		posix.execl(remnix, remnix, "daemon", nil)
 		posix._exit(127)
 	}
 	return true
 }
 
 control_path :: proc() -> string {
-	if rt := posix.getenv("SYNCSH_RUNTIME_DIR"); cstr_set(rt) {
+	if rt := posix.getenv("REMNIX_RUNTIME_DIR"); cstr_set(rt) {
 		return fmt.tprintf("%s/control.sock", rt)
 	}
 	if rt := posix.getenv("XDG_RUNTIME_DIR"); cstr_set(rt) {
-		return fmt.tprintf("%s/syncsh/control.sock", rt)
+		return fmt.tprintf("%s/remnix/control.sock", rt)
 	}
-	return "/tmp/syncsh/control.sock"
+	return "/tmp/remnix/control.sock"
 }
 
 control_fd :: proc() -> posix.FD {
-	if fd := posix.getenv("SYNCSH_CONTROL_FD"); cstr_set(fd) {
+	if fd := posix.getenv("REMNIX_CONTROL_FD"); cstr_set(fd) {
 		return posix.FD(posix.atoi(fd))
 	}
 	return connect_sock(control_path())
@@ -892,8 +892,8 @@ run_rpc :: proc(args: []string) -> int {
 }
 
 usage :: proc() {
-	fmt.eprintf("usage: syncsh-attach [--shell PATH] [--syncsh PATH]\n")
-	fmt.eprintf("       syncsh-attach --rpc OP [fields...]\n")
+	fmt.eprintf("usage: remnix-attach [--shell PATH] [--remnix PATH]\n")
+	fmt.eprintf("       remnix-attach --rpc OP [fields...]\n")
 }
 
 cstr :: proc(s: string) -> cstring {
@@ -913,7 +913,7 @@ main :: proc() {
 	if env := posix.getenv("SHELL"); cstr_set(env) {
 		shell = string(env)
 	}
-	syncsh := "syncsh"
+	remnix := "remnix"
 
 	for i := 1; i < len(os.args); i += 1 {
 		switch os.args[i] {
@@ -925,10 +925,10 @@ main :: proc() {
 				usage()
 				os.exit(2)
 			}
-		case "--syncsh":
+		case "--remnix":
 			if i + 1 < len(os.args) {
 				i += 1
-				syncsh = os.args[i]
+				remnix = os.args[i]
 			} else {
 				usage()
 				os.exit(2)
@@ -943,12 +943,12 @@ main :: proc() {
 	}
 
 	shell_c := cstr(shell)
-	syncsh_c := cstr(syncsh)
+	remnix_c := cstr(remnix)
 
 	tty_fd = posix.open("/dev/tty", {.RDWR})
 	if tty_fd < 0 {
-		fmt.eprintf("syncsh-attach: /dev/tty: %s\n", errstr())
-		exec_fallback(shell_c, syncsh_c)
+		fmt.eprintf("remnix-attach: /dev/tty: %s\n", errstr())
+		exec_fallback(shell_c, remnix_c)
 	}
 	// Separate open so O_NONBLOCK on writes does not make reads miss keys
 	// after a split/unfocus (poll+nonblock on the same tty fd).
@@ -973,7 +973,7 @@ main :: proc() {
 	path := sock_path()
 	sock := connect_sock(path)
 	if sock < 0 {
-		try_start_daemon(syncsh_c)
+		try_start_daemon(remnix_c)
 		for i := 0; i < 120 && sock < 0; i += 1 {
 			ts := posix.timespec {
 				tv_nsec = 25_000_000,
@@ -983,28 +983,28 @@ main :: proc() {
 		}
 	}
 	if sock < 0 {
-		fmt.eprintf("syncsh-attach: connect %s: %s\n", path, errstr())
-		exec_fallback(shell_c, syncsh_c)
+		fmt.eprintf("remnix-attach: connect %s: %s\n", path, errstr())
+		exec_fallback(shell_c, remnix_c)
 	}
 
 	if !write_create(sock, shell, u32(ws.ws_col), u32(ws.ws_row)) {
-		fmt.eprintf("syncsh-attach: create session failed\n")
+		fmt.eprintf("remnix-attach: create session failed\n")
 		posix.close(sock)
-		exec_fallback(shell_c, syncsh_c)
+		exec_fallback(shell_c, remnix_c)
 	}
 
 	if !make_raw(tty_fd) {
-		fmt.eprintf("syncsh-attach: raw mode: %s\n", errstr())
+		fmt.eprintf("remnix-attach: raw mode: %s\n", errstr())
 		posix.close(sock)
-		exec_fallback(shell_c, syncsh_c)
+		exec_fallback(shell_c, remnix_c)
 	}
 	// Kitty pane focus injects CSI I/O. Disable reporting so split/unfocus
 	// cannot stall zsh until Ctrl+C.
 	write_all(tty_fd, {0x1b, '[', '?', '1', '0', '0', '4', 'l'})
 	if !set_nonblock(tty_fd) || !set_nonblock(tty_in) || !set_nonblock(sock) {
-		fmt.eprintf("syncsh-attach: nonblock: %s\n", errstr())
+		fmt.eprintf("remnix-attach: nonblock: %s\n", errstr())
 		posix.close(sock)
-		exec_fallback(shell_c, syncsh_c)
+		exec_fallback(shell_c, remnix_c)
 	}
 	sock_io = sock
 	posix.signal(.SIGINT, auto_cast posix.SIG_IGN)
@@ -1018,9 +1018,9 @@ main :: proc() {
 
 	reader := thread.create_and_start(tty_to_sock)
 	if reader == nil {
-		fmt.eprintf("syncsh-attach: reader thread: %s\n", errstr())
+		fmt.eprintf("remnix-attach: reader thread: %s\n", errstr())
 		posix.close(sock)
-		exec_fallback(shell_c, syncsh_c)
+		exec_fallback(shell_c, remnix_c)
 	}
 
 	sock_in: [dynamic]u8

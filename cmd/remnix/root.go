@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/mistweaverco/syncsh/internal/redact"
-	"github.com/mistweaverco/syncsh/internal/version"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	"github.com/dont-be-evil-company/remnix/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -16,9 +16,9 @@ var (
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "syncsh",
+		Use:          "remnix",
 		Short:        "Encrypted, server-free shell history manager",
-		Long:         "syncsh stores shell history in a local SQLite database and synchronizes encrypted events through a filesystem-backed remote.",
+		Long:         "remnix stores shell history in a local SQLite database and synchronizes encrypted events through a filesystem-backed remote.",
 		SilenceUsage: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			level := slog.LevelInfo
@@ -70,7 +70,7 @@ func newVersionCmd() *cobra.Command {
 	var verbose bool
 	cmd := &cobra.Command{
 		Use:   "version",
-		Short: "Print the syncsh version",
+		Short: "Print the remnix version",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if verbose {
 				cmd.Print(version.Verbose())

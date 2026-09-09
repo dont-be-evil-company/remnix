@@ -10,8 +10,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -38,7 +38,7 @@ type DeviceFile struct {
 }
 
 func macKey(smk []byte) []byte {
-	r := hkdf.New(sha256.New, smk, []byte("syncsh-remote-manifest"), []byte("mac-v1"))
+	r := hkdf.New(sha256.New, smk, []byte("remnix-remote-manifest"), []byte("mac-v1"))
 	key := make([]byte, 32)
 	_, _ = io.ReadFull(r, key)
 	return key

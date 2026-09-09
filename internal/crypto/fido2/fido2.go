@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
 	"golang.org/x/crypto/hkdf"
 )
 
 const (
-	RPID       = "syncsh"
+	RPID       = "remnix"
 	ParamsV1   = 1
-	hkdfSalt   = "syncsh-fido2-hmac"
+	hkdfSalt   = "remnix-fido2-hmac"
 	hkdfInfo   = "wrap-v1"
-	aeadAD     = "syncsh-fido2-hmac-slot"
+	aeadAD     = "remnix-fido2-hmac-slot"
 	SaltSize   = 32
 	SecretSize = 32
 )

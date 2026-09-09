@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
 )
 
 type Client struct {
@@ -48,7 +48,7 @@ func Ensure() (*Client, error) {
 func startDaemon() error {
 	bin, err := os.Executable()
 	if err != nil {
-		bin = "syncsh"
+		bin = "remnix"
 	}
 	cmd := exec.Command(bin, "daemon")
 	cmd.Stdout = nil

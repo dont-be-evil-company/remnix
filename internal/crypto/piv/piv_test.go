@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
 )
 
 func TestFakeTokenWrapUnwrap(t *testing.T) {

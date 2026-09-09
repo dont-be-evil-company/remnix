@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/sync/ack"
-	"github.com/mistweaverco/syncsh/internal/sync/bundle"
-	"github.com/mistweaverco/syncsh/internal/sync/checkpoint"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/sync/ack"
+	"github.com/dont-be-evil-company/remnix/internal/sync/bundle"
+	"github.com/dont-be-evil-company/remnix/internal/sync/checkpoint"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 func TestGCBlockedUntilAcks(t *testing.T) {

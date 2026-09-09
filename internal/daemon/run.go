@@ -3,8 +3,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 // runOnce is a test helper that opens a temporary app and runs one sync cycle.

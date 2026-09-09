@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
-	"github.com/mistweaverco/syncsh/internal/db"
 )
 
 // Unlock holds credentials that can unwrap an SMK from any one active slot.

@@ -8,8 +8,8 @@ import (
 )
 
 func TestUnitContents(t *testing.T) {
-	s := unitContents("/opt/syncsh")
-	if !strings.Contains(s, "ExecStart=/opt/syncsh daemon") {
+	s := unitContents("/opt/remnix")
+	if !strings.Contains(s, "ExecStart=/opt/remnix daemon") {
 		t.Fatalf("missing ExecStart:\n%s", s)
 	}
 	if !strings.Contains(s, "WantedBy=default.target") {

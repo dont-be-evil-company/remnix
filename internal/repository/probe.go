@@ -1,4 +1,4 @@
-// Package repository classifies a syncsh remote without treating storage as trusted.
+// Package repository classifies a remnix remote without treating storage as trusted.
 package repository
 
 import (
@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 type Result int
@@ -87,10 +87,10 @@ func Probe(ctx context.Context, tr transport.Transport) (Report, error) {
 			return Report{}, err
 		}
 		if looksLike {
-			return Report{Result: Partial, Message: "syncsh-looking files are present but metadata/manifest and keys/generations are missing"}, nil
+			return Report{Result: Partial, Message: "remnix-looking files are present but metadata/manifest and keys/generations are missing"}, nil
 		}
 		if listingExpensive(tr) {
-			return Report{Result: Empty, Message: "no syncsh metadata at this path"}, nil
+			return Report{Result: Empty, Message: "no remnix metadata at this path"}, nil
 		}
 		dirs, err := tr.ListDirs(ctx, "")
 		if err != nil {
@@ -101,12 +101,12 @@ func Probe(ctx context.Context, tr transport.Transport) (Report, error) {
 			return Report{}, err
 		}
 		if hasLayoutDir(dirs) || looksLikeRepo(files, false, false) {
-			return Report{Result: Partial, Message: "syncsh-looking files are present but metadata/manifest and keys/generations are missing"}, nil
+			return Report{Result: Partial, Message: "remnix-looking files are present but metadata/manifest and keys/generations are missing"}, nil
 		}
 		if len(dirs) == 0 && len(files) == 0 {
 			return Report{Result: Empty, Message: "no objects at this path"}, nil
 		}
-		return Report{Result: Unrelated, Message: "path contains files that are not a syncsh repository"}, nil
+		return Report{Result: Unrelated, Message: "path contains files that are not a remnix repository"}, nil
 	}
 
 	if hasManifest {
@@ -130,7 +130,7 @@ func Probe(ctx context.Context, tr transport.Transport) (Report, error) {
 		if !generationLooksValid(gens) {
 			return Report{Result: Partial, Message: "keys/generations does not contain a valid generation manifest"}, nil
 		}
-		return Report{Result: Valid, Message: "existing syncsh repository"}, nil
+		return Report{Result: Valid, Message: "existing remnix repository"}, nil
 	}
 
 	return Report{Result: Partial, Message: "keys/generations found without metadata/manifest"}, nil

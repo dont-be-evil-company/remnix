@@ -12,8 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/search"
 )
 
 type inspectView int
@@ -541,7 +541,7 @@ func filterRuns(in []history.Entry, query string) []history.Entry {
 }
 
 func (m inspectModel) renderInspectHeader(w int) string {
-	left := styleTitle.Render("syncsh inspect")
+	left := styleTitle.Render("remnix inspect")
 	if m.view == inspectRuns {
 		cmd := strings.ReplaceAll(strings.ReplaceAll(m.runCmd, "\r", ""), "\n", " ")
 		remain := w - lipgloss.Width(left) - 2

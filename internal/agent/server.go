@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func Serve(r io.Reader, w io.Writer, svc *Service) error {

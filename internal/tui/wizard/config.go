@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func RunConfig(ctx context.Context, cfg *config.Config) error {

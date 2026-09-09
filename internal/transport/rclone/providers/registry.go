@@ -41,7 +41,7 @@ func All() []Definition {
 		{ID: "google-drive", DisplayName: "Google Drive", RcloneType: "drive", Description: "Google Drive via OAuth", Category: CategoryCloud, AuthKind: AuthOAuth, Featured: true},
 		{ID: "webdav", DisplayName: "WebDAV", RcloneType: "webdav", Description: "Nextcloud, ownCloud, SharePoint, generic WebDAV", Category: CategoryNetwork, AuthKind: AuthPassword, Featured: true, Limitations: []string{"capabilities vary by server/vendor"}},
 		{ID: "smb", DisplayName: "SMB / CIFS", RcloneType: "smb", Description: "Windows/Samba file shares", Category: CategoryNetwork, AuthKind: AuthPassword, Featured: true, Limitations: []string{"a share must be selected"}},
-		{ID: "custom", DisplayName: "Generic rclone backend", RcloneType: "", Description: "Any backend compiled into this syncsh binary", Category: CategoryAdvanced, AuthKind: AuthMixed, Featured: false},
+		{ID: "custom", DisplayName: "Generic rclone backend", RcloneType: "", Description: "Any backend compiled into this remnix binary", Category: CategoryAdvanced, AuthKind: AuthMixed, Featured: false},
 	}
 }
 

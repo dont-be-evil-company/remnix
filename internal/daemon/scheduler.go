@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/redact"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 type SyncScheduler struct {
@@ -107,11 +107,11 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 	smks, err := keyring.Get(a.Config.DeviceID)
 	if err != nil {
 		writeStatus(failStatus(err, ""))
-		slog.Error("syncsh daemon: keyring", "err", err)
+		slog.Error("remnix daemon: keyring", "err", err)
 		return ""
 	}
 	if len(smks) == 0 {
-		msg := "keyring empty; run syncsh unlock (recovery key or FIDO touch once)"
+		msg := "keyring empty; run remnix unlock (recovery key or FIDO touch once)"
 		st := Status{OK: false, At: time.Now().Unix(), Error: msg, HumanAt: time.Now().Format(time.RFC3339)}
 		writeStatus(st)
 		s.setLastSync(st)
@@ -123,7 +123,7 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 	syncMs := time.Since(syncStart).Milliseconds()
 	if err != nil {
 		if interrupted(ctx, err) {
-			slog.Info("syncsh daemon: sync interrupted", "err", err)
+			slog.Info("remnix daemon: sync interrupted", "err", err)
 			return ""
 		}
 		class, hint := classifyErr(err, a.Config)
@@ -131,26 +131,26 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		st.SyncMs = syncMs
 		writeStatus(st)
 		s.setLastSync(st)
-		slog.Error("syncsh daemon: sync", "err", err, "class", class, "sync", FormatElapsed(syncMs))
+		slog.Error("remnix daemon: sync", "err", err, "class", class, "sync", FormatElapsed(syncMs))
 		return class
 	}
 	if s.history != nil && !cs.Empty() {
 		if err := s.history.ApplyRemoteChanges(cs); err != nil {
-			slog.Warn("syncsh daemon: cache after sync", "err", err)
+			slog.Warn("remnix daemon: cache after sync", "err", err)
 			s.history.Cache().MarkDirty()
 			_ = s.history.Rebuild(ctx)
 			reclaimMemory()
 		}
 	}
 	if err := a.MaybeCheckpoint(ctx); err != nil {
-		slog.Warn("syncsh daemon: checkpoint", "err", err)
+		slog.Warn("remnix daemon: checkpoint", "err", err)
 	}
 	gcStart := time.Now()
 	plan, err := a.GarbageCollect(ctx, false)
 	gcMs := time.Since(gcStart).Milliseconds()
 	if err != nil {
 		if interrupted(ctx, err) {
-			slog.Info("syncsh daemon: gc interrupted", "err", err)
+			slog.Info("remnix daemon: gc interrupted", "err", err)
 			return ""
 		}
 		st := failStatus(fmt.Errorf("gc: %w", err), "")
@@ -158,11 +158,11 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		st.GCMs = gcMs
 		writeStatus(st)
 		s.setLastSync(st)
-		slog.Error("syncsh daemon: gc", "err", err, "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
+		slog.Error("remnix daemon: gc", "err", err, "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
 		return ""
 	}
 	if n := plan.DeletedCount(); n > 0 {
-		slog.Info("syncsh daemon: gc", "deleted", n, "checkpoint", plan.Checkpoint, "gc", FormatElapsed(gcMs))
+		slog.Info("remnix daemon: gc", "deleted", n, "checkpoint", plan.Checkpoint, "gc", FormatElapsed(gcMs))
 		if s.history != nil {
 			s.history.Cache().MarkDirty()
 			_ = s.history.Rebuild(ctx)
@@ -178,7 +178,7 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		st.GCMs = gcMs
 		writeStatus(st)
 		s.setLastSync(st)
-		slog.Error("syncsh daemon: callback lock", "err", err)
+		slog.Error("remnix daemon: callback lock", "err", err)
 		return ""
 	}
 	cbErr := a.RunCallbacks(ctx)
@@ -191,7 +191,7 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 		st.GCMs = gcMs
 		writeStatus(st)
 		s.setLastSync(st)
-		slog.Error("syncsh daemon: callback", "err", cbErr)
+		slog.Error("remnix daemon: callback", "err", cbErr)
 		return ""
 	}
 	st := Status{
@@ -205,18 +205,18 @@ func (s *Server) runSyncCycle(ctx context.Context) string {
 	}
 	writeStatus(st)
 	s.setLastSync(st)
-	slog.Info("syncsh daemon: tick", "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
+	slog.Info("remnix daemon: tick", "sync", FormatElapsed(syncMs), "gc", FormatElapsed(gcMs))
 	return ""
 }
 
 func classifyErr(err error, cfg *config.Config) (class, hint string) {
 	switch {
 	case errors.Is(err, transport.ErrAuthRequired):
-		hint = "run: syncsh remote reconnect <name>"
+		hint = "run: remnix remote reconnect <name>"
 		if cfg != nil {
 			for _, r := range cfg.Sync.EnabledEndpoints() {
 				if r.Provider == "icloud-drive" && strings.Contains(err.Error(), r.ID) {
-					hint = "iCloud authentication expired; run: syncsh remote reconnect " + r.ID
+					hint = "iCloud authentication expired; run: remnix remote reconnect " + r.ID
 					break
 				}
 			}

@@ -8,7 +8,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/mistweaverco/syncsh/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/config"
 )
 
 func Run(ctx context.Context) error {
@@ -27,7 +27,7 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	if err := writePID(); err != nil {
-		slog.Warn("syncsh daemon: pid file", "err", err)
+		slog.Warn("remnix daemon: pid file", "err", err)
 	}
 	defer removePID()
 	go s.rebuildCache()
@@ -89,7 +89,7 @@ func Ping() error {
 func Binary() (string, error) {
 	bin, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("locate syncsh binary: %w", err)
+		return "", fmt.Errorf("locate remnix binary: %w", err)
 	}
 	return bin, nil
 }

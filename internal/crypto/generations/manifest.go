@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -25,7 +25,7 @@ type Manifest struct {
 }
 
 func macKey(smk []byte) []byte {
-	r := hkdf.New(sha256.New, smk, []byte("syncsh-manifest"), []byte("mac-v1"))
+	r := hkdf.New(sha256.New, smk, []byte("remnix-manifest"), []byte("mac-v1"))
 	key := make([]byte, 32)
 	_, _ = io.ReadFull(r, key)
 	return key

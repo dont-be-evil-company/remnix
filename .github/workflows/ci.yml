@@ -17,9 +17,9 @@ jobs:
         run: go test ./...
       - name: Binary size
         run: |
-          CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/syncsh ./cmd/syncsh
-          ls -lh /tmp/syncsh
-          stat -c 'syncsh binary size: %s bytes' /tmp/syncsh
+          CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/remnix ./cmd/remnix
+          ls -lh /tmp/remnix
+          stat -c 'remnix binary size: %s bytes' /tmp/remnix
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:

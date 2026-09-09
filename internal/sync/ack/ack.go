@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
 )
 
 const CurrentVersion = 1

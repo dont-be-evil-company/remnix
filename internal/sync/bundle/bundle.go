@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
 )
 
 const CurrentVersion = 1

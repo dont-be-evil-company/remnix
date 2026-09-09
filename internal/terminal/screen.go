@@ -8,7 +8,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 type Screen struct {

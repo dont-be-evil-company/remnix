@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
 )
 
 var postHooks = map[string]func(*sql.Tx) error{

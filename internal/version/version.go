@@ -1,7 +1,7 @@
 package version
 
 import (
-	rclonetr "github.com/mistweaverco/syncsh/internal/transport/rclone"
+	rclonetr "github.com/dont-be-evil-company/remnix/internal/transport/rclone"
 )
 
 const Version = "0.1.0"

@@ -6,7 +6,7 @@ import (
 
 func TestAcquireLockExclusive(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 
 	l1, err := AcquireLock()
 	if err != nil {

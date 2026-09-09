@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 func (e *Engine) RecoverGeneration(ctx context.Context, generationID string) (generations.Manifest, error) {

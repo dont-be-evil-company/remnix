@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 func TestChildEnvKeepsClientTmux(t *testing.T) {
@@ -28,10 +28,10 @@ func TestChildEnvKeepsClientTmux(t *testing.T) {
 		t.Fatalf("TMUX=%q", gotTmux)
 	}
 	if gotProxy != gotTmux {
-		t.Fatalf("SYNCSH_PTY_PROXY_TMUX=%q want %q", gotProxy, gotTmux)
+		t.Fatalf("REMNIX_PTY_PROXY_TMUX=%q want %q", gotProxy, gotTmux)
 	}
 	if envValue(env, EnvActive) != "1" {
-		t.Fatal("expected SYNCSH_SESSION_ACTIVE")
+		t.Fatal("expected REMNIX_SESSION_ACTIVE")
 	}
 	if countPrefix(env, ptyproxy.EnvTmux+"=") != 1 {
 		t.Fatalf("duplicate %s in %v", ptyproxy.EnvTmux, env)

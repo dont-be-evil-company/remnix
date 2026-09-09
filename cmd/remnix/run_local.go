@@ -9,18 +9,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/client"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/importers"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/shell"
+	"github.com/dont-be-evil-company/remnix/internal/stats"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/client"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/importers"
-	"github.com/mistweaverco/syncsh/internal/protocol"
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
-	"github.com/mistweaverco/syncsh/internal/search"
-	"github.com/mistweaverco/syncsh/internal/shell"
-	"github.com/mistweaverco/syncsh/internal/stats"
-	"github.com/mistweaverco/syncsh/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -384,13 +384,13 @@ func runPtyProxy(shellPath string) error {
 func runInit(cmd *cobra.Command, args []string) error {
 	bin, err := os.Executable()
 	if err != nil {
-		bin = "syncsh"
+		bin = "remnix"
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	attach := filepath.Join(filepath.Dir(bin), "syncsh-attach")
+	attach := filepath.Join(filepath.Dir(bin), "remnix-attach")
 	out, err := shell.Integration(args[0], bin, shell.Options{
 		SuggestEnabled:     cfg.Suggest.IsEnabled(),
 		SuggestAccept:      cfg.Suggest.AcceptKeys(),

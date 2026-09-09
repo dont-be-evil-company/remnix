@@ -12,7 +12,7 @@ func (d Definition) Intro() string {
 	case "azure-files":
 		return "Azure Files. Use an account key, SAS URL, connection string, or Azure identity. Credentials stay in the local rclone.conf."
 	case "icloud-drive":
-		return "iCloud Drive uses your Apple ID and may prompt for 2FA. Authentication can expire; reconnect later with: syncsh remote reconnect <name>"
+		return "iCloud Drive uses your Apple ID and may prompt for 2FA. Authentication can expire; reconnect later with: remnix remote reconnect <name>"
 	case "onedrive":
 		return "Microsoft OneDrive via OAuth. A browser window will open for sign-in."
 	case "google-drive":
@@ -22,7 +22,7 @@ func (d Definition) Intro() string {
 	case "smb":
 		return "SMB/CIFS share. You must select a share. Guest access is available when the server allows it."
 	case "custom":
-		return "Any backend compiled into this syncsh binary. Use this for providers without a first-class wizard. Saving after a failed connection test is allowed only here."
+		return "Any backend compiled into this remnix binary. Use this for providers without a first-class wizard. Saving after a failed connection test is allowed only here."
 	default:
 		return d.Description
 	}

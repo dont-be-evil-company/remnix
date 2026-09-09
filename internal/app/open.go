@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/db"
-	"github.com/mistweaverco/syncsh/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/device"
 )
 
 type App struct {

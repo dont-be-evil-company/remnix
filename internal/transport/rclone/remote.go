@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/transport"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/object"
@@ -30,7 +30,7 @@ type Transport struct {
 }
 
 // dirKeepName is a placeholder object so S3/GCS prefixes are listable.
-const dirKeepName = ".syncsh-dir"
+const dirKeepName = ".remnix-dir"
 
 func Open(ctx context.Context, remoteName, root string) (*Transport, error) {
 	mu.Lock()
@@ -278,8 +278,8 @@ func (t *Transport) rename(ctx context.Context, obj fs.Object, final string, dat
 // to accumulate copies, and Mkdir after a dir-cache flush used to spawn a
 // second `checkpoints/` folder that GC could not see.
 //
-// Duplicate folders can also appear one level up (`syncsh` next to the live
-// repo). rclone `gdrive:syncsh` is bound to one folder ID, so List never
+// Duplicate folders can also appear one level up (`remnix` next to the live
+// repo). rclone `gdrive:remnix` is bound to one folder ID, so List never
 // sees those siblings; a Drive name query (or a parent listing) merges them
 // into the live root before layout dirs are collapsed.
 func (t *Transport) Dedupe(ctx context.Context) error {
@@ -725,7 +725,7 @@ func (t *Transport) HealthCheck(ctx context.Context) (transport.HealthStatus, er
 		}
 		return transport.HealthStatus{State: transport.HealthOK, Message: "ok"}, nil
 	}
-	_, err := t.fs.NewObject(ctx, ".syncsh-health-check")
+	_, err := t.fs.NewObject(ctx, ".remnix-health-check")
 	if err != nil && !errors.Is(err, fs.ErrorObjectNotFound) && !errors.Is(err, fs.ErrorDirNotFound) {
 		st := transport.ClassifyHealth(mapErr(err))
 		return st, nil

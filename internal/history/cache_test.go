@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 )
 
 func TestCacheSuggestMatchesStore(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
 )
 
 func Apply(tx *sql.Tx, ev event.Event) error {

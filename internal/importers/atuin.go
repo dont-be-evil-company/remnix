@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 func ImportAtuin(path, deviceID string) ([]history.Entry, error) {

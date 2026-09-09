@@ -1,4 +1,4 @@
-module github.com/mistweaverco/syncsh
+module github.com/dont-be-evil-company/remnix
 
 go 1.25.8
 

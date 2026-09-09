@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 type Result struct {

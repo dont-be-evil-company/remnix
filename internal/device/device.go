@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/dont-be-evil-company/remnix/internal/db"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/db"
 )
 
 const (

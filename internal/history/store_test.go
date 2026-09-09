@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 )
 
 func testStore(t *testing.T) *Store {

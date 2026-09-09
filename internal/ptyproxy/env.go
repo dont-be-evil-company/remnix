@@ -3,12 +3,12 @@ package ptyproxy
 import "os"
 
 const (
-	EnvActive = "SYNCSH_PTY_PROXY_ACTIVE"
-	EnvSocket = "SYNCSH_PTY_PROXY_SOCKET"
-	EnvTmux   = "SYNCSH_PTY_PROXY_TMUX"
+	EnvActive = "REMNIX_PTY_PROXY_ACTIVE"
+	EnvSocket = "REMNIX_PTY_PROXY_SOCKET"
+	EnvTmux   = "REMNIX_PTY_PROXY_TMUX"
 )
 
-// Active reports whether this process is running inside syncsh pty-proxy.
+// Active reports whether this process is running inside remnix pty-proxy.
 func Active() bool {
 	return os.Getenv(EnvActive) != ""
 }

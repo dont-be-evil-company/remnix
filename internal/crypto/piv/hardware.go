@@ -43,7 +43,7 @@ func (h *HardwareToken) Decrypt(ciphertext []byte) ([]byte, error) {
 	}
 	switch h.pub.(type) {
 	case *rsa.PublicKey:
-		return d.Decrypt(rand.Reader, ciphertext, &rsa.OAEPOptions{Hash: crypto.SHA256, Label: []byte("syncsh-piv")})
+		return d.Decrypt(rand.Reader, ciphertext, &rsa.OAEPOptions{Hash: crypto.SHA256, Label: []byte("remnix-piv")})
 	default:
 		return d.Decrypt(rand.Reader, ciphertext, nil)
 	}

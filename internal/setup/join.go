@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/tui/wizard"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/tui/wizard"
 )
 
 func RequireValidRemote(ctx context.Context, a *app.App) error {
@@ -24,7 +24,7 @@ func RequireValidRemote(ctx context.Context, a *app.App) error {
 		return err
 	}
 	if rep.Result != repository.Valid {
-		return fmt.Errorf("join requires a valid syncsh repository (got %s): %s", rep.Result, rep.Message)
+		return fmt.Errorf("join requires a valid remnix repository (got %s): %s", rep.Result, rep.Message)
 	}
 	return nil
 }

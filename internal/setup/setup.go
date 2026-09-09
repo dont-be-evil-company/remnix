@@ -6,19 +6,19 @@ import (
 	"os"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
-	"github.com/mistweaverco/syncsh/internal/daemon"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/sync/syncer"
-	"github.com/mistweaverco/syncsh/internal/tui/wizard"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/rotation"
+	"github.com/dont-be-evil-company/remnix/internal/daemon"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
+	"github.com/dont-be-evil-company/remnix/internal/tui/wizard"
 )
 
 type Result struct {
@@ -43,7 +43,7 @@ func Run(ctx context.Context, a *app.App) (Result, error) {
 	if _, ok, err := store.Active(); err != nil {
 		return Result{}, err
 	} else if ok {
-		return Result{}, fmt.Errorf("this device is already set up; use 'syncsh key fido add' or 'syncsh key yubikey add' to enroll a hardware key, or 'syncsh key status' to inspect")
+		return Result{}, fmt.Errorf("this device is already set up; use 'remnix key fido add' or 'remnix key yubikey add' to enroll a hardware key, or 'remnix key status' to inspect")
 	}
 
 	cfg := a.Config
@@ -142,7 +142,7 @@ func resume(ctx context.Context, a *app.App, st *State) (Result, error) {
 		smks, _ := keyring.Get(a.Config.DeviceID)
 		smk := smks[m.GenerationID]
 		if len(smk) == 0 {
-			return Result{}, fmt.Errorf("partial setup: SMK is not in the keyring; run syncsh unlock, then retry setup")
+			return Result{}, fmt.Errorf("partial setup: SMK is not in the keyring; run remnix unlock, then retry setup")
 		}
 		if a.Config.Sync.IsEnabled() {
 			eng, err := a.Engine(nil, nil, nil)
@@ -194,7 +194,7 @@ func finishCreate(ctx context.Context, a *app.App, enrollHW bool, marker *State)
 	}
 	if err := keyring.Set(a.Config.DeviceID, map[string][]byte{m.GenerationID: smk}); err != nil {
 		fmt.Fprintln(os.Stderr, "could not store SMK in OS keyring:", err)
-		fmt.Fprintln(os.Stderr, "run syncsh unlock after the keyring is available")
+		fmt.Fprintln(os.Stderr, "run remnix unlock after the keyring is available")
 	}
 	if marker != nil {
 		marker.Phase = PhaseKeys
@@ -225,12 +225,12 @@ func offerDaemon(ctx context.Context) {
 	}
 	if err := daemon.Install(); err != nil {
 		fmt.Fprintln(os.Stderr, "could not install login daemon:", err)
-		fmt.Fprintln(os.Stderr, "you can retry with: syncsh daemon install")
+		fmt.Fprintln(os.Stderr, "you can retry with: remnix daemon install")
 	}
 }
 
 func recoverySecretFromEnv() []byte {
-	if env := os.Getenv("SYNCSH_RECOVERY_KEY"); env != "" {
+	if env := os.Getenv("REMNIX_RECOVERY_KEY"); env != "" {
 		s, err := recovery.Decode(env)
 		if err == nil {
 			return s

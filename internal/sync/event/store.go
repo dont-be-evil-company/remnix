@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/mistweaverco/syncsh/internal/db"
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 type Store struct {

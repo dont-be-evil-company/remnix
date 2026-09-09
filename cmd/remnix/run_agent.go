@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/client"
+	"github.com/dont-be-evil-company/remnix/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -11,9 +11,9 @@ func newAgentCmd() *cobra.Command {
 	var stdio bool
 	cmd := &cobra.Command{
 		Use:        "agent",
-		Short:      "Deprecated: ensure the SyncSH daemon is running",
-		Long:       "Compatibility wrapper. Starts or connects to the unified syncsh daemon and exits. Prefer `syncsh daemon`.",
-		Deprecated: "use syncsh daemon",
+		Short:      "Deprecated: ensure the remnix daemon is running",
+		Long:       "Compatibility wrapper. Starts or connects to the unified remnix daemon and exits. Prefer `remnix daemon`.",
+		Deprecated: "use remnix daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgent(cmd, stdio)
 		},

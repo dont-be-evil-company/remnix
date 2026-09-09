@@ -164,23 +164,23 @@ func newUnlockCmd() *cobra.Command {
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Run the SyncSH core daemon",
+		Short: "Run the remnix core daemon",
 		RunE:  runDaemon,
 	}
-	cmd.AddCommand(&cobra.Command{Use: "install", Short: "Install user-session autostart for the SyncSH daemon", RunE: runDaemonInstall})
-	cmd.AddCommand(&cobra.Command{Use: "uninstall", Short: "Remove login autostart for the SyncSH daemon", RunE: runDaemonUninstall})
+	cmd.AddCommand(&cobra.Command{Use: "install", Short: "Install user-session autostart for the remnix daemon", RunE: runDaemonInstall})
+	cmd.AddCommand(&cobra.Command{Use: "uninstall", Short: "Remove login autostart for the remnix daemon", RunE: runDaemonUninstall})
 	cmd.AddCommand(&cobra.Command{Use: "status", Short: "Show daemon install and last sync status", RunE: runDaemonStatus})
 	cmd.AddCommand(&cobra.Command{Use: "stats", Short: "Show live daemon stats", RunE: runDaemonStats})
 	cmd.AddCommand(&cobra.Command{Use: "reload", Short: "Reload daemon config from disk", RunE: runDaemonReload})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "compact",
 		Short: "Compact the history cache and return unused memory to the OS",
-		Long:  "Prune interned strings from the in-memory history cache and ask the Go runtime to return unused heap to the OS. The daemon also does this every 5 minutes; this command runs it immediately. Does not drop attached PTYs. Distinct from `syncsh database compact`, which vacuums SQLite.",
+		Long:  "Prune interned strings from the in-memory history cache and ask the Go runtime to return unused heap to the OS. The daemon also does this every 5 minutes; this command runs it immediately. Does not drop attached PTYs. Distinct from `remnix database compact`, which vacuums SQLite.",
 		RunE:  runDaemonCompact,
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "restart",
-		Short: "Restart the SyncSH daemon",
+		Short: "Restart the remnix daemon",
 		Long:  "Stop the running daemon and start it again. Attached PTYs cannot reattach; new shells will reconnect.",
 		RunE:  runDaemonRestart,
 	})

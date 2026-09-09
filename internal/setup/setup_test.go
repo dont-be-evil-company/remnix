@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
-	"github.com/mistweaverco/syncsh/internal/sync/syncer"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 func TestMain(m *testing.M) {
@@ -24,8 +24,8 @@ func TestMain(m *testing.M) {
 
 func TestRunNonInteractiveIdempotentError(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +43,8 @@ func TestRunNonInteractiveIdempotentError(t *testing.T) {
 func TestRunNonInteractiveRefusesExistingRemote(t *testing.T) {
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote")
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg-a"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data-a"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg-a"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data-a"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -54,8 +54,8 @@ func TestRunNonInteractiveRefusesExistingRemote(t *testing.T) {
 	}
 	a.Close()
 
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg-b"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data-b"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg-b"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data-b"))
 	b, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestRunNonInteractiveRefusesExistingRemote(t *testing.T) {
 
 func TestRunNonInteractiveStoresSMKInKeyring(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +89,8 @@ func TestRunNonInteractiveStoresSMKInKeyring(t *testing.T) {
 
 func TestRunNonInteractiveWithFakeFIDO2(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -115,8 +115,8 @@ func TestRunNonInteractiveWithFakeFIDO2(t *testing.T) {
 
 func TestRequireValidRemote(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -138,8 +138,8 @@ func TestRequireValidRemote(t *testing.T) {
 
 func TestCheckpointAndGarbageCollect(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(root, "cfg"))
-	t.Setenv("SYNCSH_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
 	a, err := app.Open()
 	if err != nil {
 		t.Fatal(err)

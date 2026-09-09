@@ -7,10 +7,10 @@ import (
 	"os"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/app"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/tui/picker"
+	"github.com/dont-be-evil-company/remnix/internal/app"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
 )
 
 type Intent int
@@ -34,9 +34,9 @@ func ChooseIntent(ctx context.Context, preselect Intent) (Intent, error) {
 		huh.NewSelect[Intent]().
 			Title("What would you like to do?").
 			Options(
-				huh.NewOption("Create a new syncsh history", IntentCreate),
-				huh.NewOption("Join an existing syncsh history", IntentJoin),
-				huh.NewOption("Use syncsh locally without synchronization", IntentLocal),
+				huh.NewOption("Create a new remnix history", IntentCreate),
+				huh.NewOption("Join an existing remnix history", IntentJoin),
+				huh.NewOption("Use remnix locally without synchronization", IntentLocal),
 				huh.NewOption("Exit", IntentExit),
 			).
 			Value(&intent),
@@ -51,8 +51,8 @@ func ChooseTransport(ctx context.Context) (string, error) {
 	tr := "rclone"
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().
-			Title("How should syncsh synchronize your encrypted history?").
-			Description("rclone gives syncsh direct access to cloud and network storage while your history remains encrypted by syncsh. No syncsh account or server is required.").
+			Title("How should remnix synchronize your encrypted history?").
+			Description("rclone gives remnix direct access to cloud and network storage while your history remains encrypted by remnix. No remnix account or server is required.").
 			Options(
 				huh.NewOption("rclone (recommended)", "rclone"),
 				huh.NewOption("Synced/local folder", "directory"),
@@ -94,9 +94,9 @@ func AddEndpoint(ctx context.Context, cfg *config.Config, join bool) (config.End
 	case "none":
 		return config.Endpoint{}, nil
 	case "directory":
-		title := "Select syncsh storage folder"
+		title := "Select remnix storage folder"
 		if join {
-			title = "Select existing syncsh folder"
+			title = "Select existing remnix folder"
 		}
 		res, err := PickLocalDir(ctx, title, !join)
 		if err != nil {
@@ -106,7 +106,7 @@ func AddEndpoint(ctx context.Context, cfg *config.Config, join bool) (config.End
 			return config.Endpoint{}, fmt.Errorf("cancelled")
 		}
 		if !join && res.Join {
-			return config.Endpoint{}, fmt.Errorf("an existing repository was selected; use 'syncsh device add' to join")
+			return config.Endpoint{}, fmt.Errorf("an existing repository was selected; use 'remnix device add' to join")
 		}
 		ep := config.DirectoryEndpoint(uniqueEndpointID(cfg, "local"), res.Path)
 		return ep, nil

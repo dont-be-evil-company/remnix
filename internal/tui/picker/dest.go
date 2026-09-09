@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 type DestKind int
@@ -17,7 +17,7 @@ const (
 	DestValidRepo
 	DestPartialRepo
 	DestUnsupported
-	DestSyncshSubdirExists
+	DestRemnixSubdirExists
 )
 
 type DestReport struct {
@@ -50,14 +50,14 @@ func ClassifyDest(ctx context.Context, path string) (DestReport, error) {
 		out.Kind = DestUnsupported
 	default:
 		out.Kind = DestUnrelated
-		sub := filepath.Join(abs, "syncsh")
+		sub := filepath.Join(abs, "remnix")
 		if st, err := os.Stat(sub); err == nil && st.IsDir() {
 			out.HasSubdir = true
 			out.Subdir = sub
 			subTr := directory.New(sub)
 			subRep, err := repository.Probe(ctx, subTr)
 			if err == nil && subRep.Result == repository.Valid {
-				out.Kind = DestSyncshSubdirExists
+				out.Kind = DestRemnixSubdirExists
 				out.Probe = subRep
 			}
 		}
@@ -84,7 +84,7 @@ func ChoicesFor(kind DestKind) []DestChoice {
 		return []DestChoice{ChoiceUse, ChoiceSelectAnother, ChoiceCancel}
 	case DestUnrelated:
 		return []DestChoice{ChoiceCreateSubfolder, ChoiceSelectAnother, ChoiceProceedAnyway, ChoiceCancel}
-	case DestSyncshSubdirExists:
+	case DestRemnixSubdirExists:
 		return []DestChoice{ChoiceUse, ChoiceSelectAnother, ChoiceChooseSubfolderName, ChoiceCancel}
 	case DestValidRepo:
 		return []DestChoice{ChoiceJoin, ChoiceSelectAnother, ChoiceCancel}

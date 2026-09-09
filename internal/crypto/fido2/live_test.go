@@ -6,8 +6,8 @@ import (
 )
 
 func TestLiveHIDHmacSecret(t *testing.T) {
-	if os.Getenv("SYNCSH_FIDO2_LIVE") != "1" {
-		t.Skip("set SYNCSH_FIDO2_LIVE=1 to run against a plugged-in Security Key")
+	if os.Getenv("REMNIX_FIDO2_LIVE") != "1" {
+		t.Skip("set REMNIX_FIDO2_LIVE=1 to run against a plugged-in Security Key")
 	}
 	devs, err := OpenHMACDevices(PromptPIN)
 	if err != nil {

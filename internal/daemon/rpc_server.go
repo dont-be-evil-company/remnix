@@ -7,9 +7,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/protocol"
-	"github.com/mistweaverco/syncsh/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/search"
 )
 
 const pingTimeout = 50 * time.Millisecond

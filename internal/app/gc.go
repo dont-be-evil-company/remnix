@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/sync/equalize"
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/sync/syncer"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/sync/equalize"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) {

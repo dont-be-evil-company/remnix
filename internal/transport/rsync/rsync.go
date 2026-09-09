@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/mistweaverco/syncsh/internal/transport"
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 var (

@@ -12,8 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/search"
 )
 
 type Options struct {
@@ -347,7 +347,7 @@ func (m model) renderHeader(w int) string {
 			scope += "  " + m.cwd
 		}
 	}
-	left := styleTitle.Render("syncsh") + "  " + styleMuted.Render(scope)
+	left := styleTitle.Render("remnix") + "  " + styleMuted.Render(scope)
 	right := styleMuted.Render(fmt.Sprintf("%s unique", formatCount(len(m.visible))))
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -487,11 +487,11 @@ func (m model) RunSelected() bool {
 
 // AcceptPrefix is printed before the selected command in widget mode so the
 // shell integration can execute it (Atuin's __atuin_accept__: protocol).
-const AcceptPrefix = "__syncsh_accept__:"
+const AcceptPrefix = "__remnix_accept__:"
 
 // ContinuePrefix means the shell should insert the command and reopen the
 // suggest overlay with fresh completions for that prefix.
-const ContinuePrefix = "__syncsh_continue__:"
+const ContinuePrefix = "__remnix_continue__:"
 
 // FormatSelection is the widget RPC payload: accept-prefix when Enter should
 // run the command. No trailing newline (NUL fields keep it).

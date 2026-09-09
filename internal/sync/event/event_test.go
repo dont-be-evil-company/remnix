@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {

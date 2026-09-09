@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	configpkg "github.com/mistweaverco/syncsh/internal/config"
+	configpkg "github.com/dont-be-evil-company/remnix/internal/config"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configfile"

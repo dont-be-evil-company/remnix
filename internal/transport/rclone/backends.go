@@ -1,8 +1,8 @@
-// Package rclone implements a syncsh Transport over embedded rclone backends.
+// Package rclone implements a remnix Transport over embedded rclone backends.
 //
 // Spike findings (rclone v1.73.4):
 //   - Direct Go APIs (fs.NewFs, fs.Fs, fs.Object) work without librclone.
-//   - Config is process-global; syncsh must SetConfigPath to its own rclone.conf
+//   - Config is process-global; remnix must SetConfigPath to its own rclone.conf
 //     and serialize mutations with mu.
 //   - Selected backend blank-imports register remotes; no external binary.
 //   - CGO is not required for the featured backends (FUSE/mount is not imported).

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/db"
 )
 
 type HeadStore struct {

@@ -35,8 +35,8 @@ func TestMemoryRoundTrip(t *testing.T) {
 }
 
 func TestLiveKeyring(t *testing.T) {
-	if os.Getenv("SYNCSH_KEYRING_LIVE") != "1" {
-		t.Skip("set SYNCSH_KEYRING_LIVE=1 to talk to the OS keyring")
+	if os.Getenv("REMNIX_KEYRING_LIVE") != "1" {
+		t.Skip("set REMNIX_KEYRING_LIVE=1 to talk to the OS keyring")
 	}
 	Use(nil)
 	id := "live-test-device"

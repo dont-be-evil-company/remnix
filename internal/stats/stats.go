@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 func Write(w io.Writer, st history.Stats) {

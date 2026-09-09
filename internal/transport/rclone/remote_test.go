@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
 func TestLocalRoundTrip(t *testing.T) {
@@ -99,16 +99,16 @@ func TestVersionPinned(t *testing.T) {
 }
 
 func TestFsSpecTrailingSlashForBucketBackends(t *testing.T) {
-	if got := fsSpec("syncsh-s3", "dont-be-evil-company/syncsh", "s3"); got != "syncsh-s3:dont-be-evil-company/syncsh/" {
+	if got := fsSpec("remnix-s3", "dont-be-evil-company/remnix", "s3"); got != "remnix-s3:dont-be-evil-company/remnix/" {
 		t.Fatalf("s3 spec: %q", got)
 	}
-	if got := fsSpec("syncsh-s3", "my-bucket", "s3"); got != "syncsh-s3:my-bucket/" {
+	if got := fsSpec("remnix-s3", "my-bucket", "s3"); got != "remnix-s3:my-bucket/" {
 		t.Fatalf("s3 bucket spec: %q", got)
 	}
-	if got := fsSpec("syncsh-s3", "", "s3"); got != "syncsh-s3:" {
+	if got := fsSpec("remnix-s3", "", "s3"); got != "remnix-s3:" {
 		t.Fatalf("s3 empty spec: %q", got)
 	}
-	if got := fsSpec("gdrive", "syncsh", "drive"); got != "gdrive:syncsh" {
+	if got := fsSpec("gdrive", "remnix", "drive"); got != "gdrive:remnix" {
 		t.Fatalf("drive must not get a trailing slash: %q", got)
 	}
 }

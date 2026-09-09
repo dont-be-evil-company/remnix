@@ -163,12 +163,12 @@ func (h *hidDevice) makeCredential() (credID []byte, aaguid string, err error) {
 	}
 	resp, err := h.dev.MakeCredential(
 		token,
-		[]byte(`{"type":"webauthn.create","origin":"syncsh"}`),
-		webauthntypes.PublicKeyCredentialRpEntity{ID: RPID, Name: "syncsh"},
+		[]byte(`{"type":"webauthn.create","origin":"remnix"}`),
+		webauthntypes.PublicKeyCredentialRpEntity{ID: RPID, Name: "remnix"},
 		webauthntypes.PublicKeyCredentialUserEntity{
 			ID:          userID,
-			Name:        "syncsh",
-			DisplayName: "syncsh",
+			Name:        "remnix",
+			DisplayName: "remnix",
 		},
 		[]webauthntypes.PublicKeyCredentialParameters{{
 			Type:      webauthntypes.PublicKeyCredentialTypePublicKey,
@@ -217,7 +217,7 @@ func (h *hidDevice) Derive(credID, salt []byte) ([]byte, error) {
 	for assertion, err := range h.dev.GetAssertion(
 		token,
 		RPID,
-		[]byte(`{"type":"webauthn.get","origin":"syncsh"}`),
+		[]byte(`{"type":"webauthn.get","origin":"remnix"}`),
 		allow,
 		&webauthntypes.GetAuthenticationExtensionsClientInputs{
 			GetHMACSecretInputs: &webauthntypes.GetHMACSecretInputs{

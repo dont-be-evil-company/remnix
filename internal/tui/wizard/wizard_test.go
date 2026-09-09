@@ -15,13 +15,13 @@ func TestSanitizeBucketAndJoin(t *testing.T) {
 	if got := sanitizeBucket(" s3://dont-be-evil-company/ "); got != "dont-be-evil-company" {
 		t.Fatalf("sanitize: %q", got)
 	}
-	if got := joinRemotePath("dont-be-evil-company", "syncsh"); got != "dont-be-evil-company/syncsh" {
+	if got := joinRemotePath("dont-be-evil-company", "remnix"); got != "dont-be-evil-company/remnix" {
 		t.Fatalf("join: %q", got)
 	}
-	if got := joinRemotePath("bucket/syncsh", ""); got != "bucket/syncsh" {
+	if got := joinRemotePath("bucket/remnix", ""); got != "bucket/remnix" {
 		t.Fatalf("join empty pick: %q", got)
 	}
-	if got := joinRemotePath("bucket", "syncsh"); got != "bucket/syncsh" {
+	if got := joinRemotePath("bucket", "remnix"); got != "bucket/remnix" {
 		t.Fatalf("join pick: %q", got)
 	}
 	if got := joinRemotePath("bucket", ""); got != "bucket" {

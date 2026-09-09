@@ -8,29 +8,29 @@ import (
 	"syscall"
 
 	"charm.land/huh/v2"
-	"github.com/mistweaverco/syncsh/internal/client"
-	"github.com/mistweaverco/syncsh/internal/crypto/fido2"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/crypto/keys"
-	"github.com/mistweaverco/syncsh/internal/crypto/piv"
-	"github.com/mistweaverco/syncsh/internal/crypto/recovery"
-	"github.com/mistweaverco/syncsh/internal/crypto/rotation"
-	"github.com/mistweaverco/syncsh/internal/crypto/slots"
-	"github.com/mistweaverco/syncsh/internal/daemon"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/doctor"
-	"github.com/mistweaverco/syncsh/internal/protocol"
-	"github.com/mistweaverco/syncsh/internal/redact"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/setup"
-	"github.com/mistweaverco/syncsh/internal/sync/gc"
-	"github.com/mistweaverco/syncsh/internal/sync/merge"
+	"github.com/dont-be-evil-company/remnix/internal/client"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/rotation"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/slots"
+	"github.com/dont-be-evil-company/remnix/internal/daemon"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/doctor"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/setup"
+	"github.com/dont-be-evil-company/remnix/internal/sync/gc"
+	"github.com/dont-be-evil-company/remnix/internal/sync/merge"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 func recoverySecretFromEnv() []byte {
-	if env := os.Getenv("SYNCSH_RECOVERY_KEY"); env != "" {
+	if env := os.Getenv("REMNIX_RECOVERY_KEY"); env != "" {
 		s, err := recovery.Decode(env)
 		if err == nil {
 			return s
@@ -198,7 +198,7 @@ func runDeviceAdd(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if !ranWizard {
-		fmt.Fprintln(cmd.ErrOrStderr(), "checking configured endpoint for syncsh metadata (not a Drive-wide scan)...")
+		fmt.Fprintln(cmd.ErrOrStderr(), "checking configured endpoint for remnix metadata (not a Drive-wide scan)...")
 		if err := setup.RequireValidRemote(cmd.Context(), a); err != nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), err)
 			fmt.Fprintln(cmd.ErrOrStderr(), "re-running join wizard; pick the folder that already contains metadata/")
@@ -273,7 +273,7 @@ func runKeyYubiKeyAdd(cmd *cobra.Command, _ []string) error {
 		toks, lerr := (piv.HardwareFactory{}).List()
 		if lerr != nil || len(toks) == 0 {
 			if infos, _ := fido2.List(); len(infos) > 0 {
-				return fmt.Errorf("%w\n\nA FIDO2 security key is visible over USB HID but has no PIV applet. Enroll it with: syncsh key fido add", err)
+				return fmt.Errorf("%w\n\nA FIDO2 security key is visible over USB HID but has no PIV applet. Enroll it with: remnix key fido add", err)
 			}
 			return err
 		}
@@ -601,7 +601,7 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%s%s gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, when, last.FormatTiming(), last.GCDeleted, last.GCEligible, last.Error)
 		if !last.OK && strings.Contains(last.Error, "context canceled") {
-			fmt.Fprintln(cmd.OutOrStdout(), "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart syncsh-daemon")
+			fmt.Fprintln(cmd.OutOrStdout(), "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart remnix-daemon")
 		}
 	}
 	return nil
@@ -609,7 +609,7 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 func offerDaemonInstall(cmd *cobra.Command) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(cmd.ErrOrStderr(), "to sync at login: syncsh daemon install")
+		fmt.Fprintln(cmd.ErrOrStderr(), "to sync at login: remnix daemon install")
 		return
 	}
 	startDaemon := true
@@ -621,7 +621,7 @@ func offerDaemonInstall(cmd *cobra.Command) {
 	}
 	if err := daemon.Install(); err != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), "could not install login daemon:", err)
-		fmt.Fprintln(cmd.ErrOrStderr(), "you can retry with: syncsh daemon install")
+		fmt.Fprintln(cmd.ErrOrStderr(), "you can retry with: remnix daemon install")
 		return
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "sync daemon installed for this user session")

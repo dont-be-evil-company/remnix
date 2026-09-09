@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 // Search overlay chrome: header, rule, help, input. The list needs at least

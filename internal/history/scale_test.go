@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/db"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/search"
-	"github.com/mistweaverco/syncsh/internal/sync/bundle"
-	"github.com/mistweaverco/syncsh/internal/sync/checkpoint"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/sync/bundle"
+	"github.com/dont-be-evil-company/remnix/internal/sync/checkpoint"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
 )
 
 // TestScaleMillionUniqueCommands times Ctrl+R unique search, ghost-text /
@@ -23,9 +23,9 @@ import (
 //
 // Skipped by default (too heavy for CI). Run:
 //
-//	SYNCSH_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
+//	REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
 //
-// Optional: SYNCSH_SCALE_N=10000 for a shorter dry run (default 1000000).
+// Optional: REMNIX_SCALE_N=10000 for a shorter dry run (default 1000000).
 func TestScaleMillionUniqueCommands(t *testing.T) {
 	n := scaleN(t)
 	d, err := db.OpenAndMigrate(filepath.Join(t.TempDir(), "history.db"))
@@ -209,14 +209,14 @@ func scaleN(t testing.TB) int {
 	if testing.Short() {
 		t.Skip("scale test skipped with -short")
 	}
-	if os.Getenv("SYNCSH_SCALE") == "" {
-		t.Skip("set SYNCSH_SCALE=1 to time 1M unique commands (optional SYNCSH_SCALE_N)")
+	if os.Getenv("REMNIX_SCALE") == "" {
+		t.Skip("set REMNIX_SCALE=1 to time 1M unique commands (optional REMNIX_SCALE_N)")
 	}
 	n := 1_000_000
-	if s := os.Getenv("SYNCSH_SCALE_N"); s != "" {
+	if s := os.Getenv("REMNIX_SCALE_N"); s != "" {
 		v, err := strconv.Atoi(s)
 		if err != nil || v <= 0 {
-			t.Fatalf("SYNCSH_SCALE_N=%q", s)
+			t.Fatalf("REMNIX_SCALE_N=%q", s)
 		}
 		n = v
 	}

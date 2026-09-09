@@ -1,19 +1,19 @@
 # rclone transport
 
-syncsh embeds [rclone](https://rclone.org) **v1.73.4** as a Go library
+remnix embeds [rclone](https://rclone.org) **v1.73.4** as a Go library
 (`github.com/rclone/rclone`). The binary talks to backends through `fs.Fs`.
 There is no `exec.Command("rclone")` on the default path and no FUSE/mount.
 
 ## Engine
 
-- Config path: `$XDG_DATA_HOME/syncsh/rclone.conf` (created 0600, directory 0700).
-  A leftover file in `$XDG_CONFIG_HOME/syncsh/rclone.conf` is moved here on
+- Config path: `$XDG_DATA_HOME/remnix/rclone.conf` (created 0600, directory 0700).
+  A leftover file in `$XDG_CONFIG_HOME/remnix/rclone.conf` is moved here on
   startup so the portable config directory can be version-controlled.
 - Process-global rclone config: `Init` runs once; mutations take a mutex
 - Featured backends (blank imports, not `backend/all`): S3, GCS, Dropbox,
   Azure Files, iCloud Drive, OneDrive, Google Drive, WebDAV, SMB, plus local
   and memory for tests
-- `syncsh version --verbose` prints the pinned engine string
+- `remnix version --verbose` prints the pinned engine string
 - Release builds stay `CGO_ENABLED=0`
 
 ## Config
@@ -27,15 +27,15 @@ sync:
   endpoints:
     - id: google-drive
       type: rclone
-      rclone_remote: syncsh-google-drive
+      rclone_remote: remnix-google-drive
       provider: google-drive
-      path: syncsh
+      path: remnix
       enabled: true
     - id: s3
       type: rclone
-      rclone_remote: syncsh-s3
+      rclone_remote: remnix-s3
       provider: s3
-      path: my-bucket/syncsh
+      path: my-bucket/remnix
       enabled: true
 ```
 
@@ -46,11 +46,11 @@ bucket and an optional prefix: listing is `s3:ListBucket` on that bucket
 `s3:GetObject`, `s3:PutObject`, and `s3:DeleteObject` on the object keys.
 
 `sync.transport` / `rclone.primary` files are no longer supported; run
-`syncsh setup`. All enabled endpoints are mirrors of the same encrypted
-repository. `syncsh sync` fans out to every enabled endpoint;
-`syncsh sync --endpoint=<id>` targets one. `syncsh remote add` appends.
+`remnix setup`. All enabled endpoints are mirrors of the same encrypted
+repository. `remnix sync` fans out to every enabled endpoint;
+`remnix sync --endpoint=<id>` targets one. `remnix remote add` appends.
 
-Secrets stay in `$XDG_DATA_HOME/syncsh/rclone.conf`, not next to the
+Secrets stay in `$XDG_DATA_HOME/remnix/rclone.conf`, not next to the
 version-controllable `config.yaml`. Import copies a section from the user’s
 rclone config without modifying the original.
 
@@ -58,27 +58,27 @@ rclone config without modifying the original.
 
 The encrypted repository (`metadata/`, `keys/`, `events/`, `checkpoints/`,
 `acks/`) is **only** on configured endpoints. An rclone Google Drive
-endpoint with `path: syncsh` is `gdrive:syncsh` on Drive (My Drive →
-`syncsh`), not a folder on this machine. Sync and GC talk to that path
+endpoint with `path: remnix` is `gdrive:remnix` on Drive (My Drive →
+`remnix`), not a folder on this machine. Sync and GC talk to that path
 through the Drive API.
 
-On the device, under `$XDG_DATA_HOME/syncsh` (default
-`~/.local/share/syncsh`):
+On the device, under `$XDG_DATA_HOME/remnix` (default
+`~/.local/share/remnix`):
 
 - `history.db` - local shell history (plus SQLite `-wal`/`-shm`)
 - `local.yaml` - device id and local state
 - `rclone.conf` - provider credentials
-- `syncsh.lock`, `daemon-status.json` - daemon lock and status
+- `remnix.lock`, `daemon-status.json` - daemon lock and status
 
-Portable settings are `$XDG_CONFIG_HOME/syncsh/config.yaml`. The agent
-socket is `$XDG_RUNTIME_DIR/syncsh/control.sock` (else `/tmp/syncsh/`).
+Portable settings are `$XDG_CONFIG_HOME/remnix/config.yaml`. The agent
+socket is `$XDG_RUNTIME_DIR/remnix/control.sock` (else `/tmp/remnix/`).
 Atomic upload temps (`.tmp-<uuid>`) are remote objects on backends that
 still use tmp+rename; Drive writes in place.
 
-A path like `~/GoogleDrive/syncsh` is the repository only if an endpoint
+A path like `~/GoogleDrive/remnix` is the repository only if an endpoint
 is `type: directory` with that `path`. Otherwise it is unrelated local
 files (for example an old copy or a Drive desktop client mirror) and
-syncsh will not GC it.
+remnix will not GC it.
 
 Google Drive remotes get `skip_gdocs` and `skip_dangling_shortcuts` so native
 Docs/Sheets (size -1, `alt=media` downloads) are never listed or fetched.
@@ -92,8 +92,8 @@ parents - a Mkdir after a dir-cache flush used to spawn a second
 duplicate files and merge same-named directories (`MergeDirs`) starting
 at the repository root so leftover checkpoint UUID dirs in a hidden
 duplicate parent become visible and can be collected. The same Mkdir
-bug can also leave a second `syncsh` folder next to the live repo;
-rclone `gdrive:syncsh` is bound to one folder ID, so a Drive name query
+bug can also leave a second `remnix` folder next to the live repo;
+rclone `gdrive:remnix` is bound to one folder ID, so a Drive name query
 merges those siblings into the live root (never listing all of My Drive).
 After merge, GC sees every UUID dir and keeps the best checkpoint.
 Dedupe also deletes leftover `.tmp-*` objects.
@@ -108,7 +108,7 @@ Limitations (shown in the wizard, not treated as errors):
 - S3/GCS: prefixes, expensive rename; wizard asks for a bucket (account-wide
   bucket listing is not required)
 - iCloud: auth can expire; reconnect is interactive (2FA). Daemon never opens
-  a browser - use `syncsh remote reconnect <name>`
+  a browser - use `remnix remote reconnect <name>`
 - SMB: a share must be selected
 - WebDAV: capabilities vary; prefer HTTPS
 

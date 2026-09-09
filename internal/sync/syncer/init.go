@@ -9,15 +9,15 @@ import (
 	"path"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/crypto/generations"
-	"github.com/mistweaverco/syncsh/internal/device"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/repository"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
-	"github.com/mistweaverco/syncsh/internal/transport"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
+	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 )
 
-var ErrRemoteInitialized = errors.New("remote already initialized; use 'syncsh device add' to join, or 'syncsh key recover' if setup created a conflicting generation")
+var ErrRemoteInitialized = errors.New("remote already initialized; use 'remnix device add' to join, or 'remnix key recover' if setup created a conflicting generation")
 
 func RemoteInitialized(ctx context.Context, tr transport.Transport) (bool, error) {
 	rep, err := repository.Probe(ctx, tr)

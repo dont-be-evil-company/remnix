@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
 )
 
 func TestMain(m *testing.M) {
@@ -19,8 +19,8 @@ func TestMain(m *testing.M) {
 
 func TestStatusRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(dir, "cfg"))
 	writeStatus(Status{OK: true, At: time.Now().Unix(), SyncMs: 66000, GCMs: 12})
 	st, err := ReadStatus()
 	if err != nil || !st.OK {
@@ -63,8 +63,8 @@ func TestQueryDoesNotPanic(t *testing.T) {
 
 func TestRunOnceDisabled(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(dir, "cfg"))
 	off := false
 	cfg := config.Default()
 	cfg.Sync.Enabled = &off
@@ -82,8 +82,8 @@ func TestRunOnceDisabled(t *testing.T) {
 
 func TestRecordOK(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(dir, "cfg"))
 	writeStatus(Status{OK: false, At: 1, Error: "couldn't list directory: context canceled"})
 	RecordOK()
 	st, err := ReadStatus()
@@ -105,8 +105,8 @@ func TestInterrupted(t *testing.T) {
 
 func TestRunOnceEmptyKeyring(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(dir, "cfg"))
 	cfg := config.Default()
 	on := true
 	cfg.Sync.Enabled = &on

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/db"
-	"github.com/mistweaverco/syncsh/internal/history"
-	"github.com/mistweaverco/syncsh/internal/sync/event"
+	"github.com/dont-be-evil-company/remnix/internal/db"
+	"github.com/dont-be-evil-company/remnix/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/sync/event"
 )
 
 func TestMigrateThinsExistingEvents(t *testing.T) {

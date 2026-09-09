@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/client"
-	"github.com/mistweaverco/syncsh/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/client"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
 )
 
 // Snapshot is a visible-screen capture from pty-proxy. RowANSI entries are
@@ -92,7 +92,7 @@ func Decode(data []byte) (Snapshot, error) {
 // Fetch reads the current screen from the wrapping pty-proxy. Write-shutdown
 // is used so an older proxy waiting for a request byte unblocks immediately.
 func Fetch() (Snapshot, error) {
-	if id := os.Getenv("SYNCSH_SESSION_ID"); id != "" {
+	if id := os.Getenv("REMNIX_SESSION_ID"); id != "" {
 		if s, err := fetchDaemonSnapshot(id); err == nil {
 			return s, nil
 		}

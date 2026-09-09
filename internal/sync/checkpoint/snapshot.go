@@ -8,9 +8,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/cborx"
-	"github.com/mistweaverco/syncsh/internal/crypto/envelope"
-	"github.com/mistweaverco/syncsh/internal/history"
+	"github.com/dont-be-evil-company/remnix/internal/cborx"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/envelope"
+	"github.com/dont-be-evil-company/remnix/internal/history"
 )
 
 const (
@@ -202,12 +202,12 @@ func PackSnapshot(entries []history.Entry, smk []byte) (nonce, ct []byte, err er
 	if err != nil {
 		return nil, nil, err
 	}
-	ct, err = envelope.Seal(smk, nonce, gz, []byte("syncsh-checkpoint"))
+	ct, err = envelope.Seal(smk, nonce, gz, []byte("remnix-checkpoint"))
 	return nonce, ct, err
 }
 
 func UnpackSnapshot(smk, nonce, ct []byte) ([]history.Entry, error) {
-	pt, err := envelope.Open(smk, nonce, ct, []byte("syncsh-checkpoint"))
+	pt, err := envelope.Open(smk, nonce, ct, []byte("remnix-checkpoint"))
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func DecodeFile(b []byte) (nonce, ct []byte, err error) {
 	if nonce, ct, err = decodeJSONFile(b); err == nil {
 		return nonce, ct, nil
 	}
-	return nil, nil, fmt.Errorf("not a syncsh snapshot")
+	return nil, nil, fmt.Errorf("not a remnix snapshot")
 }
 
 func decodeBinaryFile(b []byte) (nonce, ct []byte, err error) {

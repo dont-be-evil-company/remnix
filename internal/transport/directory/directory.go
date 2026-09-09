@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dont-be-evil-company/remnix/internal/transport"
 	"github.com/google/uuid"
-	"github.com/mistweaverco/syncsh/internal/transport"
 )
 
 var _ transport.Transport = (*Transport)(nil)

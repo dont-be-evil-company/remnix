@@ -7,18 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mistweaverco/syncsh/internal/client"
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/crypto/keyring"
-	"github.com/mistweaverco/syncsh/internal/protocol"
+	"github.com/dont-be-evil-company/remnix/internal/client"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/protocol"
 )
 
 func TestDaemonControlPing(t *testing.T) {
 	keyring.Use(keyring.NewMemory())
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_DATA_DIR", dir)
-	t.Setenv("SYNCSH_CONFIG_DIR", filepath.Join(dir, "cfg"))
-	t.Setenv("SYNCSH_RUNTIME_DIR", filepath.Join(dir, "run"))
+	t.Setenv("REMNIX_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(dir, "cfg"))
+	t.Setenv("REMNIX_RUNTIME_DIR", filepath.Join(dir, "run"))
 	cfg := config.Default()
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestDaemonControlPing(t *testing.T) {
 
 func TestStartingTwiceIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_RUNTIME_DIR", filepath.Join(dir, "run"))
+	t.Setenv("REMNIX_RUNTIME_DIR", filepath.Join(dir, "run"))
 	if err := os.MkdirAll(config.RuntimeDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}

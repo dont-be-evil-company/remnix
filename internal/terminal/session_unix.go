@@ -17,13 +17,13 @@ import (
 	"unsafe"
 
 	"github.com/creack/pty"
-	"github.com/mistweaverco/syncsh/internal/ptyproxy"
+	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
 const (
-	EnvActive    = "SYNCSH_SESSION_ACTIVE"
-	EnvSessionID = "SYNCSH_SESSION_ID"
-	EnvControlFD = "SYNCSH_CONTROL_FD"
+	EnvActive    = "REMNIX_SESSION_ACTIVE"
+	EnvSessionID = "REMNIX_SESSION_ID"
+	EnvControlFD = "REMNIX_CONTROL_FD"
 )
 
 type Session struct {

@@ -9,31 +9,31 @@ import (
 )
 
 func TestPathsHonorEnv(t *testing.T) {
-	t.Setenv("SYNCSH_CONFIG_DIR", "/tmp/syncsh-cfg")
-	t.Setenv("SYNCSH_DATA_DIR", "/tmp/syncsh-data")
-	if got := ConfigDir(); got != "/tmp/syncsh-cfg" {
+	t.Setenv("REMNIX_CONFIG_DIR", "/tmp/remnix-cfg")
+	t.Setenv("REMNIX_DATA_DIR", "/tmp/remnix-data")
+	if got := ConfigDir(); got != "/tmp/remnix-cfg" {
 		t.Fatalf("ConfigDir = %q", got)
 	}
-	if got := DataDir(); got != "/tmp/syncsh-data" {
+	if got := DataDir(); got != "/tmp/remnix-data" {
 		t.Fatalf("DataDir = %q", got)
 	}
-	t.Setenv("SYNCSH_RUNTIME_DIR", "/tmp/syncsh-run")
-	if got := RuntimeDir(); got != "/tmp/syncsh-run" {
+	t.Setenv("REMNIX_RUNTIME_DIR", "/tmp/remnix-run")
+	if got := RuntimeDir(); got != "/tmp/remnix-run" {
 		t.Fatalf("RuntimeDir = %q", got)
 	}
-	if got := AgentSocketPath(); got != "/tmp/syncsh-run/agent.sock" {
+	if got := AgentSocketPath(); got != "/tmp/remnix-run/agent.sock" {
 		t.Fatalf("AgentSocketPath = %q", got)
 	}
-	if got := ControlSocketPath(); got != "/tmp/syncsh-run/control.sock" {
+	if got := ControlSocketPath(); got != "/tmp/remnix-run/control.sock" {
 		t.Fatalf("ControlSocketPath = %q", got)
 	}
-	if got := PtyProxySocketPath(); !strings.HasPrefix(got, "/tmp/syncsh-run/pty-proxy-") {
+	if got := PtyProxySocketPath(); !strings.HasPrefix(got, "/tmp/remnix-run/pty-proxy-") {
 		t.Fatalf("PtyProxySocketPath = %q", got)
 	}
-	if got := ConfigPath(); got != filepath.Join("/tmp/syncsh-cfg", "config.yaml") {
+	if got := ConfigPath(); got != filepath.Join("/tmp/remnix-cfg", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got)
 	}
-	if got := LocalPath(); got != filepath.Join("/tmp/syncsh-data", "local.yaml") {
+	if got := LocalPath(); got != filepath.Join("/tmp/remnix-data", "local.yaml") {
 		t.Fatalf("LocalPath = %q", got)
 	}
 }
@@ -41,8 +41,8 @@ func TestPathsHonorEnv(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 
 	cfg := Default()
 	cfg.DeviceID = "dev-1"
@@ -50,7 +50,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	on := true
 	cfg.Sync.Enabled = &on
 	cfg.Sync.Endpoints = []Endpoint{DirectoryEndpoint("local", "$HOME/remote")}
-	cfg.Sync.Callbacks = []string{"rclone sync myremote:/syncsh $HOME/GoogleDrive/syncsh"}
+	cfg.Sync.Callbacks = []string{"rclone sync myremote:/remnix $HOME/GoogleDrive/remnix"}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -102,12 +102,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestLoadSyncCallbacks(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("version: 2\nsync:\n  enabled: true\n  endpoints:\n    - id: local\n      type: directory\n      path: $HOME/GoogleDrive/syncsh\n      enabled: true\n  callbacks:\n    - rclone copy $HOME/GoogleDrive/syncsh gdrive:/syncsh\n")
+	raw := []byte("version: 2\nsync:\n  enabled: true\n  endpoints:\n    - id: local\n      type: directory\n      path: $HOME/GoogleDrive/remnix\n      enabled: true\n  callbacks:\n    - rclone copy $HOME/GoogleDrive/remnix gdrive:/remnix\n")
 	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +123,8 @@ func TestLoadSyncCallbacks(t *testing.T) {
 func TestLoadIgnoresStaleIdentityInUserConfig(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -153,17 +153,17 @@ func TestLoadIgnoresStaleIdentityInUserConfig(t *testing.T) {
 func TestExpand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("SYNCSH_TEST_VAR", "xyz")
+	t.Setenv("REMNIX_TEST_VAR", "xyz")
 	cases := []struct {
 		in, want string
 	}{
 		{"", ""},
 		{"~", home},
-		{"~/GoogleDrive/syncsh", filepath.Join(home, "GoogleDrive/syncsh")},
-		{"$HOME/GoogleDrive/syncsh", filepath.Join(home, "GoogleDrive/syncsh")},
-		{"rclone sync r:/x $HOME/GoogleDrive/syncsh", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/syncsh")},
-		{"rclone sync r:/x ~/GoogleDrive/syncsh", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/syncsh")},
-		{"prefix $SYNCSH_TEST_VAR", "prefix xyz"},
+		{"~/GoogleDrive/remnix", filepath.Join(home, "GoogleDrive/remnix")},
+		{"$HOME/GoogleDrive/remnix", filepath.Join(home, "GoogleDrive/remnix")},
+		{"rclone sync r:/x $HOME/GoogleDrive/remnix", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/remnix")},
+		{"rclone sync r:/x ~/GoogleDrive/remnix", "rclone sync r:/x " + filepath.Join(home, "GoogleDrive/remnix")},
+		{"prefix $REMNIX_TEST_VAR", "prefix xyz"},
 	}
 	for _, tc := range cases {
 		if got := Expand(tc.in); got != tc.want {
@@ -192,8 +192,8 @@ func TestIntervalDuration(t *testing.T) {
 
 func TestLoadMissingReturnsDefault(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -225,8 +225,8 @@ func TestSuggestDefaultsAndAcceptKeys(t *testing.T) {
 
 func TestLoadSuggestAccept(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	path := ConfigPath()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -249,12 +249,12 @@ func TestLoadSuggestAccept(t *testing.T) {
 
 func TestLoadRejectsLegacyTransport(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("version: 1\nsync:\n  transport: directory\n  directory:\n    path: $HOME/GoogleDrive/syncsh\n")
+	raw := []byte("version: 1\nsync:\n  transport: directory\n  directory:\n    path: $HOME/GoogleDrive/remnix\n")
 	if err := os.WriteFile(ConfigPath(), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -265,8 +265,8 @@ func TestLoadRejectsLegacyTransport(t *testing.T) {
 
 func TestLoadRejectsLegacyRclonePrimary(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -304,8 +304,8 @@ func TestSyncEnabledFalseDisables(t *testing.T) {
 func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	cfg := Default()
 	on := true
 	cfg.Sync.Enabled = &on
@@ -314,9 +314,9 @@ func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 		ID:           "personal-drive",
 		Type:         TypeRclone,
 		DisplayName:  "Google Drive",
-		RcloneRemote: "syncsh-personal",
+		RcloneRemote: "remnix-personal",
 		Provider:     "google-drive",
-		Path:         "syncsh",
+		Path:         "remnix",
 		Enabled:      true,
 	}}
 	if err := cfg.Save(); err != nil {
@@ -332,7 +332,7 @@ func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 			t.Fatalf("portable config leaked %s:\n%s", leak, s)
 		}
 	}
-	if !strings.Contains(s, "rclone_remote: syncsh-personal") {
+	if !strings.Contains(s, "rclone_remote: remnix-personal") {
 		t.Fatalf("missing rclone remote ref:\n%s", s)
 	}
 	loaded, err := Load()
@@ -350,15 +350,15 @@ func TestRcloneConfigRoundTripOmitsSecrets(t *testing.T) {
 func TestEndpointsRoundTripMixedTypes(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	cfg := Default()
 	on := true
 	cfg.Sync.Enabled = &on
 	cfg.Sync.Endpoints = []Endpoint{
-		{ID: "gdrive", Type: TypeRclone, RcloneRemote: "syncsh-gdrive", Provider: "google-drive", Path: "syncsh", Enabled: true},
-		{ID: "s3", Type: TypeRclone, RcloneRemote: "syncsh-s3", Provider: "s3", Path: "syncsh", Enabled: false},
-		DirectoryEndpoint("nas", "/mnt/nas/syncsh"),
+		{ID: "gdrive", Type: TypeRclone, RcloneRemote: "remnix-gdrive", Provider: "google-drive", Path: "remnix", Enabled: true},
+		{ID: "s3", Type: TypeRclone, RcloneRemote: "remnix-s3", Provider: "s3", Path: "remnix", Enabled: false},
+		DirectoryEndpoint("nas", "/mnt/nas/remnix"),
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -387,8 +387,8 @@ func TestSaveRejectsDuplicateEndpointIDs(t *testing.T) {
 }
 
 func TestRcloneConfigPath(t *testing.T) {
-	t.Setenv("SYNCSH_DATA_DIR", "/tmp/syncsh-data")
-	if got := RcloneConfigPath(); got != "/tmp/syncsh-data/rclone.conf" {
+	t.Setenv("REMNIX_DATA_DIR", "/tmp/remnix-data")
+	if got := RcloneConfigPath(); got != "/tmp/remnix-data/rclone.conf" {
 		t.Fatalf("RcloneConfigPath = %q", got)
 	}
 }
@@ -396,8 +396,8 @@ func TestRcloneConfigPath(t *testing.T) {
 func TestMigrateRcloneConfigFromPortableDir(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	src := filepath.Join(cfgDir, "rclone.conf")
 	if err := os.WriteFile(src, []byte("[gdrive]\ntype = drive\ntoken = secret\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -421,8 +421,8 @@ func TestMigrateRcloneConfigFromPortableDir(t *testing.T) {
 func TestMigrateRcloneConfigOverwritesEmptyDest(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	src := filepath.Join(cfgDir, "rclone.conf")
 	dst := filepath.Join(dataDir, "rclone.conf")
 	if err := os.WriteFile(src, []byte("[gdrive]\ntype = drive\ntoken = secret\n"), 0o600); err != nil {
@@ -449,8 +449,8 @@ func TestMigrateRcloneConfigOverwritesEmptyDest(t *testing.T) {
 func TestLeftoverPortableRcloneConfig(t *testing.T) {
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", cfgDir)
-	t.Setenv("SYNCSH_DATA_DIR", dataDir)
+	t.Setenv("REMNIX_CONFIG_DIR", cfgDir)
+	t.Setenv("REMNIX_DATA_DIR", dataDir)
 	if p, ok := LeftoverPortableRcloneConfig(); ok {
 		t.Fatalf("unexpected leftover %s", p)
 	}
@@ -466,8 +466,8 @@ func TestLeftoverPortableRcloneConfig(t *testing.T) {
 
 func TestLoadSuggestAcceptKeepsEnabledDefault(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -488,8 +488,8 @@ func TestLoadSuggestAcceptKeepsEnabledDefault(t *testing.T) {
 
 func TestLoadSuggestMenu(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -520,8 +520,8 @@ func TestLoadSuggestMenu(t *testing.T) {
 
 func TestLoadPtyProxy(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -549,8 +549,8 @@ func TestLoadPtyProxy(t *testing.T) {
 
 func TestLoadPtyProxyHeight(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -580,8 +580,8 @@ func TestLoadPtyProxyHeight(t *testing.T) {
 
 func TestLoadSuggestCompletions(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("SYNCSH_CONFIG_DIR", dir)
-	t.Setenv("SYNCSH_DATA_DIR", dir)
+	t.Setenv("REMNIX_CONFIG_DIR", dir)
+	t.Setenv("REMNIX_DATA_DIR", dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/mistweaverco/syncsh/internal/config"
-	"github.com/mistweaverco/syncsh/internal/redact"
-	rclonetr "github.com/mistweaverco/syncsh/internal/transport/rclone"
-	"github.com/mistweaverco/syncsh/internal/tui/picker"
-	"github.com/mistweaverco/syncsh/internal/tui/wizard"
+	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/redact"
+	rclonetr "github.com/dont-be-evil-company/remnix/internal/transport/rclone"
+	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
+	"github.com/dont-be-evil-company/remnix/internal/tui/wizard"
 	"github.com/spf13/cobra"
 )
 
@@ -164,7 +164,7 @@ func runRemoteTest(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "state=%s %s\n", st.State, redact.String(st.Message))
 	if st.State == "auth_required" {
-		fmt.Fprintln(cmd.OutOrStdout(), "hint: syncsh remote reconnect "+ep.ID)
+		fmt.Fprintln(cmd.OutOrStdout(), "hint: remnix remote reconnect "+ep.ID)
 	}
 	return nil
 }

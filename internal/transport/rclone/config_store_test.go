@@ -15,7 +15,7 @@ func TestImportUserRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("RCLONE_CONFIG", user)
-	if err := Init(filepath.Join(dir, "syncsh-rclone.conf")); err != nil {
+	if err := Init(filepath.Join(dir, "remnix-rclone.conf")); err != nil {
 		t.Fatal(err)
 	}
 	names, err := ListUserRemotes()
@@ -50,7 +50,7 @@ func TestImportUserRemote(t *testing.T) {
 
 func TestHardenDriveRemote(t *testing.T) {
 	dir := t.TempDir()
-	if err := Init(filepath.Join(dir, "syncsh-rclone.conf")); err != nil {
+	if err := Init(filepath.Join(dir, "remnix-rclone.conf")); err != nil {
 		t.Fatal(err)
 	}
 	Lock()
@@ -73,7 +73,7 @@ func TestHardenDriveRemote(t *testing.T) {
 
 func TestHardenS3Remote(t *testing.T) {
 	dir := t.TempDir()
-	if err := Init(filepath.Join(dir, "syncsh-rclone.conf")); err != nil {
+	if err := Init(filepath.Join(dir, "remnix-rclone.conf")); err != nil {
 		t.Fatal(err)
 	}
 	Lock()

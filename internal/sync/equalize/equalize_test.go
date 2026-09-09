@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mistweaverco/syncsh/internal/transport/directory"
+	"github.com/dont-be-evil-company/remnix/internal/transport/directory"
 )
 
 func TestEqualizeCopiesMissingObjects(t *testing.T) {
