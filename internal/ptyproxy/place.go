@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Rect is a 0-indexed screen rectangle.
@@ -58,6 +61,35 @@ func Place(cursorRow, termRows, termCols, height int) Placement {
 		}
 		return Placement{Rect: Rect{X: 0, Y: y, W: termCols, H: height}, Scroll: scroll}
 	}
+}
+
+// ContentCursorRow pins a snapshot cursor that sits on blank cells below the
+// prompt. Fish (no POSTDISPLAY) often leaves the emulator/widget cursor on the
+// last row while the command line is still near the top; zsh redisplay keeps
+// them aligned so this is a no-op there.
+func ContentCursorRow(s Snapshot) int {
+	last := -1
+	for i, row := range s.RowANSI {
+		if rowHasPrintable(row) {
+			last = i
+		}
+	}
+	if last < 0 {
+		return s.CursorRow
+	}
+	if s.CursorRow > last {
+		return last
+	}
+	return s.CursorRow
+}
+
+func rowHasPrintable(row string) bool {
+	for _, r := range ansi.Strip(row) {
+		if !unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // MoveTo writes a 1-indexed CUP sequence.

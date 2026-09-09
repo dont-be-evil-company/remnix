@@ -100,6 +100,29 @@ func TestSuspendShellKeyboardPushesAndPops(t *testing.T) {
 	}
 }
 
+func TestParseCPR(t *testing.T) {
+	row, col, ok := parseCPR([]byte("noise\x1b[3;11R"))
+	if !ok || row != 2 || col != 10 {
+		t.Fatalf("got row=%d col=%d ok=%v", row, col, ok)
+	}
+	if _, _, ok := parseCPR([]byte("\x1b[3;11")); ok {
+		t.Fatal("incomplete CPR")
+	}
+}
+
+func TestApplyOverlayCursorPrefersLiveWhenParked(t *testing.T) {
+	snap := ptyproxy.Snapshot{Rows: 24, Cols: 80, CursorRow: 23}
+	got := applyOverlayCursor(snap, cursorReport{row: 2, col: 8, ok: true})
+	if got.CursorRow != 2 || got.CursorCol != 8 {
+		t.Fatalf("%+v", got)
+	}
+	aligned := ptyproxy.Snapshot{Rows: 24, Cols: 80, CursorRow: 5}
+	got = applyOverlayCursor(aligned, cursorReport{row: 2, col: 8, ok: true})
+	if got.CursorRow != 5 {
+		t.Fatalf("zsh-aligned snapshot must keep row 5, got %d", got.CursorRow)
+	}
+}
+
 func TestDrawFixedCUPsEachRow(t *testing.T) {
 	var b strings.Builder
 	drawFixed(&b, 8, 3, 2, "AA\nBB")

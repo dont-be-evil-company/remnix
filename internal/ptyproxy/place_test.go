@@ -21,3 +21,31 @@ func TestPrepareCUPsToOverlayOrigin(t *testing.T) {
 		t.Fatal("must not park at home; Bubble Tea inline paints from overlay origin")
 	}
 }
+
+func TestContentCursorRowPinsBelowPrompt(t *testing.T) {
+	s := Snapshot{
+		Rows:      10,
+		Cols:      8,
+		CursorRow: 9,
+		RowANSI:   []string{"prompt", "> remnix", "", "", "", "", "", "", "", ""},
+	}
+	if got := ContentCursorRow(s); got != 1 {
+		t.Fatalf("got %d, want prompt row 1", got)
+	}
+	s.CursorRow = 1
+	if got := ContentCursorRow(s); got != 1 {
+		t.Fatalf("aligned cursor should stay %d", got)
+	}
+}
+
+func TestContentCursorRowIgnoresSGRPadding(t *testing.T) {
+	s := Snapshot{
+		Rows:      4,
+		Cols:      8,
+		CursorRow: 3,
+		RowANSI:   []string{"\x1b[0mhello", "\x1b[0m", "", "\x1b[0m"},
+	}
+	if got := ContentCursorRow(s); got != 0 {
+		t.Fatalf("got %d", got)
+	}
+}

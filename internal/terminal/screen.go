@@ -171,6 +171,20 @@ func (s *Screen) Snapshot() ptyproxy.Snapshot {
 	return snapshotFrom(s.emu)
 }
 
+// Cursor is the emulator cursor in 0-indexed cells.
+func (s *Screen) Cursor() (x, y int) {
+	if s == nil {
+		return 0, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.emu == nil {
+		return 0, 0
+	}
+	pos := s.emu.CursorPosition()
+	return pos.X, pos.Y
+}
+
 func snapshotFrom(emu *vt.Emulator) ptyproxy.Snapshot {
 	w, h := emu.Width(), emu.Height()
 	if w < 1 {

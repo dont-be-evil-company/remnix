@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -144,6 +146,14 @@ func beginOverlay(w *os.File, rowsFor func(termRows int) int) *overlaySession {
 		gch = nil
 	case <-time.After(overlayGeomWait):
 	}
+	var live cursorReport
+	snap.CursorRow = ptyproxy.ContentCursorRow(snap)
+	if snap.Rows < 1 || snap.CursorRow >= snap.Rows-1 {
+		if r, c, ok := queryCursorPosition(w, overlayGeomWait); ok {
+			live = cursorReport{row: r, col: c, ok: true}
+		}
+	}
+	snap = applyOverlayCursor(snap, live)
 
 	height := snap.Rows
 	if rowsFor != nil {
@@ -158,6 +168,85 @@ func beginOverlay(w *os.File, rowsFor func(termRows int) int) *overlaySession {
 	ch := make(chan []string, 1)
 	go readOverlayRows(gch, rest, snap.Rows, ch)
 	return &overlaySession{snap: snap, place: place, rows: ch}
+}
+
+type cursorReport struct {
+	row, col int
+	ok       bool
+}
+
+func applyOverlayCursor(snap ptyproxy.Snapshot, live cursorReport) ptyproxy.Snapshot {
+	snap.CursorRow = ptyproxy.ContentCursorRow(snap)
+	if !live.ok || live.row < 0 {
+		return snap
+	}
+	if snap.Rows >= 1 && live.row >= snap.Rows {
+		return snap
+	}
+	// Fish/nu have no POSTDISPLAY. When the snapshot cursor is still on the
+	// last row, the live CPR is the prompt line.
+	if snap.Rows < 1 || snap.CursorRow >= snap.Rows-1 {
+		snap.CursorRow = live.row
+		if live.col >= 0 {
+			snap.CursorCol = live.col
+		}
+	}
+	return snap
+}
+
+func queryCursorPosition(f *os.File, d time.Duration) (row, col int, ok bool) {
+	if f == nil || d <= 0 || !isTerminalFile(f) {
+		return 0, 0, false
+	}
+	fd := int(f.Fd())
+	state, err := term.GetState(fd)
+	if err != nil {
+		return 0, 0, false
+	}
+	if _, err := term.MakeRaw(fd); err != nil {
+		return 0, 0, false
+	}
+	defer term.Restore(fd, state)
+
+	_ = f.SetReadDeadline(time.Now().Add(d))
+	defer f.SetReadDeadline(time.Time{})
+	if _, err := f.WriteString("\x1b[6n"); err != nil {
+		return 0, 0, false
+	}
+	var buf []byte
+	tmp := make([]byte, 32)
+	for {
+		n, err := f.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			if r, c, parsed := parseCPR(buf); parsed {
+				return r, c, true
+			}
+			if len(buf) > 64 {
+				return 0, 0, false
+			}
+		}
+		if err != nil {
+			return 0, 0, false
+		}
+	}
+}
+
+func parseCPR(b []byte) (row, col int, ok bool) {
+	i := bytes.Index(b, []byte("\x1b["))
+	if i < 0 {
+		return 0, 0, false
+	}
+	rest := b[i+2:]
+	j := bytes.IndexByte(rest, 'R')
+	if j < 0 {
+		return 0, 0, false
+	}
+	var r, c int
+	if _, err := fmt.Sscanf(string(rest[:j]), "%d;%d", &r, &c); err != nil || r < 1 || c < 1 {
+		return 0, 0, false
+	}
+	return r - 1, c - 1, true
 }
 
 type overlayGeom struct {

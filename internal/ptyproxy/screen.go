@@ -1,6 +1,7 @@
 package ptyproxy
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -117,7 +118,7 @@ func Fetch() (Snapshot, error) {
 func FetchGeom() (Snapshot, io.ReadCloser, error) {
 	path := SocketPath()
 	if path == "" {
-		return Snapshot{}, nil, ErrNoProxy
+		return fetchGeomFromDaemon()
 	}
 	conn, err := net.DialTimeout("unix", path, 50*time.Millisecond)
 	if err != nil {
@@ -134,6 +135,22 @@ func FetchGeom() (Snapshot, io.ReadCloser, error) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return s, conn, nil
+}
+
+func fetchGeomFromDaemon() (Snapshot, io.ReadCloser, error) {
+	id := os.Getenv(EnvSessionID)
+	if id == "" {
+		return Snapshot{}, nil, ErrNoProxy
+	}
+	s, err := fetchDaemonSnapshot(id)
+	if err != nil {
+		return Snapshot{}, nil, err
+	}
+	var buf bytes.Buffer
+	for _, row := range s.RowANSI {
+		buf.Write(EncodeRow(row))
+	}
+	return s, io.NopCloser(&buf), nil
 }
 
 func setReadDeadline(r io.ReadCloser, d time.Duration) {

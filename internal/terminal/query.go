@@ -24,7 +24,7 @@ func oscTerminated(s []byte) bool {
 	return n >= 2 && s[n-2] == 0x1b && s[n-1] == '\\'
 }
 
-func (q *queryScanner) feed(p []byte, rows, cols int) []byte {
+func (q *queryScanner) feed(p []byte, rows, cols, cursorRow, cursorCol int) []byte {
 	if rows < 1 {
 		rows = 1
 	}
@@ -43,7 +43,7 @@ func (q *queryScanner) feed(p []byte, rows, cols int) []byte {
 			q.buf = q.buf[i:]
 			continue
 		}
-		reply, n := consumeQuery(q.buf, rows, cols)
+		reply, n := consumeQuery(q.buf, rows, cols, cursorRow, cursorCol)
 		if n == 0 {
 			if len(q.buf) > 128 {
 				q.buf = q.buf[1:]
@@ -57,7 +57,7 @@ func (q *queryScanner) feed(p []byte, rows, cols int) []byte {
 	return replies
 }
 
-func consumeQuery(s []byte, rows, cols int) (reply []byte, consumed int) {
+func consumeQuery(s []byte, rows, cols, cursorRow, cursorCol int) (reply []byte, consumed int) {
 	if len(s) < 2 || s[0] != 0x1b {
 		return nil, 0
 	}
@@ -65,7 +65,7 @@ func consumeQuery(s []byte, rows, cols int) (reply []byte, consumed int) {
 	case '[':
 		for i := 2; i < len(s); i++ {
 			if csiFinal(s[i]) {
-				return replyCSI(s[:i+1], rows, cols), i + 1
+				return replyCSI(s[:i+1], rows, cols, cursorRow, cursorCol), i + 1
 			}
 		}
 		return nil, 0
@@ -88,13 +88,13 @@ func consumeQuery(s []byte, rows, cols int) (reply []byte, consumed int) {
 	}
 }
 
-func replyCSI(s []byte, rows, cols int) []byte {
+func replyCSI(s []byte, rows, cols, cursorRow, cursorCol int) []byte {
 	fin := s[len(s)-1]
 	body := s[2 : len(s)-1]
 	switch fin {
 	case 'n':
 		if bytes.Equal(body, []byte("6")) {
-			return []byte(fmt.Sprintf("\x1b[%d;%dR", rows, cols))
+			return []byte(fmt.Sprintf("\x1b[%d;%dR", cprCell(cursorRow, rows), cprCell(cursorCol, cols)))
 		}
 		if bytes.Equal(body, []byte("5")) {
 			return []byte("\x1b[0n")
@@ -116,4 +116,16 @@ func replyCSI(s []byte, rows, cols int) []byte {
 		}
 	}
 	return nil
+}
+
+// cprCell converts a 0-indexed emulator coordinate to a 1-indexed CPR cell.
+func cprCell(pos, max int) int {
+	n := pos + 1
+	if n < 1 {
+		n = 1
+	}
+	if max >= 1 && n > max {
+		n = max
+	}
+	return n
 }

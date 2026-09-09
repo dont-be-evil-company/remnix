@@ -77,6 +77,7 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 		snap.CursorRow = snap.Rows - 1
 		snap.CursorCol = 0
 	}
+	snap.CursorRow = ptyproxy.ContentCursorRow(snap)
 	height := snap.Rows
 	if rowsFor != nil {
 		height = rowsFor(snap.Rows)

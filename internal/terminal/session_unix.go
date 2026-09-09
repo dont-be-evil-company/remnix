@@ -157,14 +157,15 @@ func (s *Session) pump(conn net.Conn) {
 			if n > 0 {
 				chunk := make([]byte, n)
 				copy(chunk, buf[:n])
-				if reply := queries.feed(chunk, s.Rows, s.Cols); len(reply) > 0 {
+				_, leftAlt := s.screen.Write(chunk)
+				cx, cy := s.screen.Cursor()
+				if reply := queries.feed(chunk, s.Rows, s.Cols, cy, cx); len(reply) > 0 {
 					// Overlay hides PTY output; queued replies would be typed
 					// onto the prompt after Ctrl+R (?0u / [?1;2c).
 					if !s.overlayActive.Load() {
 						_, _ = s.ptmxW.Write(reply)
 					}
 				}
-				_, leftAlt := s.screen.Write(chunk)
 				stripped := kbStrip.feed(chunk)
 				if leftAlt {
 					s.resetKeys.Store(true)
