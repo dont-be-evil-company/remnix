@@ -558,6 +558,18 @@ func TestFishOverlayMenuNoGhost(t *testing.T) {
 	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `ctrl-space`) {
 		t.Fatal("fish should bind Ctrl+Space overlay menu")
 	}
+	if !strings.Contains(out, `complete -C"`) {
+		t.Fatal("fish Ctrl+Space must use native complete -C, not history-only")
+	}
+	if !strings.Contains(out, "__remnix_continue__:") {
+		t.Fatal("fish Ctrl+Space must drill into a suggestion")
+	}
+	if !strings.Contains(out, "__remnix_overlay_complete_begin") {
+		t.Fatal("fish must open the overlay before capturing completions")
+	}
+	if strings.Contains(out, "carapace") {
+		t.Fatal("fish must not shell out to carapace")
+	}
 	if strings.Contains(out, `\c@`) {
 		t.Fatal("fish 4 rejects bind \\c@ as an invalid token and aborts source")
 	}
@@ -576,6 +588,18 @@ func TestNuOverlayMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "__remnix_rebind") {
 		t.Fatal("Ctrl+Space must go through __remnix_rebind")
+	}
+	if !strings.Contains(out, "--ide-complete") {
+		t.Fatal("nu Ctrl+Space must use native --ide-complete, not history-only")
+	}
+	if !strings.Contains(out, "__remnix_continue__:") {
+		t.Fatal("nu Ctrl+Space must drill into a suggestion")
+	}
+	if !strings.Contains(out, "suggest-complete-interactive") {
+		t.Fatal("nu must pass completion items to the overlay")
+	}
+	if strings.Contains(out, "carapace") {
+		t.Fatal("nu must not shell out to carapace")
 	}
 }
 

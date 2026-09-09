@@ -150,14 +150,14 @@ typed, history (overlay), and completions stay distinguishable.
 On Linux, macOS, and WSL, set `pty_proxy.enabled: true` and put `remnix init`
 high in the shell rc. `init` then `exec`s `remnix-attach`, a tiny helper that
 connects to the remnix daemon. The daemon owns the inner PTY, the shadow
-screen, and the Ctrl+R / Ctrl+Space overlay TUIs. On zsh, Ctrl+Space lists
-compsys completions (git, gcloud, carapace, ...) instead of history; history
-stays ghost text. The shell widget asks the daemon over RPC
-(`search-interactive` / `suggest-complete-interactive`); keys and paint stay
-on the existing attach stream so a second Go process is not spawned. Set
-`REMNIX_PTY_PROXY_LEGACY=1` to use the old per-terminal `remnix pty-proxy`
-Go process for one release. Without a daemon session, the same widgets fall
-back to a local `remnix search --interactive` TUI.
+screen, and the Ctrl+R / Ctrl+Space overlay TUIs. Ctrl+Space lists native
+shell completions (zsh compsys, fish `complete -C`, nu `--ide-complete`)
+instead of history; history stays ghost text. The shell widget asks the
+daemon over RPC (`search-interactive` / `suggest-complete-interactive`);
+keys and paint stay on the existing attach stream so a second Go process is
+not spawned. Set `REMNIX_PTY_PROXY_LEGACY=1` to use the old per-terminal
+`remnix pty-proxy` Go process for one release. Without a daemon session, the
+same widgets fall back to a local `remnix search --interactive` TUI.
 `pty_proxy.height` is a percent of the terminal (for example `40` or `40%`).
 Omit it, or set `100%`, for a fullscreen overlay. Smaller values still keep
 at least five history rows plus the header, rule, help line, and input box.
@@ -169,10 +169,10 @@ Ghost text stays in each shell’s line editor:
 
 | Shell | Ghost text | Ctrl+R | Suggest overlay (Ctrl+Space) |
 | --- | --- | --- | --- |
-| zsh | `POSTDISPLAY` | yes | overlay when `pty_proxy` is on; else POSTDISPLAY menu |
-| bash | ble.sh, if loaded | yes | when `suggest.menu` is on |
-| fish | not supported (no `POSTDISPLAY`) | yes | when `suggest.menu` is on |
-| nu | not supported | yes | when `suggest.menu` is on |
+| zsh | `POSTDISPLAY` | yes | compsys overlay when `pty_proxy` is on; else POSTDISPLAY menu |
+| bash | ble.sh, if loaded | yes | history overlay when `suggest.menu` is on |
+| fish | not supported (no `POSTDISPLAY`) | yes | `complete -C` overlay when `suggest.menu` is on |
+| nu | not supported | yes | `--ide-complete` overlay when `suggest.menu` is on |
 
 Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(remnix init ...)"`
 near the top of the rc file so only the proxy re-execs, not the rest of your
