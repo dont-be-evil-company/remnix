@@ -17,6 +17,6 @@ export default [
 		}
 	},
 	{
-		ignores: ['node_modules/**', 'build/**', '.svelte-kit/**']
+		ignores: ['node_modules/**', 'build/**', '.svelte-kit/**', 'vite-plugins/**']
 	}
 ];

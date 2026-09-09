@@ -16,4 +16,5 @@ coverage.html
 # Auto generated files
 CHANGELOG.md
 /internal/changelog/changelog.md
-/node_modules
+node_modules
+.pnpm-store/
