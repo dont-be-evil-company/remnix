@@ -23,8 +23,7 @@
 	}
 	const downloadBaseUrl =
 		'https://github.com/dont-be-evil-company/remnix/releases/latest/download/';
-	const websiteBaseUrl =
-		'https://remnix.app';
+	const websiteBaseUrl = 'https://remnix.app';
 
 	let downloadLink = downloadBaseUrl + 'remnix-linux-amd64';
 
@@ -87,7 +86,8 @@
 <HeadComponent
 	data={{
 		title: 'remnix',
-		description: 'Sync 📡 your shell 🐚 history 📚 across unlimited devices. Fast ⚡ and intelligent 🧠 history search 🔎 with batteries 🔋 included.'
+		description:
+			'Sync 📡 your shell 🐚 history 📚 across unlimited devices. Fast ⚡ and intelligent 🧠 history search 🔎 with batteries 🔋 included.'
 	}}
 />
 
@@ -97,14 +97,21 @@
 			<img src="/logo.png" alt="remnix logo" class="m-5 mx-auto w-64" />
 			<h1 class="text-5xl font-bold">remnix</h1>
 			<p class="py-6">
-        Encrypted, server-free shell history. Commands live in a local SQLite database. Synchronization is optional: a background daemon can copy encrypted event bundles to storage you already have (Google Drive, Dropbox, S3, a folder, ...) using an embedded rclone engine. There is no remnix cloud and no account.
+				Encrypted, server-free shell history. Commands live in a local SQLite database.
+				Synchronization is optional: a background daemon can copy encrypted event bundles to storage
+				you already have (Google Drive, Dropbox, S3, a folder, ...) using an embedded rclone engine.
+				There is no remnix cloud and no account.
 			</p>
 			<p class="py-6">
-        Remote storage is untrusted. Encryption, key wrapping, and merge happen in remnix - rclone only reads and writes objects.
+				Remote storage is untrusted. Encryption, key wrapping, and merge happen in remnix - rclone
+				only reads and writes objects.
 			</p>
-			<a href="#screenshots" on:click={handleAnchorClick}
-				><button class="btn btn-primary">Screenshots</button></a
-			>
+			<div class="flex flex-wrap justify-center gap-3">
+				<a href="#screenshots" on:click={handleAnchorClick}
+					><button class="btn btn-primary">Screenshots</button></a
+				>
+				<a href="/themes"><button class="btn btn-secondary">Themes</button></a>
+			</div>
 		</div>
 	</div>
 </div>
@@ -121,9 +128,7 @@
 					class="m-5 mx-auto"
 				/>
 			</a>
-			<p class="py-6">
-        Shows the fuzzy search of the history database.
-			</p>
+			<p class="py-6">Shows the fuzzy search of the history database.</p>
 			<a href="#install" on:click={handleAnchorClick}
 				><button class="btn btn-primary">Install</button></a
 			>
@@ -189,7 +194,11 @@
 						data-prismjs-copy="📋">paru -S remnix-bin</code
 					></pre>
 			</div>
-			<div class={installSystem !== 'manually' && installSystem !== 'aur' && installSystem !== 'script' ? '' : 'hidden'}>
+			<div
+				class={installSystem !== 'manually' && installSystem !== 'aur' && installSystem !== 'script'
+					? ''
+					: 'hidden'}
+			>
 				<p class="mb-5">
 					<a href={downloadLink} target="_blank" rel="noopener noreferrer">
 						<button class="btn btn-secondary mt-5">Download {installSystem}</button></a
@@ -249,7 +258,8 @@
 			<p>
 				View the <a class="text-secondary" href="https://github.com/dont-be-evil-company/remnix"
 					>code</a
-				>, and/or check out the
+				>, browse
+				<a class="text-secondary" href="/themes">themes</a>, and/or check out the
 				<a class="text-secondary" href="/docs">docs</a>.
 			</p>
 		</div>
