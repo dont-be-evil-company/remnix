@@ -151,13 +151,13 @@
 				<pre><code
 						class="language-bash"
 						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">curl -sSL ${websiteBaseUrl}/install.sh | sh</code
+						data-prismjs-copy="📋">curl -sSL {websiteBaseUrl}/install.sh | sh</code
 					></pre>
 				<p class="mb-5">Windows (PowerShell):</p>
 				<pre><code
 						class="language-powershell"
 						data-toolbar-order="copy-to-clipboard"
-						data-prismjs-copy="📋">iwr ${websiteBaseUrl}/install.ps1 -useb | iex</code
+						data-prismjs-copy="📋">iwr {websiteBaseUrl}/install.ps1 -useb | iex</code
 					></pre>
 				<p class="mb-5">Update later with <code class="language-bash">remnix update</code>.</p>
 			</div>
