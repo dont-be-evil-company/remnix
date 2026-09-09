@@ -21,6 +21,7 @@ import (
 const (
 	githubRepo      = "dont-be-evil-company/remnix"
 	binaryAssetName = "remnix"
+	attachAssetName = "remnix-attach"
 )
 
 var (
@@ -133,16 +134,16 @@ func detectPlatform() string {
 	return fmt.Sprintf("%s-%s", osName, arch)
 }
 
-func downloadBinary(versionTag, platform string) (string, error) {
+func downloadBinary(versionTag, platform, assetName string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 
-	fileName := fmt.Sprintf("%s-%s", binaryAssetName, platform)
+	fileName := fmt.Sprintf("%s-%s", assetName, platform)
 	if strings.HasPrefix(platform, "windows-") {
 		fileName += ".exe"
 	}
 	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", githubRepo, versionTag, fileName)
 
-	tempFile, err := os.CreateTemp("", "remnix-update-*")
+	tempFile, err := os.CreateTemp("", assetName+"-update-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary file: %w", err)
 	}
@@ -211,7 +212,7 @@ func replaceBinary(currentPath, newBinaryPath string) error {
 	if currentGOOS == "windows" {
 		return replaceBinaryWindows(currentPath, newBinaryPath)
 	}
-	if err := os.Remove(currentPath); err != nil {
+	if err := os.Remove(currentPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove current binary: %w", err)
 	}
 	if err := copyFile(newBinaryPath, currentPath); err != nil {
@@ -298,7 +299,7 @@ func runUpdate() error {
 	slog.Debug("detected platform", "platform", platform)
 
 	fmt.Printf("Downloading remnix %s for %s...\n", latestVersion, platform)
-	newBinaryPath, err := downloadBinary(latestVersion, platform)
+	newBinaryPath, err := downloadBinary(latestVersion, platform, binaryAssetName)
 	if err != nil {
 		return fmt.Errorf("failed to download new version: %w", err)
 	}
@@ -314,6 +315,28 @@ func runUpdate() error {
 	fmt.Printf("Installing new version...\n")
 	if err := replaceBinary(currentPath, newBinaryPath); err != nil {
 		return fmt.Errorf("failed to replace binary: %w", err)
+	}
+
+	if currentGOOS != "windows" {
+		attachPath := filepath.Join(filepath.Dir(currentPath), attachAssetName)
+		fmt.Printf("Downloading remnix-attach %s for %s...\n", latestVersion, platform)
+		newAttachPath, err := downloadBinary(latestVersion, platform, attachAssetName)
+		if err != nil {
+			return fmt.Errorf("failed to download remnix-attach: %w", err)
+		}
+		defer os.Remove(newAttachPath)
+
+		if _, err := os.Stat(attachPath); err == nil {
+			attachBackup, err := backupCurrentBinary(attachPath)
+			if err != nil {
+				return fmt.Errorf("failed to backup remnix-attach: %w", err)
+			}
+			fmt.Printf("Attach backup created: %s\n", attachBackup)
+		}
+		if err := replaceBinary(attachPath, newAttachPath); err != nil {
+			return fmt.Errorf("failed to replace remnix-attach: %w", err)
+		}
+		fmt.Printf("Updated remnix-attach at %s\n", attachPath)
 	}
 
 	if currentGOOS == "windows" {

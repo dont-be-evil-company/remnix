@@ -11,8 +11,12 @@ GH_TAG="v$VERSION"
 FILES=(
   "dist/remnix-linux-amd64"
   "dist/remnix-linux-arm64"
+  "dist/remnix-attach-linux-amd64"
+  "dist/remnix-attach-linux-arm64"
   "dist/remnix-darwin-amd64"
   "dist/remnix-darwin-arm64"
+  "dist/remnix-attach-darwin-amd64"
+  "dist/remnix-attach-darwin-arm64"
   "dist/remnix-windows-amd64.exe"
 )
 

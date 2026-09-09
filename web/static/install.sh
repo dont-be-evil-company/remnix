@@ -10,6 +10,7 @@ NC='\033[0m'
 
 REPO="dont-be-evil-company/remnix"
 BINARY_NAME="remnix"
+ATTACH_NAME="remnix-attach"
 
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -68,18 +69,18 @@ get_latest_version() {
     echo "$redirect_url"
 }
 
-download_binary() {
+download_asset() {
     local version="$1"
     local platform="$2"
-    local download_url="https://github.com/${REPO}/releases/download/${version}/${BINARY_NAME}-${platform}"
+    local name="$3"
+    local dest_dir="$4"
+    local download_url="https://github.com/${REPO}/releases/download/${version}/${name}-${platform}"
+    local binary_path="${dest_dir}/${name}"
 
     if [[ "$platform" = *"windows"* ]]; then
         download_url="${download_url}.exe"
+        binary_path="${binary_path}.exe"
     fi
-
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local binary_path="${temp_dir}/${BINARY_NAME}"
 
     local download_success=false
 
@@ -95,8 +96,7 @@ download_binary() {
 
     if [ "$download_success" = false ]; then
         print_error "Failed to download binary from ${download_url}"
-        rm -rf "$temp_dir"
-        exit 1
+        return 1
     fi
 
     if [[ "$platform" != *"windows"* ]]; then
@@ -106,13 +106,13 @@ download_binary() {
     echo "$binary_path"
 }
 
-get_install_location() {
+get_install_dir() {
     if [ "$(id -u)" -eq 0 ]; then
-        echo "/usr/local/bin/${BINARY_NAME}"
+        echo "/usr/local/bin"
     else
         local user_bin="${HOME}/.local/bin"
         mkdir -p "$user_bin"
-        echo "${user_bin}/${BINARY_NAME}"
+        echo "$user_bin"
     fi
 }
 
@@ -139,8 +139,9 @@ detect_shell_rc() {
 install_binary() {
     local source_path="$1"
     local install_path="$2"
+    local label="$3"
 
-    print_status "Installing ${BINARY_NAME} to ${install_path}..."
+    print_status "Installing ${label} to ${install_path}..."
 
     if [ -f "$install_path" ]; then
         local backup_path
@@ -150,35 +151,40 @@ install_binary() {
     fi
 
     if cp "$source_path" "$install_path"; then
-        print_success "${BINARY_NAME} installed successfully to ${install_path}"
-
-        if [[ "$install_path" == *"/.local/bin"* ]]; then
-            local shell_rc
-            shell_rc=$(detect_shell_rc)
-            if ! grep -q "\.local/bin" "$shell_rc" 2>/dev/null; then
-                print_status "Adding ${HOME}/.local/bin to PATH in ${shell_rc}"
-                {
-                  echo ""
-                  echo "# Add local bin directory to PATH"
-                  echo "export PATH=$HOME/.local/bin:$PATH"
-                } >> "$shell_rc"
-                print_warning "Please restart your shell or run 'source ${shell_rc}' to update PATH"
-            fi
-        fi
+        chmod +x "$install_path"
+        print_success "${label} installed successfully to ${install_path}"
     else
-        print_error "Failed to install ${BINARY_NAME}"
+        print_error "Failed to install ${label}"
         exit 1
+    fi
+}
+
+ensure_path() {
+    local install_dir="$1"
+
+    if [[ "$install_dir" == *"/.local/bin"* ]]; then
+        local shell_rc
+        shell_rc=$(detect_shell_rc)
+        if ! grep -q "\.local/bin" "$shell_rc" 2>/dev/null; then
+            print_status "Adding ${HOME}/.local/bin to PATH in ${shell_rc}"
+            {
+              echo ""
+              echo "# Add local bin directory to PATH"
+              echo "export PATH=$HOME/.local/bin:$PATH"
+            } >> "$shell_rc"
+            print_warning "Please restart your shell or run 'source ${shell_rc}' to update PATH"
+        fi
     fi
 }
 
 verify_installation() {
     local install_path="$1"
+    local label="$2"
 
     if [ -f "$install_path" ] && [ -x "$install_path" ]; then
-        print_success "Installation verified successfully!"
-        print_status "You can now run: ${BINARY_NAME} --version"
+        print_success "${label} installation verified"
     else
-        print_error "Installation verification failed"
+        print_error "${label} installation verification failed"
         exit 1
     fi
 }
@@ -194,18 +200,38 @@ main() {
     version=$(get_latest_version)
     print_status "Latest version: ${version}"
 
+    local temp_dir
+    temp_dir=$(mktemp -d)
+
     print_status "Downloading ${BINARY_NAME} ${version} for ${platform}..."
     local temp_binary
-    temp_binary=$(download_binary "$version" "$platform")
+    if ! temp_binary=$(download_asset "$version" "$platform" "$BINARY_NAME" "$temp_dir"); then
+        rm -rf "$temp_dir"
+        exit 1
+    fi
 
-    local install_path
-    install_path=$(get_install_location)
+    print_status "Downloading ${ATTACH_NAME} ${version} for ${platform}..."
+    local temp_attach
+    if ! temp_attach=$(download_asset "$version" "$platform" "$ATTACH_NAME" "$temp_dir"); then
+        rm -rf "$temp_dir"
+        exit 1
+    fi
 
-    install_binary "$temp_binary" "$install_path"
-    rm -rf "$(dirname "$temp_binary")"
-    verify_installation "$install_path"
+    local install_dir
+    install_dir=$(get_install_dir)
+    local install_path="${install_dir}/${BINARY_NAME}"
+    local attach_path="${install_dir}/${ATTACH_NAME}"
+
+    install_binary "$temp_binary" "$install_path" "$BINARY_NAME"
+    install_binary "$temp_attach" "$attach_path" "$ATTACH_NAME"
+    ensure_path "$install_dir"
+
+    rm -rf "$temp_dir"
+    verify_installation "$install_path" "$BINARY_NAME"
+    verify_installation "$attach_path" "$ATTACH_NAME"
 
     print_success "${BINARY_NAME} installation completed successfully!"
+    print_status "You can now run: ${BINARY_NAME} --version"
 }
 
 if [[ "$(uname -s)" == *"MINGW"* ]] || [[ "$(uname -s)" == *"MSYS"* ]]; then
