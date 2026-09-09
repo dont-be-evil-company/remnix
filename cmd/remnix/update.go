@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	githubRepo     = "dont-be-evil-company/remnix"
+	githubRepo      = "dont-be-evil-company/remnix"
 	binaryAssetName = "remnix"
 )
 
@@ -94,9 +95,8 @@ func compareVersions(v1, v2 string) int {
 	}
 
 	for i := 0; i < maxLen; i++ {
-		var num1, num2 int
-		fmt.Sscanf(parts1[i], "%d", &num1)
-		fmt.Sscanf(parts2[i], "%d", &num2)
+		num1, _ := strconv.Atoi(parts1[i])
+		num2, _ := strconv.Atoi(parts2[i])
 		if num1 < num2 {
 			return -1
 		}
