@@ -30,6 +30,11 @@ func marshalUserConfig(c *Config, existing []byte) ([]byte, error) {
 		var old yaml.Node
 		if err := yaml.Unmarshal(existing, &old); err == nil && old.Kind == yaml.DocumentNode && len(old.Content) > 0 {
 			applyYAML(&old, &fresh, false)
+			tmpl, err := defaultConfigNode()
+			if err != nil {
+				return nil, err
+			}
+			fillMissing(&old, tmpl)
 			toEncode = &old
 		}
 	} else {
@@ -56,6 +61,9 @@ sync:
     rclone_engine: embedded
     endpoints: []
     callbacks: []
+daemon:
+    compact_interval: 5m
+    config_watch_interval: 30s
 suggest:
     enabled: true
     menu: false
@@ -156,6 +164,38 @@ func encodeUserYAML(n *yaml.Node, style yamlIndent) ([]byte, error) {
 		body = leadingSpacesToTabs(body, style.spaces)
 	}
 	return prependSchemaHeader(body), nil
+}
+
+func fillMissing(dst, tmpl *yaml.Node) {
+	if dst == nil || tmpl == nil {
+		return
+	}
+	tmpl = unwrapDoc(tmpl)
+	if dst.Kind == yaml.DocumentNode {
+		if len(dst.Content) == 0 {
+			dst.Content = []*yaml.Node{tmpl}
+			return
+		}
+		fillMissing(dst.Content[0], tmpl)
+		return
+	}
+	if tmpl.Kind != yaml.MappingNode || dst.Kind != yaml.MappingNode {
+		return
+	}
+	have := map[string]*yaml.Node{}
+	for i := 0; i+1 < len(dst.Content); i += 2 {
+		have[dst.Content[i].Value] = dst.Content[i+1]
+	}
+	for i := 0; i+1 < len(tmpl.Content); i += 2 {
+		k, v := tmpl.Content[i], tmpl.Content[i+1]
+		if existing, ok := have[k.Value]; ok {
+			if existing.Kind == yaml.MappingNode && v.Kind == yaml.MappingNode {
+				fillMissing(existing, v)
+			}
+			continue
+		}
+		dst.Content = append(dst.Content, k, v)
+	}
 }
 
 func applyYAML(dst, src *yaml.Node, keep bool) {

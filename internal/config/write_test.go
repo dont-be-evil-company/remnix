@@ -22,6 +22,8 @@ func TestMarshalUserConfigInitialWriteIncludesDefaults(t *testing.T) {
 		"rclone_engine: embedded",
 		"endpoints: []",
 		"callbacks: []",
+		"compact_interval: 5m",
+		"config_watch_interval: 30s",
 		"enabled: true",
 		"menu: false",
 		"menu_max: 8",
@@ -75,6 +77,49 @@ func TestMarshalUserConfigInitialWriteKeepsUserValues(t *testing.T) {
 	}
 	if !strings.Contains(got, "rclone_engine: embedded") || !strings.Contains(got, "menu: false") {
 		t.Fatalf("lost untouched defaults:\n%s", got)
+	}
+	if !strings.Contains(got, "compact_interval: 5m") || !strings.Contains(got, "config_watch_interval: 30s") {
+		t.Fatalf("lost daemon defaults:\n%s", got)
+	}
+}
+
+func TestMarshalUserConfigBackfillsMissingDefaults(t *testing.T) {
+	cfg := Default()
+	on := true
+	cfg.Sync.Enabled = &on
+	cfg.Sync.Interval = "30s"
+	existing := []byte("version: 2\nsync:\n    enabled: true\n    interval: 30s\n")
+	out, err := marshalUserConfig(cfg, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "interval: 30s") {
+		t.Fatalf("expected preserved interval:\n%s", got)
+	}
+	if strings.Contains(got, "interval: 1m") {
+		t.Fatalf("overwrote user interval:\n%s", got)
+	}
+	for _, want := range []string{
+		"gc_interval: 1h",
+		"compact_interval: 5m",
+		"config_watch_interval: 30s",
+		"rclone_engine: embedded",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing backfill %q:\n%s", want, got)
+		}
+	}
+
+	partial := Default()
+	partial.Sync.Enabled = &on
+	out, err = marshalUserConfig(partial, []byte("version: 2\nsync:\n    enabled: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = string(out)
+	if !strings.Contains(got, "interval: 1m") {
+		t.Fatalf("expected default interval on partial file:\n%s", got)
 	}
 }
 

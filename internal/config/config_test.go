@@ -188,6 +188,24 @@ func TestIntervalDuration(t *testing.T) {
 	if (Sync{GCInterval: "15m"}).GCIntervalDuration() != 15*time.Minute {
 		t.Fatal("parsed gc interval")
 	}
+	if Default().Daemon.CompactIntervalDuration() != 5*time.Minute {
+		t.Fatal("default compact interval")
+	}
+	if (Daemon{CompactInterval: "2m"}).CompactIntervalDuration() != 2*time.Minute {
+		t.Fatal("parsed compact interval")
+	}
+	if (Daemon{CompactInterval: "bogus"}).CompactIntervalDuration() != 5*time.Minute {
+		t.Fatal("invalid compact interval")
+	}
+	if Default().Daemon.ConfigWatchIntervalDuration() != 30*time.Second {
+		t.Fatal("default config watch interval")
+	}
+	if (Daemon{ConfigWatchInterval: "5s"}).ConfigWatchIntervalDuration() != 5*time.Second {
+		t.Fatal("parsed config watch interval")
+	}
+	if (Daemon{ConfigWatchInterval: "500ms"}).ConfigWatchIntervalDuration() != 30*time.Second {
+		t.Fatal("sub-second config watch interval")
+	}
 }
 
 func TestLoadMissingReturnsDefault(t *testing.T) {

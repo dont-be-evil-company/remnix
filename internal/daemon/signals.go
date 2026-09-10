@@ -17,8 +17,8 @@ func (s *Server) watchSignals(ctx context.Context) {
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGHUP)
 	defer signal.Stop(ch)
-	tick := time.NewTicker(30 * time.Second)
-	defer tick.Stop()
+	timer := time.NewTimer(s.configWatchInterval())
+	defer timer.Stop()
 	var mtime time.Time
 	if st, err := os.Stat(config.ConfigPath()); err == nil {
 		mtime = st.ModTime()
@@ -33,9 +33,10 @@ func (s *Server) watchSignals(ctx context.Context) {
 			} else {
 				slog.Info("remnix daemon: config reloaded")
 			}
-		case <-tick.C:
+		case <-timer.C:
 			st, err := os.Stat(config.ConfigPath())
 			if err != nil {
+				timer.Reset(s.configWatchInterval())
 				continue
 			}
 			if st.ModTime().After(mtime) {
@@ -44,6 +45,7 @@ func (s *Server) watchSignals(ctx context.Context) {
 					slog.Warn("remnix daemon: reload config", "err", err)
 				}
 			}
+			timer.Reset(s.configWatchInterval())
 		}
 	}
 }

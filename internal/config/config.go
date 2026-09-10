@@ -18,6 +18,7 @@ type Config struct {
 	DeviceName         string   `yaml:"-"`
 	Database           Database `yaml:"-"`
 	Sync               Sync     `yaml:"sync"`
+	Daemon             Daemon   `yaml:"daemon"`
 	Suggest            Suggest  `yaml:"suggest"`
 	PtyProxy           PtyProxy `yaml:"pty_proxy"`
 	UI                 UI       `yaml:"ui"`
@@ -80,6 +81,11 @@ type Sync struct {
 	RcloneEngine RcloneEngine `yaml:"rclone_engine,omitempty"`
 	Endpoints    []Endpoint   `yaml:"endpoints,omitempty"`
 	Callbacks    []string     `yaml:"callbacks,omitempty"`
+}
+
+type Daemon struct {
+	CompactInterval     string `yaml:"compact_interval,omitempty"`
+	ConfigWatchInterval string `yaml:"config_watch_interval,omitempty"`
 }
 
 type RcloneEngine string
@@ -612,6 +618,28 @@ func (s Sync) GCIntervalDuration() time.Duration {
 		return time.Hour
 	}
 	return d
+}
+
+func (d Daemon) CompactIntervalDuration() time.Duration {
+	if d.CompactInterval == "" {
+		return 5 * time.Minute
+	}
+	parsed, err := time.ParseDuration(d.CompactInterval)
+	if err != nil || parsed <= 0 {
+		return 5 * time.Minute
+	}
+	return parsed
+}
+
+func (d Daemon) ConfigWatchIntervalDuration() time.Duration {
+	if d.ConfigWatchInterval == "" {
+		return 30 * time.Second
+	}
+	parsed, err := time.ParseDuration(d.ConfigWatchInterval)
+	if err != nil || parsed < time.Second {
+		return 30 * time.Second
+	}
+	return parsed
 }
 
 func (c *Config) EnsureDevice(id, name string) {

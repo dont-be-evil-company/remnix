@@ -147,22 +147,35 @@ func (s *Server) CompactCache() protocol.Stats {
 	return s.Stats()
 }
 
-// compactInterval is long enough that FreeOSMemory's stop-the-world GC
-// does not hit interactive suggest/search, and short enough that Ctrl+R
-// spikes and intern churn do not pin RSS for the whole session.
-const compactInterval = 5 * time.Minute
-
 func (s *Server) compactLoop(ctx context.Context) {
-	tick := time.NewTicker(compactInterval)
-	defer tick.Stop()
+	timer := time.NewTimer(s.compactInterval())
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-timer.C:
 			s.runPeriodicCompact()
+			timer.Reset(s.compactInterval())
 		}
 	}
+}
+
+// compactInterval is long enough that FreeOSMemory's stop-the-world GC
+// does not hit interactive suggest/search, and short enough that Ctrl+R
+// spikes and intern churn do not pin RSS for the whole session.
+func (s *Server) compactInterval() time.Duration {
+	if cfg := s.Config(); cfg != nil {
+		return cfg.Daemon.CompactIntervalDuration()
+	}
+	return 5 * time.Minute
+}
+
+func (s *Server) configWatchInterval() time.Duration {
+	if cfg := s.Config(); cfg != nil {
+		return cfg.Daemon.ConfigWatchIntervalDuration()
+	}
+	return 30 * time.Second
 }
 
 func (s *Server) runPeriodicCompact() {

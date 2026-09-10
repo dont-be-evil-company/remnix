@@ -49,6 +49,21 @@
         }
       }
     },
+    "daemon": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Background daemon cadences.",
+      "properties": {
+        "compact_interval": {
+          "$ref": "#/definitions/duration",
+          "description": "How often the daemon prunes the RAM history cache. Default 5m."
+        },
+        "config_watch_interval": {
+          "$ref": "#/definitions/duration",
+          "description": "How often the daemon checks config.yaml mtime for reload. Default 30s."
+        }
+      }
+    },
     "suggest": {
       "type": "object",
       "additionalProperties": false,
