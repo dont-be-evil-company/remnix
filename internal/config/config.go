@@ -600,11 +600,11 @@ func writeAtomic(path string, data []byte) error {
 
 func (s Sync) IntervalDuration() time.Duration {
 	if s.Interval == "" {
-		return time.Minute
+		return 5 * time.Minute
 	}
 	d, err := time.ParseDuration(s.Interval)
 	if err != nil || d < time.Second {
-		return time.Minute
+		return 5 * time.Minute
 	}
 	return d
 }

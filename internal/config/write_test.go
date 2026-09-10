@@ -17,7 +17,7 @@ func TestMarshalUserConfigInitialWriteIncludesDefaults(t *testing.T) {
 	for _, want := range []string{
 		"disable_auto_migrate: false",
 		"enabled: false",
-		"interval: 1m",
+		" interval: 5m",
 		"gc_interval: 1h",
 		"rclone_engine: embedded",
 		"endpoints: []",
@@ -97,7 +97,7 @@ func TestMarshalUserConfigBackfillsMissingDefaults(t *testing.T) {
 	if !strings.Contains(got, "interval: 30s") {
 		t.Fatalf("expected preserved interval:\n%s", got)
 	}
-	if strings.Contains(got, "interval: 1m") {
+	if strings.Contains(got, " interval: 5m") {
 		t.Fatalf("overwrote user interval:\n%s", got)
 	}
 	for _, want := range []string{
@@ -118,7 +118,7 @@ func TestMarshalUserConfigBackfillsMissingDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = string(out)
-	if !strings.Contains(got, "interval: 1m") {
+	if !strings.Contains(got, " interval: 5m") {
 		t.Fatalf("expected default interval on partial file:\n%s", got)
 	}
 }

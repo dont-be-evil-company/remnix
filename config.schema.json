@@ -26,7 +26,7 @@
         },
         "interval": {
           "$ref": "#/definitions/duration",
-          "description": "How often the daemon syncs. Default 1m."
+          "description": "How often the daemon syncs. Default 5m."
         },
         "gc_interval": {
           "$ref": "#/definitions/duration",

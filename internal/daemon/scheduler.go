@@ -29,14 +29,14 @@ type SyncScheduler struct {
 
 func newScheduler(s *Server, interval time.Duration) *SyncScheduler {
 	if interval <= 0 {
-		interval = time.Minute
+		interval = 5 * time.Minute
 	}
 	return &SyncScheduler{server: s, interval: interval}
 }
 
 func (sc *SyncScheduler) SetInterval(d time.Duration) {
 	if d <= 0 {
-		d = time.Minute
+		d = 5 * time.Minute
 	}
 	sc.mu.Lock()
 	sc.interval = d

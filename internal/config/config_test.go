@@ -173,13 +173,13 @@ func TestExpand(t *testing.T) {
 }
 
 func TestIntervalDuration(t *testing.T) {
-	if Default().Sync.IntervalDuration() != time.Minute {
+	if Default().Sync.IntervalDuration() != 5*time.Minute {
 		t.Fatal("default interval")
 	}
 	if (Sync{Interval: "30s"}).IntervalDuration() != 30*time.Second {
 		t.Fatal("parsed interval")
 	}
-	if (Sync{Interval: "bogus"}).IntervalDuration() != time.Minute {
+	if (Sync{Interval: "bogus"}).IntervalDuration() != 5*time.Minute {
 		t.Fatal("invalid interval")
 	}
 	if Default().Sync.GCIntervalDuration() != time.Hour {

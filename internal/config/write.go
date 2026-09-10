@@ -56,7 +56,7 @@ const defaultUserConfigYAML = `version: 2
 disable_auto_migrate: false
 sync:
     enabled: false
-    interval: 1m
+    interval: 5m
     gc_interval: 1h
     rclone_engine: embedded
     endpoints: []
