@@ -24,3 +24,17 @@ func TestStatusSetPrintsWhenNotTTY(t *testing.T) {
 		t.Fatalf("missing done line: %q", got)
 	}
 }
+
+func TestStatusStopOmitsSynced(t *testing.T) {
+	var buf bytes.Buffer
+	s := StartStatus(&buf)
+	s.Set("pulling events")
+	s.Stop()
+	got := buf.String()
+	if !strings.Contains(got, "pulling events") {
+		t.Fatalf("output %q", got)
+	}
+	if strings.Contains(got, "synced") {
+		t.Fatalf("stop printed success: %q", got)
+	}
+}

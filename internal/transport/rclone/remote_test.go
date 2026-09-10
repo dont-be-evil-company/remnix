@@ -59,6 +59,9 @@ func TestLocalRoundTrip(t *testing.T) {
 	if err := tr.Remove(ctx, "events/d1/a.bundle"); err != nil {
 		t.Fatal(err)
 	}
+	if err := tr.Remove(ctx, "acks/missing.ack"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPutAtomicOverwrites(t *testing.T) {

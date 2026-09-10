@@ -54,6 +54,15 @@ func (s *Status) Set(msg string) {
 }
 
 func (s *Status) Finish(err error) {
+	s.finish(err == nil)
+}
+
+// Stop clears the spinner without printing a success line.
+func (s *Status) Stop() {
+	s.finish(false)
+}
+
+func (s *Status) finish(ok bool) {
 	if s == nil {
 		return
 	}
@@ -62,12 +71,12 @@ func (s *Status) Finish(err error) {
 		if s.tty {
 			<-s.done
 			_, _ = fmt.Fprint(s.out, "\r\033[K\033[?25h")
-			if err == nil {
+			if ok {
 				_, _ = fmt.Fprintln(s.out, "✓ synced")
 			}
 			return
 		}
-		if err == nil {
+		if ok {
 			_, _ = fmt.Fprintln(s.out, "synced")
 		}
 	})

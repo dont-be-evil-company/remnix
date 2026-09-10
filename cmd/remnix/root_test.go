@@ -26,6 +26,7 @@ func TestUnlockAndDaemonHelp(t *testing.T) {
 		{"changelog", "--help"},
 		{"inspect", "--help"},
 		{"explore", "--help"},
+		{"daemon", "status", "--help"},
 		{"daemon", "reload", "--help"},
 		{"daemon", "compact", "--help"},
 		{"daemon", "restart", "--help"},

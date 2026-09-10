@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strings"
 	"testing"
@@ -388,6 +389,36 @@ func TestMapErrAccessDenied(t *testing.T) {
 	}
 }
 
+func TestMapErrDropboxPathLookupNotFound(t *testing.T) {
+	err := mapErr(fmt.Errorf("path_lookup/not_found/"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRemoveMissingIsIdempotentWhenPurgeReturnsNotFound(t *testing.T) {
+	f := newDupFs()
+	f.features.Purge = func(context.Context, string) error {
+		return fmt.Errorf("path_lookup/not_found/")
+	}
+	tr := &Transport{fs: f, remote: "dropbox"}
+	if err := tr.Remove(context.Background(), "acks/missing.ack"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemovePropagatesPurgePermissionDenied(t *testing.T) {
+	f := newDupFs()
+	f.features.Purge = func(context.Context, string) error {
+		return fs.ErrorPermissionDenied
+	}
+	tr := &Transport{fs: f, remote: "dropbox"}
+	err := tr.Remove(context.Background(), "acks/missing.ack")
+	if !errors.Is(err, transport.ErrPermissionDenied) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestListAllBucketsDenied(t *testing.T) {
 	cases := []struct {
 		err  error
@@ -710,5 +741,163 @@ func TestDedupeMergesDuplicateRepoRootFolders(t *testing.T) {
 	})
 	if !got["old"] || !got["new"] {
 		t.Fatalf("merged checkpoint dirs %v", got)
+	}
+}
+
+// conflictFs mimics Dropbox: unique names, server-side Move, but Move fails
+// with to/conflict/file/ when the destination already exists.
+type conflictFs struct {
+	files []*conflictObj
+}
+
+type conflictObj struct {
+	f       *conflictFs
+	remote  string
+	data    []byte
+	modTime time.Time
+}
+
+func newConflictFs() *conflictFs { return &conflictFs{} }
+
+func (f *conflictFs) Name() string             { return "dropbox" }
+func (f *conflictFs) Root() string             { return "" }
+func (f *conflictFs) String() string           { return "conflictfs" }
+func (f *conflictFs) Precision() time.Duration { return time.Second }
+func (f *conflictFs) Hashes() hash.Set         { return hash.NewHashSet() }
+func (f *conflictFs) Features() *fs.Features {
+	return &fs.Features{Move: f.Move}
+}
+func (f *conflictFs) Mkdir(context.Context, string) error { return nil }
+func (f *conflictFs) Rmdir(context.Context, string) error { return nil }
+
+func (f *conflictFs) List(_ context.Context, dir string) (fs.DirEntries, error) {
+	var entries fs.DirEntries
+	seenDir := map[string]bool{}
+	prefix := dir
+	if prefix != "" {
+		prefix += "/"
+	}
+	for _, o := range f.files {
+		if dir != "" && o.remote != dir && !strings.HasPrefix(o.remote, prefix) {
+			continue
+		}
+		rest := o.remote
+		if dir != "" {
+			if o.remote == dir {
+				continue
+			}
+			rest = strings.TrimPrefix(o.remote, prefix)
+		}
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			full := rest[:i]
+			if dir != "" {
+				full = dir + "/" + rest[:i]
+			}
+			if !seenDir[full] {
+				seenDir[full] = true
+				entries = append(entries, fs.NewDir(full, time.Time{}))
+			}
+			continue
+		}
+		entries = append(entries, o)
+	}
+	return entries, nil
+}
+
+func (f *conflictFs) NewObject(_ context.Context, remote string) (fs.Object, error) {
+	for _, o := range f.files {
+		if o.remote == remote {
+			return o, nil
+		}
+	}
+	return nil, fs.ErrorObjectNotFound
+}
+
+func (f *conflictFs) Put(_ context.Context, in io.Reader, src fs.ObjectInfo, _ ...fs.OpenOption) (fs.Object, error) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return nil, err
+	}
+	o := &conflictObj{f: f, remote: src.Remote(), data: data, modTime: src.ModTime(context.Background())}
+	f.files = append(f.files, o)
+	return o, nil
+}
+
+func (f *conflictFs) Move(_ context.Context, src fs.Object, remote string) (fs.Object, error) {
+	o, ok := src.(*conflictObj)
+	if !ok {
+		return nil, fs.ErrorCantMove
+	}
+	for _, other := range f.files {
+		if other != o && other.remote == remote {
+			return nil, fmt.Errorf("move failed: to/conflict/file/")
+		}
+	}
+	o.remote = remote
+	return o, nil
+}
+
+func (o *conflictObj) Fs() fs.Info                       { return o.f }
+func (o *conflictObj) String() string                    { return o.remote }
+func (o *conflictObj) Remote() string                    { return o.remote }
+func (o *conflictObj) ModTime(context.Context) time.Time { return o.modTime }
+func (o *conflictObj) Size() int64                       { return int64(len(o.data)) }
+func (o *conflictObj) Storable() bool                    { return true }
+func (o *conflictObj) Hash(context.Context, hash.Type) (string, error) {
+	return "", hash.ErrUnsupported
+}
+func (o *conflictObj) SetModTime(_ context.Context, t time.Time) error {
+	o.modTime = t
+	return nil
+}
+func (o *conflictObj) Open(context.Context, ...fs.OpenOption) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(o.data)), nil
+}
+func (o *conflictObj) Update(_ context.Context, in io.Reader, _ fs.ObjectInfo, _ ...fs.OpenOption) error {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return err
+	}
+	o.data = data
+	o.modTime = time.Now()
+	return nil
+}
+func (o *conflictObj) Remove(context.Context) error {
+	files := o.f.files[:0]
+	for _, x := range o.f.files {
+		if x != o {
+			files = append(files, x)
+		}
+	}
+	o.f.files = files
+	return nil
+}
+
+func TestPutAtomicOverwritesConflictMove(t *testing.T) {
+	f := newConflictFs()
+	tr := &Transport{fs: f, remote: "dropbox"}
+	ctx := context.Background()
+	if err := tr.PutAtomic(ctx, "acks/dev.ack", bytes.NewReader([]byte("old"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.PutAtomic(ctx, "acks/dev.ack", bytes.NewReader([]byte("new"))); err != nil {
+		t.Fatal(err)
+	}
+	named := 0
+	var body []byte
+	for _, o := range f.files {
+		if o.remote == "acks/dev.ack" {
+			named++
+			body = o.data
+		}
+		if strings.Contains(o.remote, ".tmp-") {
+			t.Fatalf("leftover temp %s", o.remote)
+		}
+	}
+	if named != 1 {
+		t.Fatalf("objects named acks/dev.ack: %d (files=%d)", named, len(f.files))
+	}
+	if string(body) != "new" {
+		t.Fatalf("got %q", body)
 	}
 }

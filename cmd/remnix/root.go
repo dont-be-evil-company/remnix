@@ -19,7 +19,8 @@ func newRootCmd() *cobra.Command {
 		Use:          "remnix",
 		Short:        "Encrypted, server-free shell history manager",
 		Long:         "remnix stores shell history in a local SQLite database and synchronizes encrypted events through a filesystem-backed remote.",
-		SilenceUsage: true,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			level := slog.LevelInfo
 			if debugFlag {

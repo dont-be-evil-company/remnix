@@ -152,6 +152,8 @@ type Stats struct {
 	LastSyncClass string `cbor:"last_sync_class,omitempty"`
 	LastSyncError string `cbor:"last_sync_error,omitempty"`
 	SyncStage     string `cbor:"sync_stage,omitempty"`
+	SyncRunning   bool   `cbor:"sync_running,omitempty"`
+	SyncElapsedMs int64  `cbor:"sync_elapsed_ms,omitempty"`
 }
 
 const maxFrame = 16 << 20

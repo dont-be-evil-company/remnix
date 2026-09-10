@@ -50,6 +50,9 @@ func TestDaemonControlPing(t *testing.T) {
 	if st.PID != os.Getpid() {
 		t.Fatalf("pid %d", st.PID)
 	}
+	if st.SyncRunning {
+		t.Fatal("sync should be idle")
+	}
 	var started protocol.HistoryStartRes
 	if err := c.Call(protocol.OpHistoryStart, protocol.HistoryStartReq{
 		Command: "echo hi", Cwd: dir, Session: "sess", Shell: "zsh",

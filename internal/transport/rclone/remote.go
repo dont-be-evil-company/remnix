@@ -251,6 +251,10 @@ func (t *Transport) upload(ctx context.Context, key string, data []byte) (fs.Obj
 
 func (t *Transport) rename(ctx context.Context, obj fs.Object, final string, data []byte) (fs.Object, error) {
 	if move := t.fs.Features().Move; move != nil {
+		// Dropbox MoveV2 fails with to/conflict/file/ if dest exists.
+		if err := t.removeDestForMove(ctx, obj, final); err != nil {
+			return nil, err
+		}
 		moved, err := move(ctx, obj, final)
 		if err != nil {
 			return nil, mapErr(err)
@@ -583,6 +587,18 @@ func (t *Transport) dedupeTree(ctx context.Context, dir string) error {
 	return nil
 }
 
+func (t *Transport) removeDestForMove(ctx context.Context, src fs.Object, final string) error {
+	for _, o := range t.objectsNamed(ctx, final) {
+		if sameObject(o, src) {
+			continue
+		}
+		if err := o.Remove(ctx); err != nil {
+			return mapErr(err)
+		}
+	}
+	return nil
+}
+
 func (t *Transport) objectsNamed(ctx context.Context, key string) []fs.Object {
 	key = strings.Trim(key, "/")
 	parent := path.Dir(key)
@@ -662,36 +678,33 @@ func (t *Transport) Remove(ctx context.Context, key string) error {
 					firstErr = err
 				}
 			}
-			return mapErr(firstErr)
+			return ignoreNotFound(mapErr(firstErr))
 		}
 	}
 	obj, err := t.fs.NewObject(ctx, key)
 	if err == nil {
-		return mapErr(obj.Remove(ctx))
+		return ignoreNotFound(mapErr(obj.Remove(ctx)))
 	}
-	if !errors.Is(err, fs.ErrorObjectNotFound) && !errors.Is(err, fs.ErrorIsDir) {
-		if !errors.Is(err, fs.ErrorDirNotFound) {
-			mapped := mapErr(err)
-			if !errors.Is(mapped, os.ErrNotExist) {
-				return mapped
-			}
+	if !isRcloneNotFound(err) && !errors.Is(err, fs.ErrorIsDir) {
+		mapped := mapErr(err)
+		if !isNotFound(mapped) {
+			return mapped
 		}
 	}
+	// Missing files still reach here so we can delete a directory of the
+	// same name. Dropbox Purge returns path_lookup/not_found instead of
+	// ErrorDirNotFound; treat that as already gone, like directory.Remove.
 	if purge := t.fs.Features().Purge; purge != nil {
-		err := purge(ctx, key)
-		if errors.Is(err, fs.ErrorDirNotFound) || errors.Is(err, fs.ErrorObjectNotFound) {
-			return nil
-		}
-		return mapErr(err)
+		return ignoreNotFound(mapErr(purge(ctx, key)))
 	}
 	err = walkRemove(ctx, t.fs, key)
-	if errors.Is(err, fs.ErrorDirNotFound) {
+	if isRcloneNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return mapErr(err)
 	}
-	return mapErr(t.fs.Rmdir(ctx, key))
+	return ignoreNotFound(mapErr(t.fs.Rmdir(ctx, key)))
 }
 
 func (t *Transport) HealthCheck(ctx context.Context) (transport.HealthStatus, error) {
@@ -869,17 +882,35 @@ func listBucketDenied(err error) bool {
 	return strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "not authorized")
 }
 
+func isRcloneNotFound(err error) bool {
+	return errors.Is(err, fs.ErrorObjectNotFound) || errors.Is(err, fs.ErrorDirNotFound)
+}
+
+func isNotFound(err error) bool {
+	return isRcloneNotFound(err) || errors.Is(err, os.ErrNotExist)
+}
+
+func ignoreNotFound(err error) error {
+	if err == nil || isNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func mapErr(err error) error {
 	if err == nil {
 		return nil
 	}
 	switch {
-	case errors.Is(err, fs.ErrorObjectNotFound), errors.Is(err, fs.ErrorDirNotFound):
+	case isRcloneNotFound(err):
 		return fmt.Errorf("%w: %v", os.ErrNotExist, err)
 	case errors.Is(err, fs.ErrorPermissionDenied):
 		return fmt.Errorf("%w: %v", transport.ErrPermissionDenied, err)
 	default:
 		msg := strings.ToLower(err.Error())
+		if remoteNotFoundMsg(msg) {
+			return fmt.Errorf("%w: %v", os.ErrNotExist, err)
+		}
 		if strings.Contains(msg, "accessdenied") || strings.Contains(msg, "access denied") || strings.Contains(msg, "not authorized to perform") || strings.Contains(msg, "forbidden") && strings.Contains(msg, "403") {
 			return fmt.Errorf("%w: %v", transport.ErrPermissionDenied, err)
 		}
@@ -891,4 +922,10 @@ func mapErr(err error) error {
 		}
 		return err
 	}
+}
+
+func remoteNotFoundMsg(msg string) bool {
+	return strings.Contains(msg, "path_lookup/not_found") ||
+		strings.Contains(msg, "path/not_found") ||
+		strings.Contains(msg, "/not_found")
 }

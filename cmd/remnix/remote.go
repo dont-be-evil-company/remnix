@@ -169,7 +169,13 @@ func newDaemonCmd() *cobra.Command {
 	}
 	cmd.AddCommand(&cobra.Command{Use: "install", Short: "Install user-session autostart for the remnix daemon", RunE: runDaemonInstall})
 	cmd.AddCommand(&cobra.Command{Use: "uninstall", Short: "Remove login autostart for the remnix daemon", RunE: runDaemonUninstall})
-	cmd.AddCommand(&cobra.Command{Use: "status", Short: "Show daemon install and last sync status", RunE: runDaemonStatus})
+	status := &cobra.Command{
+		Use:   "status",
+		Short: "Show daemon install and last sync status",
+		RunE:  runDaemonStatus,
+	}
+	status.Flags().Bool("watch", false, "refresh live sync progress until interrupted")
+	cmd.AddCommand(status)
 	cmd.AddCommand(&cobra.Command{Use: "stats", Short: "Show live daemon stats", RunE: runDaemonStats})
 	cmd.AddCommand(&cobra.Command{Use: "reload", Short: "Reload daemon config from disk", RunE: runDaemonReload})
 	cmd.AddCommand(&cobra.Command{

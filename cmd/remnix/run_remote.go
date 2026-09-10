@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -74,6 +75,9 @@ func runSyncWork(ctx context.Context, cmd *cobra.Command, endpoint string, sp *t
 		if ctx.Err() != nil {
 			return err
 		}
+		if !shouldLocalSyncFallback(err, daemonControlUp()) {
+			return err
+		}
 	}
 	sp.Set("opening local database")
 	a, err := openApp()
@@ -93,12 +97,18 @@ func runSyncWork(ctx context.Context, cmd *cobra.Command, endpoint string, sp *t
 	return a.ForceCheckpoint(ctx)
 }
 
+const (
+	errSyncAlreadyRunning = "sync already running"
+	syncNowWait           = 15 * time.Minute
+	syncBusyPoll          = 150 * time.Millisecond
+)
+
 func waitSyncNow(ctx context.Context, checkpoint bool, sp *tui.Status) error {
 	done := make(chan error, 1)
 	go func() {
-		done <- waitSyncNowRPC(checkpoint)
+		done <- waitSyncNowRPC(ctx, checkpoint)
 	}()
-	tick := time.NewTicker(150 * time.Millisecond)
+	tick := time.NewTicker(syncBusyPoll)
 	defer tick.Stop()
 	for {
 		select {
@@ -108,36 +118,71 @@ func waitSyncNow(ctx context.Context, checkpoint bool, sp *tui.Status) error {
 			return ctx.Err()
 		case <-tick.C:
 			st, err := client.PeekStats()
-			if err != nil || st.SyncStage == "" || sp == nil {
+			if err != nil || sp == nil {
 				continue
 			}
-			sp.Set(st.SyncStage)
+			if st.SyncStage != "" {
+				sp.Set(st.SyncStage)
+			}
 		}
 	}
 }
 
-func waitSyncNowRPC(checkpoint bool) error {
-	var last error
-	for i := 0; i < 6; i++ {
-		last = client.SyncNow(protocol.SyncNowReq{Checkpoint: checkpoint})
-		if last == nil {
+func waitSyncNowRPC(ctx context.Context, checkpoint bool) error {
+	ctx, cancel := context.WithTimeout(ctx, syncNowWait)
+	defer cancel()
+	return retrySyncNow(ctx, func() error {
+		return client.SyncNow(protocol.SyncNowReq{Checkpoint: checkpoint})
+	})
+}
+
+func retrySyncNow(ctx context.Context, syncNow func() error) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := syncNow()
+		if err == nil {
 			return nil
 		}
-		if last.Error() != "sync already running" {
-			return last
+		if !isSyncAlreadyRunning(err) {
+			return err
 		}
-		time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(syncBusyPoll):
+		}
 	}
-	return last
+}
+
+func isSyncAlreadyRunning(err error) bool {
+	return err != nil && err.Error() == errSyncAlreadyRunning
+}
+
+func daemonControlUp() bool {
+	_, err := client.PeekStats()
+	return err == nil
+}
+
+func shouldLocalSyncFallback(rpcErr error, reachable bool) bool {
+	if rpcErr == nil || isSyncAlreadyRunning(rpcErr) {
+		return false
+	}
+	return !reachable
 }
 
 func kickSyncCheckpoint(ctx context.Context, a *app.App) error {
 	if a == nil || !a.Config.Sync.IsEnabled() {
 		return nil
 	}
-	if err := waitSyncNowRPC(true); err == nil {
+	if err := waitSyncNowRPC(ctx, true); err == nil {
 		daemon.RecordOK()
 		return nil
+	} else if ctx.Err() != nil {
+		return err
+	} else if !shouldLocalSyncFallback(err, daemonControlUp()) {
+		return err
 	}
 	if err := a.Sync(ctx, recoverySecretFromEnv(), tokensFromHardware(), nil); err != nil {
 		return err
@@ -622,8 +667,8 @@ func runDaemonUninstall(cmd *cobra.Command, _ []string) error {
 }
 
 func printDaemonStats(cmd *cobra.Command, st protocol.Stats) {
-	fmt.Fprintf(cmd.OutOrStdout(), "pid=%d uptime=%ds heap=%d rss=%d sessions=%d ptys=%d cache_cmds=%d cache_interned=%d cache_bytes=%d dirty=%v db_open=%d last_sync_ok=%v\n",
-		st.PID, st.UptimeSec, st.HeapAlloc, st.RSSBytes, st.Sessions, st.ActivePTYs, st.CacheEntries, st.CacheInterned, st.CacheBytes, st.CacheDirty, st.DBOpenConns, st.LastSyncOK)
+	fmt.Fprintf(cmd.OutOrStdout(), "pid=%d uptime=%ds heap=%d rss=%d sessions=%d ptys=%d cache_cmds=%d cache_interned=%d cache_bytes=%d dirty=%v db_open=%d last_sync_ok=%v %s\n",
+		st.PID, st.UptimeSec, st.HeapAlloc, st.RSSBytes, st.Sessions, st.ActivePTYs, st.CacheEntries, st.CacheInterned, st.CacheBytes, st.CacheDirty, st.DBOpenConns, st.LastSyncOK, formatLiveSync(st))
 }
 
 func runDaemonStats(cmd *cobra.Command, _ []string) error {
@@ -662,26 +707,128 @@ func runDaemonRestart(cmd *cobra.Command, _ []string) error {
 }
 
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
-	st, err := daemon.Query()
+	watch, _ := cmd.Flags().GetBool("watch")
+	if watch {
+		return watchDaemonStatus(cmd)
+	}
+	lines, err := daemonStatusLines()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "installed=%v running=%v path=%s %s\n", st.Installed, st.Running, st.Path, st.Detail)
+	for _, line := range lines {
+		fmt.Fprintln(cmd.OutOrStdout(), line)
+	}
+	return nil
+}
+
+func daemonStatusLines() ([]string, error) {
+	st, err := daemon.Query()
+	if err != nil {
+		return nil, err
+	}
+	lines := []string{fmt.Sprintf("installed=%v running=%v path=%s %s", st.Installed, st.Running, st.Path, st.Detail)}
 	last, err := daemon.ReadStatus()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if last.At != 0 {
 		when := last.HumanAt
 		if when == "" {
 			when = fmt.Sprintf("%d", last.At)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "last_ok=%v at=%s%s gc_deleted=%d gc_eligible=%v err=%s\n", last.OK, when, last.FormatTiming(), last.GCDeleted, last.GCEligible, last.Error)
+		lines = append(lines, fmt.Sprintf("last_ok=%v at=%s%s gc_deleted=%d gc_eligible=%v err=%s", last.OK, when, last.FormatTiming(), last.GCDeleted, last.GCEligible, last.Error))
 		if !last.OK && strings.Contains(last.Error, "context canceled") {
-			fmt.Fprintln(cmd.OutOrStdout(), "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart remnix-daemon")
+			lines = append(lines, "hint: that error is from a stopped/restarted sync, not necessarily the last successful join; run: systemctl --user restart remnix-daemon")
 		}
 	}
-	return nil
+	if live, err := client.PeekStats(); err == nil {
+		lines = append(lines, formatLiveSync(live))
+	} else if st.Running {
+		lines = append(lines, "sync=unreachable")
+	}
+	return lines, nil
+}
+
+func formatLiveSync(st protocol.Stats) string {
+	if !st.SyncRunning {
+		return "sync=idle"
+	}
+	stage := st.SyncStage
+	if stage == "" {
+		stage = "working"
+	}
+	if s := daemon.FormatElapsed(st.SyncElapsedMs); s != "" {
+		return fmt.Sprintf("sync=running stage=%q elapsed=%s", stage, s)
+	}
+	return fmt.Sprintf("sync=running stage=%q", stage)
+}
+
+func watchDaemonStatus(cmd *cobra.Command) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	out := cmd.OutOrStdout()
+	f, ok := out.(*os.File)
+	tty := ok && term.IsTerminal(int(f.Fd()))
+	if tty {
+		return watchDaemonStatusTTY(ctx, cmd)
+	}
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		lines, err := daemonStatusLines()
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			fmt.Fprintln(out, line)
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+func watchDaemonStatusTTY(ctx context.Context, cmd *cobra.Command) error {
+	header, err := daemonStatusLines()
+	if err != nil {
+		return err
+	}
+	live := ""
+	if n := len(header); n > 0 && strings.HasPrefix(header[n-1], "sync=") {
+		live = header[n-1]
+		header = header[:n-1]
+	}
+	for _, line := range header {
+		fmt.Fprintln(cmd.OutOrStdout(), line)
+	}
+	sp := tui.StartStatus(cmd.ErrOrStderr())
+	if live == "" {
+		live = "sync=idle"
+	}
+	sp.Set(live)
+	defer sp.Stop()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
+			return ctx.Err()
+		case <-tick.C:
+			if live, err := client.PeekStats(); err == nil {
+				sp.Set(formatLiveSync(live))
+			} else {
+				sp.Set("sync=unreachable")
+			}
+		}
+	}
 }
 
 func offerDaemonInstall(cmd *cobra.Command) {

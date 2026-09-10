@@ -92,6 +92,22 @@ func TestRecordOK(t *testing.T) {
 	}
 }
 
+func TestSchedulerSnapshot(t *testing.T) {
+	sc := &SyncScheduler{}
+	running, started := sc.Snapshot()
+	if running || !started.IsZero() {
+		t.Fatalf("idle snapshot running=%v started=%v", running, started)
+	}
+	sc.mu.Lock()
+	sc.running = true
+	sc.started = time.Now().Add(-2 * time.Second)
+	sc.mu.Unlock()
+	running, started = sc.Snapshot()
+	if !running || started.IsZero() {
+		t.Fatalf("busy snapshot running=%v started=%v", running, started)
+	}
+}
+
 func TestInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

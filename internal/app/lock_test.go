@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -16,6 +17,8 @@ func TestAcquireLockExclusive(t *testing.T) {
 
 	if _, err := AcquireLock(); err == nil {
 		t.Fatal("expected second lock to fail")
+	} else if !strings.Contains(err.Error(), "another remnix process holds") {
+		t.Fatalf("err=%v", err)
 	}
 	if err := l1.Release(); err != nil {
 		t.Fatal(err)

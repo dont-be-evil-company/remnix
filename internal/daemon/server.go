@@ -216,6 +216,13 @@ func (s *Server) Stats() protocol.Stats {
 	st.LastSyncClass = last.Class
 	st.LastSyncError = last.Error
 	st.SyncStage = stage
+	if s.syncer != nil {
+		running, started := s.syncer.Snapshot()
+		st.SyncRunning = running
+		if running && !started.IsZero() {
+			st.SyncElapsedMs = time.Since(started).Milliseconds()
+		}
+	}
 	if rss, err := processRSS(); err == nil {
 		st.RSSBytes = rss
 	}

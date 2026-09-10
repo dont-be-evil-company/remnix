@@ -24,7 +24,7 @@ func AcquireLock() (*Lock, error) {
 		return nil, fmt.Errorf("acquire lock: %w", err)
 	}
 	if !locked {
-		return nil, fmt.Errorf("another remnix process holds %s", path)
+		return nil, fmt.Errorf("another remnix process holds %s; if the daemon is syncing, wait or run: remnix daemon status --watch", path)
 	}
 	return &Lock{flock: l}, nil
 }

@@ -22,6 +22,7 @@ type SyncScheduler struct {
 	server    *Server
 	mu        sync.Mutex
 	running   bool
+	started   time.Time
 	interval  time.Duration
 	authFails int
 }
@@ -85,6 +86,12 @@ func (sc *SyncScheduler) SyncNow(ctx context.Context, forceCheckpoint bool) stri
 	return sc.runExclusive(ctx, forceCheckpoint)
 }
 
+func (sc *SyncScheduler) Snapshot() (running bool, started time.Time) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.running, sc.started
+}
+
 func (sc *SyncScheduler) runExclusive(ctx context.Context, forceCheckpoint bool) string {
 	sc.mu.Lock()
 	if sc.running {
@@ -92,10 +99,12 @@ func (sc *SyncScheduler) runExclusive(ctx context.Context, forceCheckpoint bool)
 		return "busy"
 	}
 	sc.running = true
+	sc.started = time.Now()
 	sc.mu.Unlock()
 	defer func() {
 		sc.mu.Lock()
 		sc.running = false
+		sc.started = time.Time{}
 		sc.mu.Unlock()
 	}()
 	return sc.server.runSyncCycle(ctx, forceCheckpoint)
