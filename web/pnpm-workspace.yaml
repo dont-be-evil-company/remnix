@@ -2,3 +2,5 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - daisyui@5.7.32
+  - daisyui@5.7.34
+  - vite@8.3.0

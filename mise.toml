@@ -1,3 +1,4 @@
 [tools]
 go = "1.27"
 odin = "latest"
+pnpm = "12.3.4"

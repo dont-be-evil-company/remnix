@@ -6,6 +6,7 @@
 
 <CodeBlock
 	lang="yaml"
+	meta="path=~/.config/remnix/config.yaml"
 	code={`ui:
     colors:
         accent: "#BB9AF7"

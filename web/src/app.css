@@ -2,20 +2,3 @@
 @plugin 'daisyui' {
 	themes: dark --default;
 }
-.mdsvex-shiki {
-	box-sizing: border-box;
-	width: 100%;
-	min-width: 0;
-	max-width: 100%;
-	overflow: hidden;
-}
-.mdsvex-shiki pre {
-	width: 100%;
-	min-width: 0;
-	max-width: 100%;
-	overflow-x: auto;
-}
-.mdsvex-shiki code {
-	width: max-content;
-	min-width: 100%;
-}

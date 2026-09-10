@@ -1,4 +1,9 @@
-# rclone transport
+---
+title: rclone transport
+excerpt: Embedded rclone engine, providers, and where encrypted data lives.
+description: How remnix embeds rclone, configures endpoints, and talks to cloud providers.
+order: 5
+---
 
 remnix embeds [rclone](https://rclone.org) **v1.73.4** as a Go library
 (`github.com/rclone/rclone`). The binary talks to backends through `fs.Fs`.

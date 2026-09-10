@@ -1,4 +1,9 @@
-# Architecture
+---
+title: Architecture
+excerpt: Local-first shell history, daemon, SQLite, and the 1M-command scale test.
+description: How remnix is structured — daemon, SQLite, encrypted remotes, and the million-command scale test.
+order: 1
+---
 
 remnix is a local-first shell history manager. A device writes commands to
 SQLite, optionally encrypts them into event bundles, and stores those objects
@@ -57,15 +62,15 @@ daemon so SQLite and the RAM cache stay coherent.
 `TestScaleMillionUniqueCommands` in `internal/history` seeds unique commands
 into a temp SQLite file and reports wall time for the interactive paths:
 
-| Step | What it exercises |
-| --- | --- |
-| `ctrl+r unique list (limit 5000)` | Widget load (`history.Filter{Unique: true, Limit: 5000}`) |
-| `ctrl+r rank fuzzy query` | In-memory ranking used after Ctrl+R / `remnix search --interactive` |
-| `ctrl+r unique list + cwd` | Same unique scan filtered by working directory |
-| `ghost-text end-to-end` | Prefix SQL + `search.BestSuggestion` (inline completion) |
-| `lsp-style menu end-to-end` | Prefix SQL + `search.Suggestions` with `suggest.menu_max` |
-| `sync encrypt checkpoint snapshot` | gzip + AEAD snapshot of all rows |
-| `sync encrypt event bundle` | CBOR event encode + `bundle.Pack` / unpack |
+| Step                               | What it exercises                                                   |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `ctrl+r unique list (limit 5000)`  | Widget load (`history.Filter{Unique: true, Limit: 5000}`)           |
+| `ctrl+r rank fuzzy query`          | In-memory ranking used after Ctrl+R / `remnix search --interactive` |
+| `ctrl+r unique list + cwd`         | Same unique scan filtered by working directory                      |
+| `ghost-text end-to-end`            | Prefix SQL + `search.BestSuggestion` (inline completion)            |
+| `lsp-style menu end-to-end`        | Prefix SQL + `search.Suggestions` with `suggest.menu_max`           |
+| `sync encrypt checkpoint snapshot` | gzip + AEAD snapshot of all rows                                    |
+| `sync encrypt event bundle`        | CBOR event encode + `bundle.Pack` / unpack                          |
 
 Skipped unless `REMNIX_SCALE=1` is set (`go test ./...` and `-short` skip it).
 Default size is 1 000 000 unique commands; override with `REMNIX_SCALE_N`.
@@ -74,6 +79,6 @@ Default size is 1 000 000 unique commands; override with `REMNIX_SCALE_N`.
 REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
 ```
 
-Further reading: [sync-protocol.md](sync-protocol.md),
-[cryptography.md](cryptography.md), [rclone.md](rclone.md),
-[threat-model.md](threat-model.md).
+Further reading: [sync protocol](/docs/sync-protocol),
+[cryptography](/docs/cryptography), [rclone](/docs/rclone),
+[threat model](/docs/threat-model).

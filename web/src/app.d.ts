@@ -10,4 +10,16 @@ declare global {
 	}
 }
 
+declare module '*.md' {
+	import type { Component } from 'svelte';
+
+	export default Component;
+	export const metadata: {
+		title: string;
+		excerpt: string;
+		description: string;
+		order: number;
+	};
+}
+
 export {};

@@ -62,7 +62,7 @@ REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -
 ```
 
 Use `REMNIX_SCALE_N=10000` for a shorter dry run. `-short` skips the test.
-Timings print with `-v`. See [docs/architecture.md](docs/architecture.md#scale-test).
+Timings print with `-v`. See [architecture](https://remnix.app/docs/architecture#scale-test).
 
 ## Quick start
 
@@ -260,7 +260,7 @@ moved on startup.
 
 Post-sync `sync.callbacks` (for example an external `rclone sync` of a
 directory-transport folder) still run. They are not the native rclone
-transport. See [docs/rclone.md](docs/rclone.md).
+transport. See [rclone](https://remnix.app/docs/rclone).
 
 Files:
 
@@ -300,7 +300,7 @@ If `setup` was run twice on the same remote:
 remnix key recover
 ```
 
-See [docs/cryptography.md](docs/cryptography.md).
+See [cryptography](https://remnix.app/docs/cryptography).
 
 ## Garbage collection
 
@@ -333,12 +333,12 @@ durations for the last tick, for example `sync=1m6s gc=12ms`.
 
 Protocol, threat model, wizard keys, and rclone internals:
 
-- [docs/architecture.md](docs/architecture.md) (includes the 1M-command scale test)
-- [docs/sync-protocol.md](docs/sync-protocol.md)
-- [docs/cryptography.md](docs/cryptography.md)
-- [docs/threat-model.md](docs/threat-model.md)
-- [docs/rclone.md](docs/rclone.md)
-- [docs/config-wizard.md](docs/config-wizard.md)
+- [architecture](https://remnix.app/docs/architecture) (includes the 1M-command scale test)
+- [sync protocol](https://remnix.app/docs/sync-protocol)
+- [cryptography](https://remnix.app/docs/cryptography)
+- [threat model](https://remnix.app/docs/threat-model)
+- [rclone](https://remnix.app/docs/rclone)
+- [config wizard](https://remnix.app/docs/config-wizard)
 
 ### Command reference
 
