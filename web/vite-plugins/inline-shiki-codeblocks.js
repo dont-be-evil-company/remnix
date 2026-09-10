@@ -1,5 +1,4 @@
-// @ts-nocheck
-import { mdsvexShiki } from '@mistweaverco/mdsvex-shiki';
+import { getMdsvexShikiHighlighter } from '@mistweaverco/mdsvex-shiki';
 
 const highlighterOptions = {
 	displayLanguage: true,
@@ -9,17 +8,23 @@ const highlighterOptions = {
 	}
 };
 
-/** @type {Awaited<ReturnType<Awaited<ReturnType<typeof mdsvexShiki>>>> | undefined} */
+/** @type {Awaited<ReturnType<typeof getMdsvexShikiHighlighter>> | undefined} */
 let highlight;
 
 async function getHighlight() {
 	if (!highlight) {
-		const fn = await mdsvexShiki(highlighterOptions);
-		highlight = await fn;
+		const fn = await getMdsvexShikiHighlighter(highlighterOptions);
+		highlight = fn;
 	}
 	return highlight;
 }
 
+/**
+ * Unescapes a template literal source string, replacing escaped backticks and
+ * escaped `${` sequences with their unescaped counterparts.
+ * @param {string} raw - The raw template literal source string.
+ * @returns {string} The unescaped template literal source string.
+ */
 function unescapeCodeTemplateSource(raw) {
 	return raw.replace(/\\`/g, '`').replace(/\\\$\{/g, '${');
 }
@@ -27,7 +32,7 @@ function unescapeCodeTemplateSource(raw) {
 const blockRe = /<CodeBlock[\s\S]*?lang="([^"]+)"([\s\S]*?)code=\{`([\s\S]*?)`\}\s*\/>/g;
 
 /**
- * Inlines {@mistweaverco/mdsvex-shiki} output at build time so prerendered HTML
+ * Inlines {@mistweaverco/mdsvex-shiki} output at build time so pre-rendered HTML
  * contains real highlights.
  * @returns {import('vite').Plugin}
  */
@@ -50,7 +55,7 @@ export function inlineShikiCodeblocks() {
 				const source = unescapeCodeTemplateSource(raw);
 				const html = await h(source, lang, meta);
 				const htmlExpr = '{@html ' + JSON.stringify(html) + '}';
-				const replacement = `<div class="mb-0 min-w-0 w-full max-w-full overflow-hidden">${htmlExpr}</div>`;
+				const replacement = htmlExpr;
 				replacements.push({
 					index: match.index,
 					len: full.length,

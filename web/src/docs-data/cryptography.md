@@ -1,4 +1,9 @@
-# Cryptography
+---
+title: Cryptography
+excerpt: Sync Master Key, recovery/FIDO/PIV slots, and signed manifests.
+description: How remnix wraps the Sync Master Key, signs manifests, and rotates generations.
+order: 3
+---
 
 A **Sync Master Key** (SMK) wraps event bundles and checkpoints. The SMK is
 itself wrapped in one or more **slots**:

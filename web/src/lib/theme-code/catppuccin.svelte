@@ -7,6 +7,7 @@
 <div class={flavorId === 'latte' ? '' : 'hidden'}>
 	<CodeBlock
 		lang="yaml"
+		meta="path=~/.config/remnix/config.yaml"
 		code={`ui:
     colors:
         accent: "#EA76CB"
@@ -34,6 +35,7 @@
 <div class={flavorId === 'frappe' ? '' : 'hidden'}>
 	<CodeBlock
 		lang="yaml"
+		meta="path=~/.config/remnix/config.yaml"
 		code={`ui:
     colors:
         accent: "#F4B8E4"
@@ -61,6 +63,7 @@
 <div class={flavorId === 'macchiato' ? '' : 'hidden'}>
 	<CodeBlock
 		lang="yaml"
+		meta="path=~/.config/remnix/config.yaml"
 		code={`ui:
     colors:
         accent: "#F5BDE6"
@@ -88,6 +91,7 @@
 <div class={flavorId === 'mocha' ? '' : 'hidden'}>
 	<CodeBlock
 		lang="yaml"
+		meta="path=~/.config/remnix/config.yaml"
 		code={`ui:
     colors:
         accent: "#F5C2E7"

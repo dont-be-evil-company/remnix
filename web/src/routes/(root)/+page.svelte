@@ -11,9 +11,6 @@
 		links: { text: string; url: string }[];
 	}
 
-	const downloadBaseUrl =
-		'https://github.com/dont-be-evil-company/remnix/releases/latest/download/';
-
 	let downloadLink = '';
 
 	let randomOrderMentions: Mention[] = [];
@@ -51,32 +48,36 @@
 />
 
 <div id="start" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="w-[calc(100vw-2.5rem)] max-w-md min-w-0">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-md min-w-0">
 			<img src="/logo.png" alt="remnix logo" class="m-5 mx-auto w-64" />
 			<h1 class="text-5xl font-bold">remnix</h1>
 			<p class="py-6">
 				Encrypted, server-free shell history. Commands live in a local SQLite database.
 				Synchronization is optional: a background daemon can copy encrypted event bundles to storage
-				you already have (Google Drive, Dropbox, S3, a folder, ...) using an embedded rclone engine.
-				There is no remnix cloud and no account.
+				you already have (Google Drive, Dropbox, S3, a folder, ...).
 			</p>
+			<p class="py-6">There is no remnix cloud and no account.</p>
 			<p class="py-6">
-				Remote storage is untrusted. Encryption, key wrapping, and merge happen in remnix - rclone
-				only reads and writes objects.
+				Think of it as Atuins little brother, but with a "we don't care where you want to store your
+				data" philosophy.
 			</p>
 			<div class="flex flex-wrap justify-center gap-3">
+				<a href="#install" on:click={handleAnchorClick}
+					><button class="btn btn-accent">Install</button></a
+				>
 				<a href="#screenshots" on:click={handleAnchorClick}
 					><button class="btn btn-primary">Screenshots</button></a
 				>
 				<a href="/themes"><button class="btn btn-secondary">Themes</button></a>
+				<a href="/docs"><button class="btn btn-info">Docs</button></a>
 			</div>
 		</div>
 	</div>
 </div>
 <div id="screenshots" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="w-[calc(100vw-2.5rem)] max-w-md min-w-0">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-md min-w-0">
 			<a href="#screenshots" on:click={handleAnchorClick}>
 				<h1 class="text-5xl font-bold">Screenshots 📸</h1>
 			</a>
@@ -84,7 +85,7 @@
 				<img
 					src="/assets/tapes/cli/ctrlr.gif"
 					alt="Screenshot of the overview"
-					class="m-5 mx-auto"
+					class="m-5 mx-auto max-w-full min-w-0"
 				/>
 			</a>
 			<p class="py-6">Shows the fuzzy search of the history database.</p>
@@ -95,8 +96,8 @@
 	</div>
 </div>
 <div id="install" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="w-[calc(100vw-2.5rem)] max-w-md min-w-0">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-md min-w-0">
 			<a href="#install" on:click={handleAnchorClick}>
 				<h1 class="text-5xl font-bold">Install ⚡</h1>
 			</a>
@@ -161,8 +162,8 @@
 	</div>
 </div>
 <div id="honorable-mentions" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="w-[calc(100vw-2.5rem)] max-w-md min-w-0">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-md min-w-0">
 			<a href="#honorable-mentions" on:click={handleAnchorClick}>
 				<h1 class="text-5xl font-bold">Honorable mentions 🥰</h1>
 			</a>
@@ -171,7 +172,7 @@
 				{#if idx > 0}
 					<div class="my-4"></div>
 				{/if}
-				<div class="card bg-base-100 mx-auto w-96 shadow-sm">
+				<div class="card bg-base-100 mx-auto max-w-96 shadow-sm">
 					<div class="card-body">
 						<h2 class="card-title">
 							{mention.title}
@@ -196,8 +197,8 @@
 	</div>
 </div>
 <div id="get-involved" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="w-[calc(100vw-2.5rem)] max-w-md min-w-0">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-md min-w-0">
 			<a href="#get-involved" on:click={handleAnchorClick}>
 				<h1 class="text-5xl font-bold">Get involved 📦</h1>
 			</a>

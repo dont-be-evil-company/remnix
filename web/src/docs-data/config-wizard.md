@@ -1,4 +1,9 @@
-# Configuration wizard and filesystem picker
+---
+title: Configuration wizard
+excerpt: Setup, config, and local/remote filesystem pickers.
+description: How remnix setup, device add, config, and remote pickers share wizard components.
+order: 6
+---
 
 `remnix setup`, `remnix device add`, `remnix config`, and `remnix remote ...`
 share wizard components in `internal/tui/wizard` and `internal/tui/picker`.
@@ -27,16 +32,16 @@ deleted on cancel. The file is `$XDG_DATA_HOME/remnix/rclone.conf` (beside
 
 ## Local picker
 
-| Key | Action |
-| --- | --- |
-| Enter | Open directory |
-| Space / Ctrl+Enter | Select current directory |
-| Tab | Autocomplete path (`~`, `$HOME`, `${VAR}`) |
-| `n` | mkdir |
-| `r` | rename |
-| `d` | delete (empty vs recursive; type the name for recursive) |
-| Ctrl+L | Edit path |
-| hidden toggle | Session-only |
+| Key                | Action                                                   |
+| ------------------ | -------------------------------------------------------- |
+| Enter              | Open directory                                           |
+| Space / Ctrl+Enter | Select current directory                                 |
+| Tab                | Autocomplete path (`~`, `$HOME`, `${VAR}`)               |
+| `n`                | mkdir                                                    |
+| `r`                | rename                                                   |
+| `d`                | delete (empty vs recursive; type the name for recursive) |
+| Ctrl+L             | Edit path                                                |
+| hidden toggle      | Session-only                                             |
 
 Protected deletes: `/`, drive root, `$HOME`, remnix config/data roots.
 Directory deletes use `Lstat` so a directory symlink is not followed.

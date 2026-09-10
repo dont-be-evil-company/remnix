@@ -1,4 +1,9 @@
-# Sync protocol
+---
+title: Sync protocol
+excerpt: How devices exchange ciphertext through a filesystem-shaped remote.
+description: Event bundles, checkpoints, acks, and how remnix syncs and equalizes encrypted remotes.
+order: 2
+---
 
 Devices exchange ciphertext through a filesystem-shaped remote:
 

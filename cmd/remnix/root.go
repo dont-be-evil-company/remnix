@@ -16,9 +16,9 @@ var (
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "remnix",
-		Short:        "Encrypted, server-free shell history manager",
-		Long:         "remnix stores shell history in a local SQLite database and synchronizes encrypted events through a filesystem-backed remote.",
+		Use:           "remnix",
+		Short:         "Encrypted, server-free shell history manager",
+		Long:          "remnix stores shell history in a local SQLite database and synchronizes encrypted events through a filesystem-backed remote.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {

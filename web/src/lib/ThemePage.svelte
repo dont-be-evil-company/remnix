@@ -48,8 +48,8 @@
 />
 
 <div class="hero bg-base-200 min-h-screen">
-	<div class="hero-content text-center">
-		<div class="max-w-2xl py-10">
+	<div class="hero-content w-full max-w-full min-w-0 text-center">
+		<div class="w-full max-w-2xl min-w-0 py-10">
 			<a href="/themes">
 				<img src="/logo.png" alt="remnix logo" class="m-5 mx-auto w-32" />
 			</a>
