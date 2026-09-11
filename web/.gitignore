@@ -25,4 +25,5 @@ vite.config.ts.timestamp-*
 # Auto-Synced with root
 /static/logo.png
 /static/favicon.png
+/static/opengraph.png
 /static/config.schema.json

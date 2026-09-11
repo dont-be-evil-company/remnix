@@ -74,10 +74,7 @@ jobs:
 
       - if: steps.should_deploy.outputs.deploy == 'true'
         name: Copy synced assets to website
-        run: |
-          cp config.schema.json web/static/config.schema.json
-          cp logo.png web/static/logo.png
-          cp logo.png web/static/favicon.png
+        run: ./scripts/sync-assets.sh
 
       - if: steps.should_deploy.outputs.deploy == 'true'
         name: Install dependencies

@@ -18,6 +18,11 @@ tasks:
     cmds:
       - go-mod-upgrade
     silent: true
+  sync:assets:
+    desc: Syncs assets to the web directory
+    cmds:
+      - ./scripts/sync-assets.sh
+    silent: true
   generate:changelog:
     desc: Generates embedded changelog from CHANGELOG.md
     cmds:
