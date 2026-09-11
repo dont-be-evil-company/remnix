@@ -46,12 +46,34 @@
 			'Sync 📡 your shell 🐚 history 📚 across unlimited devices. Fast ⚡ and intelligent 🧠 history search 🔎 with batteries 🔋 included.'
 	}}
 />
-
 <div id="start" class="hero bg-base-200 min-h-screen">
 	<div class="hero-content w-full max-w-full min-w-0 text-center">
 		<div class="w-full max-w-md min-w-0">
 			<img src="/logo.png" alt="remnix logo" class="m-5 mx-auto w-64" />
 			<h1 class="text-5xl font-bold">remnix</h1>
+			<details>
+				<summary>What does <span class="badge badge-warning">remnix</span> mean?</summary>
+				<p>
+					<span class="text-warning">Rem</span>inisce means to talk, write, or think about past
+					experiences with pleasure and nostalgia.
+				</p>
+				<p>
+					U<span class="text-warning">nix</span>, the operating system, is a family of multitasking,
+					multiuser computer operating systems that derive from the original AT&T Unix.
+				</p>
+				<p>
+					Remnix is a combination of these two words, and has nothing to do with <a
+						class="link link-accent"
+						href="https://nixos.org/">NixOS</a
+					>, the Linux distribution.
+				</p>
+				<p>It is a play on words, and is meant to be a fun and memorable name for the project.</p>
+				<p class="mnemonic">
+					<span class="badge badge-soft badge-warning">rem</span>ember u<span
+						class="badge badge-soft badge-warning">nix</span
+					> (commands) is not the official mnemonic, but it is a fun way to remember the name.
+				</p>
+			</details>
 			<p class="py-6">
 				Encrypted, server-free shell history. Commands live in a local SQLite database.
 				Synchronization is optional: a background daemon can copy encrypted event bundles to storage
@@ -59,8 +81,12 @@
 			</p>
 			<p class="py-6">There is no remnix cloud and no account.</p>
 			<p class="py-6">
-				Think of it as Atuins little brother, but with a "we don't care where you want to store your
-				data" philosophy.
+				Think of it as <a class="link link-accent" href="https://atuin.sh/">Atuins</a> nerdy little
+				sister, but BYO (Bring Your Own) storage and
+				<span
+					class="tooltip decoration-info text-info underline decoration-dotted"
+					data-tip=".. as in customizable">hackable</span
+				>.
 			</p>
 			<div class="flex flex-wrap justify-center gap-3">
 				<a href="#install" on:click={handleAnchorClick}
@@ -213,3 +239,70 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	details {
+		border-radius: 4px;
+		padding: 10px;
+	}
+
+	summary {
+		font-weight: bold;
+		cursor: pointer;
+		user-select: none;
+		margin-bottom: 10px;
+	}
+
+	details {
+		overflow: hidden;
+	}
+
+	details::details-content {
+		block-size: 0;
+		opacity: 0;
+		overflow: hidden;
+		border: 5px solid transparent;
+		background-color: #181818;
+		transition:
+			block-size 300ms ease,
+			opacity 200ms ease,
+			content-visibility 300ms allow-discrete;
+	}
+
+	details[open]::details-content {
+		block-size: auto;
+		opacity: 1;
+		border: 5px solid #181818;
+		border-radius: 10px;
+	}
+
+	details > summary:first-of-type {
+		display: list-item;
+		list-style: none;
+	}
+
+	details > summary:first-of-type:before {
+		content: '📚';
+		margin-right: 15px;
+		display: inline-block;
+	}
+
+	details[open] > summary:first-of-type:before {
+		content: '📖';
+	}
+
+	details p {
+		margin: 10px 20px auto 20px;
+		font-size: 16px;
+	}
+
+	details p.mnemonic {
+		font-size: 14px;
+	}
+
+	@supports (interpolate-size: allow-keywords) {
+		:root {
+			interpolate-size: allow-keywords;
+		}
+	}
+</style>

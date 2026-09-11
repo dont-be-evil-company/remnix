@@ -1,7 +1,7 @@
 ---
 title: Architecture
 excerpt: Local-first shell history, daemon, SQLite, and the 1M-command scale test.
-description: How remnix is structured — daemon, SQLite, encrypted remotes, and the million-command scale test.
+description: How remnix is structured - daemon, SQLite, encrypted remotes, and the million-command scale test.
 order: 1
 ---
 

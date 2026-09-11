@@ -93,18 +93,6 @@
 		font-weight: 600;
 	}
 
-	.docs-article :global(:not(pre) > code) {
-		padding: 0.125rem 0.375rem;
-		background: var(--color-base-100);
-		border-radius: 0.25rem;
-		font-size: 0.875em;
-	}
-
-	.docs-article :global(pre) {
-		margin: 1.25rem 0;
-		overflow-x: auto;
-	}
-
 	.docs-article :global(strong) {
 		font-weight: 700;
 	}
