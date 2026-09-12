@@ -92,32 +92,10 @@
 				<a href="#install" on:click={handleAnchorClick}
 					><button class="btn btn-accent">Install</button></a
 				>
-				<a href="#screenshots" on:click={handleAnchorClick}
-					><button class="btn btn-primary">Screenshots</button></a
-				>
+				<a href="/screenshots"> <button class="btn btn-primary">Screenshots</button></a>
 				<a href="/themes"><button class="btn btn-secondary">Themes</button></a>
 				<a href="/docs"><button class="btn btn-info">Docs</button></a>
 			</div>
-		</div>
-	</div>
-</div>
-<div id="screenshots" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content w-full max-w-full min-w-0 text-center">
-		<div class="w-full max-w-md min-w-0">
-			<a href="#screenshots" on:click={handleAnchorClick}>
-				<h1 class="text-5xl font-bold">Screenshots 📸</h1>
-			</a>
-			<a href="/assets/tapes/cli/ctrlr.gif">
-				<img
-					src="/assets/tapes/cli/ctrlr.gif"
-					alt="Screenshot of the overview"
-					class="m-5 mx-auto max-w-full min-w-0"
-				/>
-			</a>
-			<p class="py-6">Shows the fuzzy search of the history database.</p>
-			<a href="#install" on:click={handleAnchorClick}
-				><button class="btn btn-primary">Install</button></a
-			>
 		</div>
 	</div>
 </div>
