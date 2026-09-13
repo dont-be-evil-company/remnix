@@ -570,23 +570,8 @@ func runKeyRotate(cmd *cobra.Command, _ []string) error {
 		fidoDevs = nil
 	}
 	defer fido2.CloseAll(fidoDevs)
-	eng, err := a.Engine(secret, tokens, fidoDevs)
+	encoded, err := a.RotateGeneration(cmd.Context(), secret, tokens, fidoDevs)
 	if err != nil {
-		return err
-	}
-	_, active, err := eng.Unlock()
-	if err != nil {
-		return err
-	}
-	next, smk, encoded, err := rotation.NewGenerationFromSlots(active, secret, tokens, fidoDevs)
-	if err != nil {
-		return err
-	}
-	active.Active = false
-	if err := keys.NewStore(a.DB).PutGeneration(active); err != nil {
-		return err
-	}
-	if err := a.PublishGeneration(cmd.Context(), next, smk, secret, tokens, fidoDevs); err != nil {
 		return err
 	}
 	if encoded != "" {

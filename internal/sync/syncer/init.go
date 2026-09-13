@@ -169,32 +169,39 @@ func (e *Engine) PruneDevice(ctx context.Context, id string) error {
 	if id == e.opts.DeviceID {
 		return fmt.Errorf("cannot prune this device (%s)", id)
 	}
-	_, found, _ := e.devices.Get(id)
-	if found {
-		if err := e.devices.Delete(id); err != nil {
-			return err
-		}
-	}
 	return e.withRemote(ctx, func() error {
-		if err := e.removeRemoteDeviceArtifacts(ctx, id); err != nil {
-			return err
-		}
 		smks, active, err := e.Unlock()
 		if err != nil {
 			return fmt.Errorf("unlock to publish prune: %w", err)
 		}
-		return e.publishGeneration(ctx, active, smks[active.GenerationID], []string{id})
+		// Publishing the manifest is the logical prune commit.
+		// Keep the local roster entry until this succeeds so a failed
+		// pre-commit prune remains retryable.
+		if err := e.publishGeneration(ctx, active, smks[active.GenerationID], []string{id}); err != nil {
+			return err
+		}
+		if err := e.removeRemoteDeviceArtifacts(ctx, id); err != nil {
+			return pruneCleanupError(id, err)
+		}
+		if err := e.devices.DeleteIfExists(id); err != nil {
+			return pruneCleanupError(id, err)
+		}
+		return nil
 	})
 }
 
+func pruneCleanupError(id string, err error) error {
+	return fmt.Errorf("device was pruned from the manifest, but remote cleanup failed: %w\nrerun `remnix device prune %s` to retry cleanup", err, id)
+}
+
 func (e *Engine) removeRemoteDeviceArtifacts(ctx context.Context, id string) error {
-	if err := e.opts.Transport.Remove(ctx, path.Join("metadata", "devices", id+".json")); err != nil {
+	if err := transport.DeleteIfExists(ctx, e.opts.Transport, path.Join("metadata", "devices", id+".json")); err != nil {
 		return err
 	}
-	if err := e.opts.Transport.Remove(ctx, path.Join("acks", id+".ack")); err != nil {
+	if err := transport.DeleteIfExists(ctx, e.opts.Transport, path.Join("acks", id+".ack")); err != nil {
 		return err
 	}
-	return e.opts.Transport.Remove(ctx, path.Join("events", id))
+	return transport.DeleteIfExists(ctx, e.opts.Transport, path.Join("events", id))
 }
 
 func (e *Engine) PublishGeneration(ctx context.Context, m generations.Manifest, smk []byte) error {
@@ -205,13 +212,21 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	if err := e.keys.PutGeneration(m); err != nil {
 		return err
 	}
+	if err := e.publishGenerationMaterial(ctx, m); err != nil {
+		return err
+	}
+	return e.publishRemoteRoster(ctx, m.GenerationID, m.Counter, smk, smk, extraPruned)
+}
+
+func (e *Engine) publishGenerationMaterial(ctx context.Context, m generations.Manifest) error {
 	body, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	if err := e.opts.Transport.PutAtomic(ctx, path.Join("keys", "generations", m.GenerationID, "manifest"), bytes.NewReader(body)); err != nil {
-		return err
-	}
+	return e.opts.Transport.PutAtomic(ctx, path.Join("keys", "generations", m.GenerationID, "manifest"), bytes.NewReader(body))
+}
+
+func (e *Engine) publishRemoteRoster(ctx context.Context, activeGeneration string, counter int64, signSMK, verifySMK []byte, extraPruned []string) error {
 	pruned := map[string]bool{}
 	retired := map[string]bool{}
 	for _, id := range extraPruned {
@@ -225,7 +240,7 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	}
 	if raw, err := getBytes(ctx, e.opts.Transport, "metadata/manifest"); err == nil {
 		var existing RemoteManifest
-		if json.Unmarshal(raw, &existing) == nil && VerifyRemote(existing, smk) == nil {
+		if json.Unmarshal(raw, &existing) == nil && VerifyRemote(existing, verifySMK) == nil {
 			for _, id := range existing.Pruned {
 				pruned[id] = true
 			}
@@ -263,8 +278,8 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	}
 	rm := RemoteManifest{
 		Version:          CurrentVersion,
-		Counter:          m.Counter,
-		ActiveGeneration: m.GenerationID,
+		Counter:          counter,
+		ActiveGeneration: activeGeneration,
 		Devices:          uniqueSorted(active),
 		Retired:          uniqueSorted(retiredIDs),
 		Pruned:           uniqueSorted(prunedIDs),
@@ -273,7 +288,7 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	if trusted >= rm.Counter {
 		rm.Counter = trusted + 1
 	}
-	if err := SignRemote(&rm, smk); err != nil {
+	if err := SignRemote(&rm, signSMK); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(rm)
@@ -283,5 +298,5 @@ func (e *Engine) publishGeneration(ctx context.Context, m generations.Manifest, 
 	if err := e.opts.Transport.PutAtomic(ctx, "metadata/manifest", bytes.NewReader(raw)); err != nil {
 		return err
 	}
-	return e.keys.SetTrusted(e.trustKind(), m.GenerationID, rm.Counter, "", raw)
+	return e.keys.SetTrusted(e.trustKind(), activeGeneration, rm.Counter, "", raw)
 }

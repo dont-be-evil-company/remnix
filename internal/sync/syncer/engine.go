@@ -329,6 +329,9 @@ func (e *Engine) pullMetadata(ctx context.Context) error {
 				return err
 			}
 		}
+		if haveManifest {
+			m.Active = m.GenerationID == rm.ActiveGeneration
+		}
 		if err := e.keys.PutGeneration(m); err != nil {
 			return err
 		}

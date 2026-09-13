@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"testing"
@@ -18,6 +19,25 @@ func TestMapFSError(t *testing.T) {
 	}
 	if !errors.Is(MapFSError(ErrAuthRequired), ErrAuthRequired) {
 		t.Fatal("passthrough")
+	}
+}
+
+func TestDeleteIfExists(t *testing.T) {
+	ctx := context.Background()
+	base := &memFS{objs: map[string][]byte{"a": []byte("1")}}
+	if err := DeleteIfExists(ctx, base, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteIfExists(ctx, base, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	ft := &FaultTransport{Base: base, FailRemovePrefix: "gone", FailRemoveErr: ErrRemoteNotFound}
+	if err := DeleteIfExists(ctx, ft, "gone/x"); err != nil {
+		t.Fatal(err)
+	}
+	ft.FailRemoveErr = ErrPermissionDenied
+	if err := DeleteIfExists(ctx, ft, "gone/y"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("got %v", err)
 	}
 }
 

@@ -89,4 +89,7 @@ func TestDeleteRemovesDevice(t *testing.T) {
 	if err := s.Delete("b"); err == nil {
 		t.Fatal("expected not found")
 	}
+	if err := s.DeleteIfExists("b"); err != nil {
+		t.Fatal(err)
+	}
 }

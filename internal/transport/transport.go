@@ -2,7 +2,10 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"io"
+	"io/fs"
+	"os"
 )
 
 type Object struct {
@@ -65,6 +68,16 @@ func Dedupe(ctx context.Context, tr Transport) error {
 		return nil
 	}
 	return d.Dedupe(ctx)
+}
+
+// DeleteIfExists removes key. A missing object is success; other backend
+// errors are returned unchanged.
+func DeleteIfExists(ctx context.Context, tr Transport, key string) error {
+	err := tr.Remove(ctx, key)
+	if err == nil || errors.Is(err, ErrRemoteNotFound) || errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // Session is implemented by rsync/scp-style transports that stage a local copy.

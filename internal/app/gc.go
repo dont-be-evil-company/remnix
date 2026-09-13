@@ -35,6 +35,11 @@ func (a *App) GarbageCollect(ctx context.Context, dryRun bool) (gc.Plan, error) 
 	anyOK := false
 	for _, o := range live {
 		if err := transport.WithSession(ctx, o.tr, func() error {
+			if !dryRun {
+				if err := transport.Dedupe(ctx, o.tr); err != nil {
+					return err
+				}
+			}
 			plan, err := gc.Evaluate(ctx, o.tr, required, "")
 			if err != nil {
 				return err

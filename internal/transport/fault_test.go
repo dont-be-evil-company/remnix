@@ -82,6 +82,43 @@ func TestFaultTransportStaleList(t *testing.T) {
 	}
 }
 
+func TestFaultTransportPutKeyAndLostResponse(t *testing.T) {
+	base := &memFS{objs: map[string][]byte{}}
+	ctx := context.Background()
+	ft := &FaultTransport{Base: base, FailPutKey: "metadata/manifest"}
+	if err := ft.PutAtomic(ctx, "metadata/manifest", bytes.NewReader([]byte("x"))); err == nil {
+		t.Fatal("expected put fault")
+	}
+	if _, ok := base.objs["metadata/manifest"]; ok {
+		t.Fatal("failed put should not write")
+	}
+	ft.FailPutAfterWrite = true
+	if err := ft.PutAtomic(ctx, "metadata/manifest", bytes.NewReader([]byte("y"))); err == nil {
+		t.Fatal("expected lost-response fault")
+	}
+	if string(base.objs["metadata/manifest"]) != "y" {
+		t.Fatalf("lost response should still commit write, got %q", base.objs["metadata/manifest"])
+	}
+}
+
+func TestFaultTransportRemoveAfterN(t *testing.T) {
+	base := &memFS{objs: map[string][]byte{"events/a": []byte("1"), "events/b": []byte("2")}}
+	ctx := context.Background()
+	ft := &FaultTransport{Base: base, FailRemovePrefix: "events/", FailRemoveAfterN: 1}
+	if err := ft.Remove(ctx, "events/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ft.Remove(ctx, "events/b"); err == nil {
+		t.Fatal("expected second delete to fail")
+	}
+	if _, ok := base.objs["events/a"]; ok {
+		t.Fatal("first object should be gone")
+	}
+	if _, ok := base.objs["events/b"]; !ok {
+		t.Fatal("second object should remain")
+	}
+}
+
 func TestFaultTransportCancel(t *testing.T) {
 	base := &memFS{objs: map[string][]byte{"a": []byte("1")}}
 	ft := &FaultTransport{Base: base, Delay: 50 * time.Millisecond}

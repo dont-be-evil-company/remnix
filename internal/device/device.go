@@ -112,6 +112,7 @@ func (s *Store) Retire(id string, at time.Time) error {
 	return nil
 }
 
+// Delete requires the device to exist.
 func (s *Store) Delete(id string) error {
 	res, err := s.db.Exec(`DELETE FROM devices WHERE id = ?`, id)
 	if err != nil {
@@ -125,6 +126,12 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("device %s not found", id)
 	}
 	return nil
+}
+
+// DeleteIfExists is an idempotent cleanup: missing rows succeed.
+func (s *Store) DeleteIfExists(id string) error {
+	_, err := s.db.Exec(`DELETE FROM devices WHERE id = ?`, id)
+	return err
 }
 
 func (s *Store) ActiveIDs() ([]string, error) {

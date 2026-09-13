@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,8 +18,16 @@ type FaultTransport struct {
 	StaleList           bool
 	CorruptRead         bool
 	Delay               time.Duration
+	FailPutKey          string
+	FailPutPrefix       string
+	FailPutErr          error
+	FailPutAfterWrite   bool
+	FailRemovePrefix    string
+	FailRemoveErr       error
+	FailRemoveAfterN    int
 	mu                  sync.Mutex
 	stale               []Object
+	removeOK            int
 }
 
 var _ Transport = (*FaultTransport)(nil)
@@ -72,6 +81,12 @@ func (f *FaultTransport) PutAtomic(ctx context.Context, key string, r io.Reader)
 }
 
 func (f *FaultTransport) put(ctx context.Context, key string, r io.Reader, atomic bool) error {
+	if f.FailPutKey != "" && key == f.FailPutKey {
+		return f.failPut(ctx, key, r, atomic)
+	}
+	if f.FailPutPrefix != "" && (key == f.FailPutPrefix || strings.HasPrefix(key, f.FailPutPrefix)) {
+		return f.failPut(ctx, key, r, atomic)
+	}
 	if f.FailWriteAfterBytes > 0 {
 		limited := &limitedReader{R: r, N: f.FailWriteAfterBytes}
 		if atomic {
@@ -93,9 +108,45 @@ func (f *FaultTransport) put(ctx context.Context, key string, r io.Reader, atomi
 	return f.Base.Put(ctx, key, r)
 }
 
+func (f *FaultTransport) failPut(ctx context.Context, key string, r io.Reader, atomic bool) error {
+	if f.FailPutAfterWrite {
+		if atomic {
+			if err := f.Base.PutAtomic(ctx, key, r); err != nil {
+				return err
+			}
+		} else if err := f.Base.Put(ctx, key, r); err != nil {
+			return err
+		}
+	} else {
+		_, _ = io.Copy(io.Discard, r)
+	}
+	if f.FailPutErr != nil {
+		return f.FailPutErr
+	}
+	return fmt.Errorf("fault: put failed for %s", key)
+}
+
 func (f *FaultTransport) Remove(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if f.FailDelete {
 		return fmt.Errorf("fault: delete failed")
+	}
+	if f.FailRemovePrefix != "" && (key == f.FailRemovePrefix || strings.HasPrefix(key, f.FailRemovePrefix)) {
+		f.mu.Lock()
+		fail := f.FailRemoveAfterN <= 0 || f.removeOK >= f.FailRemoveAfterN
+		if !fail {
+			f.removeOK++
+		}
+		err := f.FailRemoveErr
+		f.mu.Unlock()
+		if fail {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("fault: delete failed for %s", key)
+		}
 	}
 	return f.Base.Remove(ctx, key)
 }

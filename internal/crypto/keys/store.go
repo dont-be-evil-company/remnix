@@ -31,15 +31,24 @@ func NewStore(d *db.DB) *Store {
 }
 
 func (s *Store) PutGeneration(m generations.Manifest) error {
+	return s.putGeneration(s.db, m)
+}
+
+type queryExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func (s *Store) putGeneration(ex queryExecer, m generations.Manifest) error {
 	var existingID string
-	err := s.db.QueryRow(`SELECT id FROM key_generations WHERE seq = ?`, m.Seq).Scan(&existingID)
+	err := ex.QueryRow(`SELECT id FROM key_generations WHERE seq = ?`, m.Seq).Scan(&existingID)
 	if err == nil && existingID != m.GenerationID {
 		return fmt.Errorf("store key generation: seq %d already held by %s", m.Seq, existingID)
 	}
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("store key generation: %w", err)
 	}
-	_, err = s.db.Exec(`
+	_, err = ex.Exec(`
 INSERT INTO key_generations (id, seq, status, created_at)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET status = excluded.status`,
@@ -49,7 +58,7 @@ ON CONFLICT(id) DO UPDATE SET status = excluded.status`,
 	}
 	for i := range m.Slots {
 		m.Slots[i].GenerationID = m.GenerationID
-		if err := s.PutSlot(m.Slots[i]); err != nil {
+		if err := s.putSlot(ex, m.Slots[i]); err != nil {
 			return err
 		}
 	}
@@ -64,10 +73,14 @@ func statusOf(m generations.Manifest) string {
 }
 
 func (s *Store) PutSlot(sl slots.Slot) error {
+	return s.putSlot(s.db, sl)
+}
+
+func (s *Store) putSlot(ex queryExecer, sl slots.Slot) error {
 	if sl.CreatedAt == 0 {
 		sl.CreatedAt = time.Now().UnixMilli()
 	}
-	_, err := s.db.Exec(`
+	_, err := ex.Exec(`
 INSERT INTO key_slots (id, generation_id, slot_type, wrap_params, wrapped_smk, status, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
@@ -112,6 +125,19 @@ func (s *Store) Active() (generations.Manifest, bool, error) {
 	for i := len(all) - 1; i >= 0; i-- {
 		if all[i].Active {
 			return all[i], true, nil
+		}
+	}
+	return generations.Manifest{}, false, nil
+}
+
+func (s *Store) Generation(id string) (generations.Manifest, bool, error) {
+	all, err := s.Generations()
+	if err != nil {
+		return generations.Manifest{}, false, err
+	}
+	for _, g := range all {
+		if g.GenerationID == id {
+			return g, true, nil
 		}
 	}
 	return generations.Manifest{}, false, nil

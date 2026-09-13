@@ -45,6 +45,15 @@ Join (`remnix device add`) **requires** Valid and never calls
 
 Garbage collection deletes superseding event objects after every required
 device has acknowledged a checkpoint. Retired devices no longer block GC.
+GC is retry-safe: if a storage or network error interrupts cleanup after some
+objects were deleted, rerunning `remnix gc` recomputes the current safe set
+and continues. Objects that were already removed are ignored.
+`gc --dry-run` uses the same eligibility logic and performs no deletions.
+
+Pruning a device updates the signed `metadata/manifest` first (the logical
+commit), then removes that device's remote metadata, ack, and event objects.
+If cleanup is interrupted, `remnix device prune <device-id>` resumes it.
+Already-removed remote objects are ignored.
 
 rsync/scp probe and setup wrap `Begin`/`End` so the live remote is inspected,
 not an empty local stage.

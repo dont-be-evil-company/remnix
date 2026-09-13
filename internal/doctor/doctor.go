@@ -111,6 +111,11 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 	} else if st != nil && st.Phase != "" {
 		check(false, fmt.Sprintf("partial setup: phase=%s generation=%s (retry remnix setup, or delete setup-state.json to start over)", st.Phase, st.GenerationID))
 	}
+	if rot, ok, err := ks.Rotation(); err != nil {
+		check(false, "key rotation: "+err.Error())
+	} else if ok {
+		check(false, fmt.Sprintf("partial key rotation: phase=%s %s -> %s (rerun remnix key rotate)", rot.Phase, rot.OldGenerationID, rot.NewGenerationID))
+	}
 
 	if !a.Config.Sync.IsEnabled() {
 		check(true, "sync: disabled (local history only)")

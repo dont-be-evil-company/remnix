@@ -284,6 +284,17 @@ Each device wraps a **Sync Master Key** (`SMK`) in slots: a `bech32` recovery
 key (`remnix1...`), optional FIDO2 `hmac-secret`, optional YubiKey PIV. The
 daemon stores the unwrapped SMK in the OS keyring after `remnix unlock`.
 
+`remnix key rotate` creates a new SMK generation and keeps the previous
+generation so existing encrypted history remains readable. Rotation is
+retry-safe. If a storage or local-state error interrupts rotation, rerunning
+the command first reconciles any in-progress rotation instead of blindly
+creating another generation. A generation is not considered active until the
+authenticated repository manifest selects it. Rerun the same command after an
+ambiguous error rather than editing generation files by hand. `remnix key
+recover` is for genuine fork or corruption states, not ordinary transient
+failures. Old generations remain until GC can prove they are no longer
+referenced.
+
 ```sh
 remnix unlock
 remnix key status
@@ -305,7 +316,18 @@ See [cryptography](https://remnix.app/docs/cryptography).
 ## Garbage collection
 
 When every active device has acknowledged a checkpoint, older event bundles
-can be deleted. A device that never acks blocks GC - retire it.
+can be deleted. A device that never acks blocks GC until it catches up or is
+explicitly retired. Do not delete remote files by hand.
+
+Garbage collection is retry-safe: if a storage or network error interrupts
+cleanup after some objects were deleted, rerunning `remnix gc` recomputes the
+current safe set and continues. Objects that were already removed are ignored.
+`remnix gc --dry-run` reports that set without deleting anything.
+
+Pruning removes a retired device from the synchronized device roster and
+cleans up remote state associated with it. The manifest update is the logical
+commit. If cleanup is interrupted after the manifest has been updated, running
+`remnix device prune <device-id>` again safely resumes cleanup.
 
 ```sh
 remnix gc --dry-run

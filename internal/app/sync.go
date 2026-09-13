@@ -12,6 +12,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/crypto/fido2"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/generations"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/keyring"
+	"github.com/dont-be-evil-company/remnix/internal/crypto/keys"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/piv"
 	"github.com/dont-be-evil-company/remnix/internal/crypto/recovery"
 	"github.com/dont-be-evil-company/remnix/internal/history"
@@ -307,6 +308,32 @@ func (a *App) PublishGeneration(ctx context.Context, m generations.Manifest, smk
 	return a.forEachEndpoint(ctx, secret, tokens, fido, func(_ config.Endpoint, eng *syncer.Engine) error {
 		return eng.PublishGeneration(ctx, m, smk)
 	})
+}
+
+func (a *App) RotateGeneration(ctx context.Context, secret []byte, tokens []piv.Token, fido []fido2.Device) (string, error) {
+	lock, err := AcquireLock()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = lock.Release() }()
+	var encoded string
+	err = a.forEachEndpoint(ctx, secret, tokens, fido, func(_ config.Endpoint, eng *syncer.Engine) error {
+		got, err := eng.RotateGeneration(ctx)
+		if got != "" {
+			encoded = got
+		}
+		return err
+	})
+	if err == nil {
+		if clearErr := keys.NewStore(a.DB).ClearRotation(); clearErr != nil {
+			return encoded, rotationLocalClearError(clearErr)
+		}
+	}
+	return encoded, err
+}
+
+func rotationLocalClearError(err error) error {
+	return fmt.Errorf("key rotation committed remotely, but local key state could not be updated: %w\nrerun `remnix key rotate` or `remnix key status` to reconcile", err)
 }
 
 func (a *App) RecoverGeneration(ctx context.Context, generationID string, secret []byte, tokens []piv.Token, fido []fido2.Device) (generations.Manifest, error) {

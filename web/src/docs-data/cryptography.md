@@ -17,8 +17,18 @@ Generation manifests are HMAC-signed with a key derived from the SMK.
 not applied.
 
 Key rotation (`remnix key rotate`) creates `seq+1` and retains the previous
-generation so older bundles still decrypt. Running `setup` twice produces two
-generations that both claim `seq=1` - recover with `remnix key recover`.
+generation so older bundles still decrypt. A generation is not considered
+active until the authenticated `metadata/manifest` selects it. Rotation is
+retry-safe: if a storage or local-state error interrupts the operation,
+rerunning the command reconciles any in-progress rotation instead of blindly
+creating another generation. Rerun `remnix key rotate` after an interrupted
+attempt rather than editing generation files. `remnix key recover` remains the
+path for genuine fork or corruption states, not ordinary transient failures.
+Old generations stay until garbage collection can prove they are no longer
+referenced.
+
+Running `setup` twice produces two generations that both claim `seq=1` -
+recover with `remnix key recover`.
 
 The daemon cannot prompt for FIDO every minute. Unlock once per session; the
 OS keyring holds the SMK.

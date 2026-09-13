@@ -62,7 +62,7 @@ func newDeviceCmd() *cobra.Command {
 	prune := &cobra.Command{
 		Use:   "prune <device-id>",
 		Short: "Permanently remove a device from the roster",
-		Long:  "Delete the device from the local roster and remote metadata. Synced history from that machine is kept. Later syncs will not bring the device back. Use retire to only stop it blocking GC.",
+		Long:  "Permanently remove a retired device from the synchronized roster and clean up remote state associated with it. Synced history from that machine is kept. The manifest update is the logical commit: if cleanup is interrupted after the manifest has been updated, running remnix device prune <device-id> again safely resumes cleanup. Already-removed remote objects are ignored. Later syncs will not bring the device back. Use retire to only stop it blocking GC.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDevicePrune,
 	}

@@ -32,9 +32,6 @@ func (p Plan) DeletedCount() int {
 }
 
 func Evaluate(ctx context.Context, tr transport.Transport, required []string, checkpointID string) (Plan, error) {
-	if err := transport.Dedupe(ctx, tr); err != nil {
-		return Plan{}, err
-	}
 	acks, err := loadAcks(ctx, tr)
 	if err != nil {
 		return Plan{}, err
@@ -170,8 +167,8 @@ func Execute(ctx context.Context, tr transport.Transport, plan Plan, dryRun bool
 		keys = append(keys, plan.Generations...)
 	}
 	for _, key := range keys {
-		if err := tr.Remove(ctx, key); err != nil {
-			return err
+		if err := transport.DeleteIfExists(ctx, tr, key); err != nil {
+			return fmt.Errorf("garbage collection was only partially completed: %w\nrerun `remnix gc` to continue cleanup", err)
 		}
 	}
 	return nil
