@@ -49,6 +49,14 @@ type Session struct {
 	resetKeys     atomic.Bool
 	afterAlt      atomic.Bool
 	idleMu        sync.Mutex
+
+	parseMu   sync.Mutex
+	parseCond *sync.Cond
+	parseBuf  []byte
+	parseGen  uint64
+	parseAt   uint64
+	parseSig  chan struct{}
+	parseDone sync.WaitGroup
 }
 
 func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Session, error) {
@@ -98,17 +106,22 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 	}
 	ptmxW := os.NewFile(uintptr(wfd), "pty-master-w")
 	s := &Session{
-		ID:     id,
-		Cols:   cols,
-		Rows:   rows,
-		screen: scr,
-		cmd:    cmd,
-		ptmx:   ptmx,
-		ptmxW:  ptmxW,
-		conn:   conn,
-		done:   make(chan int, 1),
-		closed: make(chan struct{}),
+		ID:       id,
+		Cols:     cols,
+		Rows:     rows,
+		screen:   scr,
+		cmd:      cmd,
+		ptmx:     ptmx,
+		ptmxW:    ptmxW,
+		conn:     conn,
+		done:     make(chan int, 1),
+		closed:   make(chan struct{}),
+		parseSig: make(chan struct{}, 1),
 	}
+	s.parseCond = sync.NewCond(&s.parseMu)
+	s.parseDone.Add(1)
+	go s.parseLoop()
+	go s.pumpOutput()
 	go s.pump(conn)
 	go s.watchForeground()
 	return s, nil
@@ -118,6 +131,7 @@ func (s *Session) Snapshot() ptyproxy.Snapshot {
 	if s.screen == nil {
 		return ptyproxy.Snapshot{}
 	}
+	s.syncScreen()
 	return s.screen.Snapshot()
 }
 
@@ -137,53 +151,120 @@ func (s *Session) Close() {
 		if s.ptmxW != nil {
 			_ = s.ptmxW.Close()
 		}
-		if s.screen != nil {
-			s.screen.Close()
-		}
 		if s.closed != nil {
 			close(s.closed)
+		}
+		s.wakeParse()
+		s.parseDone.Wait()
+		if s.screen != nil {
+			s.screen.Close()
 		}
 	})
 }
 
-func (s *Session) pump(conn net.Conn) {
-	defer s.Close()
-	go func() {
-		buf := make([]byte, 8192)
-		var queries queryScanner
-		var kbStrip keyboardModeStripper
-		for {
-			n, err := s.ptmx.Read(buf)
-			if n > 0 {
-				chunk := make([]byte, n)
-				copy(chunk, buf[:n])
-				_, leftAlt := s.screen.Write(chunk)
-				cx, cy := s.screen.Cursor()
-				if reply := queries.feed(chunk, s.Rows, s.Cols, cy, cx); len(reply) > 0 {
-					// Overlay hides PTY output; queued replies would be typed
-					// onto the prompt after Ctrl+R (?0u / [?1;2c).
-					if !s.overlayActive.Load() {
-						_, _ = s.ptmxW.Write(reply)
-					}
-				}
-				stripped := kbStrip.feed(chunk)
-				if leftAlt {
-					s.resetKeys.Store(true)
-					s.afterAlt.Store(true)
-				}
+// pumpOutput forwards PTY bytes immediately. Shadow VT parse runs off this
+// path; parsing nvim output here fills the PTY and the inner app looks frozen.
+func (s *Session) pumpOutput() {
+	buf := make([]byte, 8192)
+	var queries queryScanner
+	var kbStrip keyboardModeStripper
+	for {
+		n, err := s.ptmx.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			cx, cy := s.screen.Cursor()
+			s.enqueueParse(chunk)
+			if reply := queries.feed(chunk, s.Rows, s.Cols, cy, cx); len(reply) > 0 {
+				// Overlay hides PTY output; queued replies would be typed
+				// onto the prompt after Ctrl+R (?0u / [?1;2c).
 				if !s.overlayActive.Load() {
-					_ = s.sendFrame(FrameData, stripped)
-					if leftAlt {
-						s.sendIdleReset(idleResetOpts{})
-						go s.restoreForegroundLater()
-					}
+					_, _ = s.ptmxW.Write(reply)
 				}
 			}
-			if err != nil {
-				break
+			stripped := kbStrip.feed(chunk)
+			if !s.overlayActive.Load() {
+				_ = s.sendFrame(FrameData, stripped)
 			}
 		}
-	}()
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *Session) enqueueParse(p []byte) {
+	if s == nil || len(p) == 0 {
+		return
+	}
+	s.parseMu.Lock()
+	s.parseBuf = append(s.parseBuf, p...)
+	s.parseGen++
+	s.parseMu.Unlock()
+	s.wakeParse()
+}
+
+func (s *Session) wakeParse() {
+	if s == nil || s.parseSig == nil {
+		return
+	}
+	select {
+	case s.parseSig <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Session) parseLoop() {
+	defer s.parseDone.Done()
+	for {
+		select {
+		case <-s.closed:
+			s.drainParse()
+			return
+		case <-s.parseSig:
+			s.drainParse()
+		}
+	}
+}
+
+func (s *Session) drainParse() {
+	for {
+		s.parseMu.Lock()
+		if len(s.parseBuf) == 0 {
+			s.parseAt = s.parseGen
+			s.parseCond.Broadcast()
+			s.parseMu.Unlock()
+			return
+		}
+		chunk := s.parseBuf
+		s.parseBuf = nil
+		s.parseMu.Unlock()
+		_, leftAlt := s.screen.Write(chunk)
+		if leftAlt {
+			s.resetKeys.Store(true)
+			s.afterAlt.Store(true)
+			if !s.overlayActive.Load() {
+				go func() {
+					s.sendIdleReset(idleResetOpts{})
+					s.restoreForegroundLater()
+				}()
+			}
+		}
+	}
+}
+
+func (s *Session) syncScreen() {
+	if s == nil || s.parseCond == nil {
+		return
+	}
+	s.parseMu.Lock()
+	defer s.parseMu.Unlock()
+	for s.parseAt < s.parseGen {
+		s.parseCond.Wait()
+	}
+}
+
+func (s *Session) pump(conn net.Conn) {
+	defer s.Close()
 	go func() {
 		for {
 			kind, payload, err := ReadFrame(conn)

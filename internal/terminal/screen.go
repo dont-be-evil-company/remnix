@@ -16,6 +16,7 @@ type Screen struct {
 	emu          *vt.Emulator
 	sticky       map[int]bool
 	needKeyboard bool
+	beforeWrite  func() // tests: stall Write without blocking the PTY pump
 }
 
 func newScreen(cols, rows int) *Screen {
@@ -62,6 +63,12 @@ func drainEmulatorInput(emu *vt.Emulator) {
 }
 
 func (s *Screen) Write(p []byte) (entered, left bool) {
+	if s == nil {
+		return false, false
+	}
+	if hook := s.beforeWrite; hook != nil {
+		hook()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.emu == nil {
@@ -71,10 +78,76 @@ func (s *Screen) Write(p []byte) (entered, left bool) {
 	_, _ = s.emu.Write(p)
 	now := s.emu.IsAltScreen()
 	entered, left = !was && now, was && !now
+	// One coalesced nvim burst can contain both 1049h and 1049l. Net emulator
+	// state is unchanged, but the TUI still left and the shell needs idle reset.
+	sawEnter, sawLeave := altScreenHops(p)
+	if !entered && !left && sawEnter && sawLeave {
+		entered, left = true, true
+	}
 	if entered {
 		s.needKeyboard = true
 	}
 	return entered, left
+}
+
+func altScreenHops(p []byte) (enter, leave bool) {
+	i := 0
+	for i < len(p) {
+		if p[i] != 0x1b {
+			i++
+			continue
+		}
+		if i+1 >= len(p) || p[i+1] != '[' {
+			i++
+			continue
+		}
+		j := i + 2
+		for j < len(p) && !csiFinal(p[j]) {
+			j++
+		}
+		if j >= len(p) {
+			return enter, leave
+		}
+		seq := p[i : j+1]
+		if hopEnter, hopLeave := altScreenCSI(seq); hopEnter || hopLeave {
+			enter = enter || hopEnter
+			leave = leave || hopLeave
+		}
+		i = j + 1
+	}
+	return enter, leave
+}
+
+func altScreenCSI(seq []byte) (enter, leave bool) {
+	n := len(seq)
+	if n < 5 || seq[0] != 0x1b || seq[1] != '[' || seq[2] != '?' {
+		return false, false
+	}
+	fin := seq[n-1]
+	if fin != 'h' && fin != 'l' {
+		return false, false
+	}
+	body := string(seq[3 : n-1])
+	start := 0
+	for start <= len(body) {
+		end := start
+		for end < len(body) && body[end] != ';' {
+			end++
+		}
+		mode := body[start:end]
+		if mode == "1049" || mode == "1047" || mode == "47" {
+			if fin == 'h' {
+				enter = true
+			} else {
+				leave = true
+			}
+		}
+		if end >= len(body) {
+			break
+		}
+		start = end + 1
+	}
+	return enter, leave
 }
 
 func (s *Screen) IsAltScreen() bool {

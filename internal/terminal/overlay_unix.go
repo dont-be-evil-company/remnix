@@ -57,6 +57,7 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 	if s == nil {
 		return nil, ErrNoSession
 	}
+	s.syncScreen()
 	if s.screen.IsAltScreen() && s.foregroundIdle() {
 		s.sendIdleReset(idleResetOpts{includeAlt: true})
 	}

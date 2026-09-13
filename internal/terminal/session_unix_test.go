@@ -442,3 +442,144 @@ func readKeys(t *testing.T, r interface{ Read([]byte) (int, error) }, d time.Dur
 		return ""
 	}
 }
+
+func startCatSession(t *testing.T) (*Session, net.Conn) {
+	t.Helper()
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat not installed")
+	}
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	sess, err := startSession("cat", CreateRequest{
+		Shell: cat,
+		Cols:  80,
+		Rows:  24,
+		Env:   []string{"PATH=" + os.Getenv("PATH"), "TERM=xterm-256color"},
+	}, server, RPC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.Close)
+	return sess, client
+}
+
+func stallScreenWrite(t *testing.T, sess *Session) (blocked <-chan struct{}, release func()) {
+	t.Helper()
+	stall := make(chan struct{})
+	hit := make(chan struct{}, 1)
+	var once sync.Once
+	release = func() {
+		once.Do(func() { close(stall) })
+	}
+	t.Cleanup(release)
+	sess.screen.beforeWrite = func() {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+		<-stall
+	}
+	return hit, release
+}
+
+func readFrameDataUntil(t *testing.T, conn net.Conn, d time.Duration, needle string) string {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	var b strings.Builder
+	for time.Now().Before(deadline) {
+		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		kind, payload, err := ReadFrame(conn)
+		if err != nil {
+			continue
+		}
+		if kind != FrameData && kind != FrameRaw {
+			continue
+		}
+		b.Write(payload)
+		if needle == "" || strings.Contains(b.String(), needle) {
+			return b.String()
+		}
+	}
+	return b.String()
+}
+
+func TestPumpForwardsWhileScreenWriteBlocks(t *testing.T) {
+	sess, client := startCatSession(t)
+	_, release := stallScreenWrite(t, sess)
+	defer release()
+
+	if err := WriteFrame(client, FrameData, []byte("FORWARD-NOW\n")); err != nil {
+		t.Fatal(err)
+	}
+	got := readFrameDataUntil(t, client, 2*time.Second, "FORWARD-NOW")
+	if !strings.Contains(got, "FORWARD-NOW") {
+		t.Fatal("PTY pump waited on shadow VT parse; nvim-like output would stall")
+	}
+}
+
+func TestSnapshotDrainsQueuedParse(t *testing.T) {
+	sess, client := startCatSession(t)
+	blocked, release := stallScreenWrite(t, sess)
+
+	if err := WriteFrame(client, FrameData, []byte("SNAP-TEXT\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFrameDataUntil(t, client, 2*time.Second, "SNAP-TEXT"); !strings.Contains(got, "SNAP-TEXT") {
+		t.Fatal("echo never reached the client")
+	}
+	select {
+	case <-blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("screen.Write never started")
+	}
+
+	done := make(chan ptyproxy.Snapshot, 1)
+	go func() { done <- sess.Snapshot() }()
+	select {
+	case snap := <-done:
+		t.Fatalf("Snapshot returned before queued parse finished: %q", strings.Join(snap.RowANSI, ""))
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case snap := <-done:
+		if !strings.Contains(strings.Join(snap.RowANSI, ""), "SNAP-TEXT") {
+			t.Fatalf("snapshot missing echoed text: %q", strings.Join(snap.RowANSI, ""))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Snapshot did not return after parse unblocked")
+	}
+}
+
+func TestLeaveAltStillSendsIdleReset(t *testing.T) {
+	dir := t.TempDir()
+	script := dir + "/alt.sh"
+	body := "#!/bin/sh\nprintf '\\033[?1049h'\nprintf '\\033[?1049l'\nprintf 'LEFTALT\\n'\nsleep 3\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	sess, err := startSession("alt", CreateRequest{
+		Shell: script,
+		Cwd:   dir,
+		Cols:  80,
+		Rows:  24,
+		Env:   []string{"PATH=" + os.Getenv("PATH"), "TERM=xterm-256color"},
+	}, server, RPC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	got := readFrameDataUntil(t, client, 3*time.Second, "\x1b[=0;1u")
+	if !strings.Contains(got, "LEFTALT") {
+		t.Fatalf("missing LEFTALT marker\n%s", trimForLog(got))
+	}
+	if !strings.Contains(got, "\x1b[=0;1u") {
+		t.Fatalf("leave-alt must still send idle-reset kitty teardown\n%s", trimForLog(got))
+	}
+}

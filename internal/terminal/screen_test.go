@@ -47,6 +47,13 @@ func TestScreenAltScreenSplitAndCombined(t *testing.T) {
 	if entered || !left || s.IsAltScreen() {
 		t.Fatalf("nested ESC then 1049l should leave alt, entered=%v left=%v alt=%v", entered, left, s.IsAltScreen())
 	}
+
+	s2 := newScreen(80, 24)
+	t.Cleanup(s2.Close)
+	entered, left = s2.Write([]byte("\x1b[?1049h\x1b[?1049lLEFTALT"))
+	if !entered || !left || s2.IsAltScreen() {
+		t.Fatalf("coalesced 1049h+1049l must report leave-alt, entered=%v left=%v alt=%v", entered, left, s2.IsAltScreen())
+	}
 }
 
 func TestIdleResetFromModeBits(t *testing.T) {
