@@ -267,6 +267,8 @@ Files:
 | Path | Purpose |
 | --- | --- |
 | `~/.config/remnix/config.yaml` | Portable settings (no secrets) |
+| `~/.config/remnix/ignore-commands.txt` | Exact commands not recorded |
+| `~/.config/remnix/ignore-commands.regex` | Regex patterns for commands not recorded |
 | `~/.local/share/remnix/rclone.conf` | rclone credentials (not for git) |
 | `~/.local/share/remnix/local.yaml` | This machine’s device id and name |
 | `~/.local/share/remnix/history.db` | Local history and key metadata |
@@ -277,6 +279,18 @@ Files:
 
 Override locations with `REMNIX_CONFIG_DIR` and `REMNIX_DATA_DIR`. Paths in
 user configuration (`$HOME`, `${VAR}`, `~/`) are expanded when used, not when saved.
+
+## Ignoring commands
+
+Optional sidecar files next to `config.yaml` skip **recording** matching
+commands. They do not delete or hide rows already in history, and they do not
+filter search, suggestions, or inbound sync.
+
+`ignore-commands.txt` is one exact full command per line (`ls` skips `ls`, not
+`ls -la`). `ignore-commands.regex` is one Go RE2 pattern per line; the command
+is skipped if the pattern matches. Empty lines are ignored. Invalid regex
+lines are skipped with a warning. Full reference:
+[configuration](https://remnix.app/docs/config#ignoring-commands).
 
 ## Keys / recovery
 
@@ -360,6 +374,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 - [cryptography](https://remnix.app/docs/cryptography)
 - [threat model](https://remnix.app/docs/threat-model)
 - [rclone](https://remnix.app/docs/rclone)
+- [configuration](https://remnix.app/docs/config)
 - [config wizard](https://remnix.app/docs/config-wizard)
 
 ### Command reference

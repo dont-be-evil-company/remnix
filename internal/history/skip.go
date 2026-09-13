@@ -3,6 +3,13 @@ package history
 import "strings"
 
 func ShouldSkip(command string) bool {
+	if skipSecrets(command) {
+		return true
+	}
+	return userIgnore.match(command)
+}
+
+func skipSecrets(command string) bool {
 	u := strings.ToUpper(command)
 	for _, p := range []string{
 		"REMNIX_RECOVERY_KEY=",

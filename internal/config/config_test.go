@@ -33,6 +33,12 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := ConfigPath(); got != filepath.Join("/tmp/remnix-cfg", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got)
 	}
+	if got := IgnoreCommandsPath(); got != filepath.Join("/tmp/remnix-cfg", "ignore-commands.txt") {
+		t.Fatalf("IgnoreCommandsPath = %q", got)
+	}
+	if got := IgnoreCommandsRegexPath(); got != filepath.Join("/tmp/remnix-cfg", "ignore-commands.regex") {
+		t.Fatalf("IgnoreCommandsRegexPath = %q", got)
+	}
 	if got := LocalPath(); got != filepath.Join("/tmp/remnix-data", "local.yaml") {
 		t.Fatalf("LocalPath = %q", got)
 	}

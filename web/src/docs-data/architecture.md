@@ -81,4 +81,4 @@ REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -
 
 Further reading: [sync protocol](/docs/sync-protocol),
 [cryptography](/docs/cryptography), [rclone](/docs/rclone),
-[threat model](/docs/threat-model).
+[threat model](/docs/threat-model), [configuration](/docs/config).

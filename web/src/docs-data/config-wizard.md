@@ -2,11 +2,13 @@
 title: Configuration wizard
 excerpt: Setup, config, and local/remote filesystem pickers.
 description: How remnix setup, device add, config, and remote pickers share wizard components.
-order: 6
+order: 7
 ---
 
 `remnix setup`, `remnix device add`, `remnix config`, and `remnix remote ...`
 share wizard components in `internal/tui/wizard` and `internal/tui/picker`.
+YAML keys, ignore files, and paths are documented in
+[configuration](/docs/config).
 
 ## Setup
 

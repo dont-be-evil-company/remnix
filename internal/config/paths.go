@@ -40,6 +40,14 @@ func ConfigPath() string {
 	return filepath.Join(ConfigDir(), "config.yaml")
 }
 
+func IgnoreCommandsPath() string {
+	return filepath.Join(ConfigDir(), "ignore-commands.txt")
+}
+
+func IgnoreCommandsRegexPath() string {
+	return filepath.Join(ConfigDir(), "ignore-commands.regex")
+}
+
 // RcloneConfigPath is the machine-local rclone credential file. It lives next
 // to local.yaml in the data directory so ~/.config/remnix/config.yaml can be
 // committed without tokens.

@@ -9,7 +9,7 @@
 	data={{
 		title: 'Docs · remnix',
 		description:
-			'Architecture, sync protocol, cryptography, threat model, rclone, and the configuration wizard.'
+			'Architecture, sync protocol, cryptography, threat model, rclone, configuration, and the configuration wizard.'
 	}}
 />
 
@@ -20,7 +20,7 @@
 				<img src="/logo.png" alt="remnix logo" class="m-5 mx-auto w-32" />
 			</a>
 			<h1 class="text-5xl font-bold">Docs 📚</h1>
-			<p class="py-6">Protocol, threat model, wizard, and rclone internals.</p>
+			<p class="py-6">Protocol, configuration, threat model, wizard, and rclone internals.</p>
 			<div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
 				{#each data.docs as doc (doc.slug)}
 					<a href="/docs/{doc.slug}" class="block">
