@@ -8,6 +8,7 @@
 	import OneDarkProYaml from '$lib/theme-code/one-dark-pro.svelte';
 	import TokyoNightYaml from '$lib/theme-code/tokyo-night.svelte';
 	import Synthwave84Yaml from '$lib/theme-code/synthwave-84.svelte';
+	import VhsEraYaml from '$lib/theme-code/vhs-era.svelte';
 	import CatppuccinYaml from '$lib/theme-code/catppuccin.svelte';
 	import MonokaiProYaml from '$lib/theme-code/monokai-pro.svelte';
 
@@ -16,6 +17,7 @@
 		'one-dark-pro': OneDarkProYaml,
 		'tokyo-night': TokyoNightYaml,
 		'synthwave-84': Synthwave84Yaml,
+		'vhs-era': VhsEraYaml,
 		catppuccin: CatppuccinYaml,
 		'monokai-pro': MonokaiProYaml
 	};

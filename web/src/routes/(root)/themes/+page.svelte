@@ -8,7 +8,7 @@
 	data={{
 		title: 'Themes · remnix',
 		description:
-			'Copy-paste ui.colors themes for remnix: Dracula, One Dark Pro, Tokyo Night, SynthWave ’84, Catppuccin, and Monokai Pro.'
+			'Copy-paste ui.colors themes for remnix: Dracula, One Dark Pro, Tokyo Night, SynthWave ’84, VHS Era, Catppuccin, and Monokai Pro.'
 	}}
 />
 

@@ -274,6 +274,30 @@ const synthwave84 = palette('#262335', {
 	}
 });
 
+const vhsEra = palette('#161616', {
+	accent: '#EE5396',
+	title: '#C49BFF',
+	muted: '#8D8D8D',
+	rule: '#393939',
+	badge: '#33B1FF',
+	duration: '#55E07A',
+	failed: '#FF4D6D',
+	time: '#8D8D8D',
+	text: '#DDE1E6',
+	syntax: {
+		command: '#33B1FF',
+		keyword: '#EE5396',
+		flag: '#FFB655',
+		string: '#55E07A',
+		comment: '#8D8D8D',
+		operator: '#FF7EB6',
+		variable: '#C49BFF',
+		path: '#78C6FF',
+		number: '#FFD970',
+		argument: '#DDE1E6'
+	}
+});
+
 const monokaiPro = palette('#2D2A2E', {
 	accent: '#FF6188',
 	title: '#AB9DF2',
@@ -326,6 +350,13 @@ export const themes: Theme[] = [
 		description:
 			'A glowing, 1980s synthwave-inspired aesthetic featuring neon pinks and cyan glows for a retro-futuristic look.',
 		...synthwave84
+	},
+	{
+		slug: 'vhs-era',
+		name: 'VHS Era',
+		description:
+			'A dark Carbon-inspired palette from vhs-era.com with signature neon pink, cool blues, and greens tuned for terminal semantics.',
+		...vhsEra
 	},
 	{
 		slug: 'catppuccin',
