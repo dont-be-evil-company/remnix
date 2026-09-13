@@ -1,21 +1,6 @@
 <script lang="ts">
 	import '@fortawesome/fontawesome-free/css/all.css';
-	import { onMount } from 'svelte';
 	import HeadComponent from '$lib/HeadComponent.svelte';
-	import CodeBlock from '$lib/CodeBlock.svelte';
-	import mentions from './mentions.json';
-
-	interface Mention {
-		title: string;
-		contents: string[];
-		links: { text: string; url: string }[];
-	}
-
-	let downloadLink = '';
-
-	let randomOrderMentions: Mention[] = [];
-
-	let installSystem = 'script';
 
 	const handleAnchorClick = (evt: Event) => {
 		evt.preventDefault();
@@ -28,15 +13,6 @@
 		});
 		window.history.pushState(null, '', `#${anchorId}`);
 	};
-
-	const onInstallSystemChange = (evt: Event) => {
-		const select = evt.currentTarget as HTMLSelectElement;
-		installSystem = select.value;
-	};
-
-	onMount(() => {
-		randomOrderMentions = mentions.sort(() => 0.5 - Math.random());
-	});
 </script>
 
 <HeadComponent
@@ -89,114 +65,11 @@
 				>.
 			</p>
 			<div class="flex flex-wrap justify-center gap-3">
-				<a href="#install" on:click={handleAnchorClick}
-					><button class="btn btn-accent">Install</button></a
-				>
+				<a href="/install"><button class="btn btn-accent">Install</button></a>
 				<a href="/screenshots"> <button class="btn btn-primary">Screenshots</button></a>
 				<a href="/themes"><button class="btn btn-secondary">Themes</button></a>
 				<a href="/docs"><button class="btn btn-info">Docs</button></a>
 			</div>
-		</div>
-	</div>
-</div>
-<div id="install" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content w-full max-w-full min-w-0 text-center">
-		<div class="w-full max-w-md min-w-0">
-			<a href="#install" on:click={handleAnchorClick}>
-				<h1 class="text-5xl font-bold">Install ⚡</h1>
-			</a>
-			<p class="py-6">Install remnix ...</p>
-			<select on:input={onInstallSystemChange} class="select select-bordered mb-5">
-				<option value="script">install script</option>
-				<option value="manually">select manually</option>
-				<option value="aur">Arch Linux x64</option>
-			</select>
-			<div class={installSystem === 'script' ? '' : 'hidden'}>
-				<p class="mb-5">Linux / macOS:</p>
-				<div class="text-left">
-					<CodeBlock lang="bash" code={`curl -sSL https://remnix.app/install.sh | sh`} />
-				</div>
-				<p class="mb-5">Windows (PowerShell):</p>
-				<div class="text-left">
-					<CodeBlock lang="powershell" code={`iwr https://remnix.app/install.ps1 -useb | iex`} />
-				</div>
-				<p class="mb-5">Update later with <code>remnix update</code>.</p>
-			</div>
-			<div class={installSystem === 'manually' ? '' : 'hidden'}>
-				<p class="mb-5">
-					Download the latest release from the <a class="text-secondary" href="/download"
-						>releases page</a
-					>.
-				</p>
-			</div>
-			<div class={installSystem === 'aur' ? '' : 'hidden'}>
-				<p class="mb-5">
-					Via AUR, using an AUR helper like <a
-						href="https://github.com/Jguer/yay"
-						class="text-secondary">yay</a
-					>
-				</p>
-				<div class="text-left">
-					<CodeBlock lang="bash" code={`yay -S remnix-bin`} />
-				</div>
-				<p class="mb-5">
-					.. or via <a href="https://github.com/morganamilo/paru" class="text-secondary">paru</a>
-				</p>
-				<div class="text-left">
-					<CodeBlock lang="bash" code={`paru -S remnix-bin`} />
-				</div>
-			</div>
-			<div
-				class={installSystem !== 'manually' && installSystem !== 'aur' && installSystem !== 'script'
-					? ''
-					: 'hidden'}
-			>
-				<p class="mb-5">
-					<a href={downloadLink} target="_blank" rel="noopener noreferrer">
-						<button class="btn btn-secondary mt-5">Download {installSystem}</button></a
-					>
-				</p>
-			</div>
-			<p>
-				<a href="#honorable-mentions" on:click={handleAnchorClick}
-					><button class="btn btn-primary mt-5">Honorable mentions</button></a
-				>
-			</p>
-		</div>
-	</div>
-</div>
-<div id="honorable-mentions" class="hero bg-base-200 min-h-screen">
-	<div class="hero-content w-full max-w-full min-w-0 text-center">
-		<div class="w-full max-w-md min-w-0">
-			<a href="#honorable-mentions" on:click={handleAnchorClick}>
-				<h1 class="text-5xl font-bold">Honorable mentions 🥰</h1>
-			</a>
-			<p class="py-6">These projects helped make remnix possible:</p>
-			{#each randomOrderMentions as mention, idx}
-				{#if idx > 0}
-					<div class="my-4"></div>
-				{/if}
-				<div class="card bg-base-100 mx-auto max-w-96 shadow-sm">
-					<div class="card-body">
-						<h2 class="card-title">
-							{mention.title}
-						</h2>
-						{#each mention.contents as content}
-							<p>{content}</p>
-						{/each}
-						<div class="card-actions justify-end">
-							{#each mention.links as link}
-								<a class="badge badge-outline" href={link.url}>{link.text}</a>
-							{/each}
-						</div>
-					</div>
-				</div>
-			{/each}
-			<p>
-				<a href="#get-involved" on:click={handleAnchorClick}
-					><button class="btn btn-primary mt-5">Get involved</button></a
-				>
-			</p>
 		</div>
 	</div>
 </div>
@@ -210,9 +83,7 @@
 			<p>
 				View the <a class="text-secondary" href="https://github.com/dont-be-evil-company/remnix"
 					>code</a
-				>, browse
-				<a class="text-secondary" href="/themes">themes</a>, and/or check out the
-				<a class="text-secondary" href="/docs">docs</a>.
+				>.
 			</p>
 		</div>
 	</div>
