@@ -16,7 +16,7 @@ func TestOverlayGeomWaitIsShort(t *testing.T) {
 }
 
 func TestApplyOverlayGeomPrefersProxy(t *testing.T) {
-	fallback := ptyproxy.Snapshot{Rows: 24, Cols: 80, CursorRow: 23}
+	fallback := ptyproxy.Snapshot{Rows: 40, Cols: 120, CursorRow: 23}
 	got, rest := applyOverlayGeom(fallback, overlayGeom{
 		snap: ptyproxy.Snapshot{Rows: 40, Cols: 120, CursorRow: 10},
 	})
@@ -25,6 +25,19 @@ func TestApplyOverlayGeomPrefersProxy(t *testing.T) {
 	}
 	if got.Rows != 40 || got.CursorRow != 10 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestApplyOverlayGeomRejectsMismatchedTTYSize(t *testing.T) {
+	fallback := ptyproxy.Snapshot{Rows: 15, Cols: 80, CursorRow: 14}
+	got, rest := applyOverlayGeom(fallback, overlayGeom{
+		snap: ptyproxy.Snapshot{Rows: 40, Cols: 120, CursorRow: 10},
+	})
+	if rest != nil {
+		t.Fatal("mismatched snapshot must be dropped")
+	}
+	if got.Rows != 15 || got.Cols != 80 || got.CursorRow != 14 {
+		t.Fatalf("want inner tty size, got %+v", got)
 	}
 }
 

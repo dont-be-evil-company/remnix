@@ -225,7 +225,10 @@ func childEnv(shellPath string) []string {
 	env := os.Environ()
 	filtered := env[:0]
 	for _, e := range env {
-		if strings.HasPrefix(e, EnvSocket+"=") || strings.HasPrefix(e, "SHELL=") {
+		if strings.HasPrefix(e, EnvSocket+"=") ||
+			strings.HasPrefix(e, "SHELL=") ||
+			strings.HasPrefix(e, EnvTTY+"=") ||
+			strings.HasPrefix(e, EnvSessionID+"=") {
 			continue
 		}
 		filtered = append(filtered, e)

@@ -84,6 +84,21 @@ func TestOuterWinsizeNil(t *testing.T) {
 	}
 }
 
+func TestChildEnvStripsNestedIdentity(t *testing.T) {
+	t.Setenv(EnvTTY, "/dev/pts/5")
+	t.Setenv(EnvSessionID, "outer-nvim")
+	t.Setenv("SHELL", "/bin/zsh")
+	got := childEnv("/bin/zsh")
+	for _, e := range got {
+		if strings.HasPrefix(e, EnvTTY+"=") {
+			t.Fatalf("nested wrap must not keep outer tty: %s", e)
+		}
+		if strings.HasPrefix(e, EnvSessionID+"=") {
+			t.Fatalf("legacy proxy must not keep outer session: %s", e)
+		}
+	}
+}
+
 func TestOpenOuterTTY(t *testing.T) {
 	in, out, err := openOuterTTY()
 	if err != nil {

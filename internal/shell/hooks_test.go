@@ -451,17 +451,64 @@ func TestPtyProxyPreamble(t *testing.T) {
 	if !strings.Contains(on, "REMNIX_PTY_PROXY_ACTIVE") {
 		t.Fatal("missing active guard")
 	}
+	if !strings.Contains(on, "REMNIX_PTY_PROXY_TTY") || !strings.Contains(on, "__remnix_proxy_tty_here") || !strings.Contains(on, "${NVIM:-}") {
+		t.Fatal("nested nvim :terminal must re-wrap and skip the outer overlay session")
+	}
 	bashOn, _ := Integration("bash", "/opt/remnix", Options{PtyProxyEnabled: true})
 	if !strings.Contains(bashOn, `--shell "$BASH"`) {
 		t.Fatal("bash preamble should forward $BASH")
+	}
+	if !strings.Contains(bashOn, "__remnix_proxy_tty_here") {
+		t.Fatal("bash overlay must skip the outer session on a nested tty")
 	}
 	fishOn, _ := Integration("fish", "/opt/remnix", Options{PtyProxyEnabled: true})
 	if !strings.Contains(fishOn, "--shell (status fish-path)") {
 		t.Fatal("fish preamble should forward fish-path")
 	}
+	if !strings.Contains(fishOn, "__remnix_proxy_tty_here") {
+		t.Fatal("fish overlay must skip the outer session on a nested tty")
+	}
 	nuOn, _ := Integration("nu", "/opt/remnix", Options{PtyProxyEnabled: true})
 	if !strings.Contains(nuOn, "--shell $nu.current-exe") {
 		t.Fatal("nu preamble should forward current-exe")
+	}
+	if !strings.Contains(nuOn, "__remnix_proxy_tty_here") {
+		t.Fatal("nu overlay must skip the outer session on a nested tty")
+	}
+}
+
+func TestZshProxyTTYHereSkipsNestedNvim(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh not installed")
+	}
+	on, err := Integration("zsh", "/opt/remnix", Options{PtyProxyEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(on, "__remnix_proxy_tty_here()")
+	end := strings.Index(on, "__remnix_overlay()")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatal("missing __remnix_proxy_tty_here")
+	}
+	script := on[start:end] + `
+unset REMNIX_PTY_PROXY_TTY
+NVIM=/tmp/nvim.sock
+__remnix_proxy_tty_here && exit 11
+unset NVIM
+__remnix_proxy_tty_here || exit 12
+export REMNIX_PTY_PROXY_TTY=/dev/pts/5
+NVIM=/tmp/nvim.sock
+TTY=/dev/pts/12
+__remnix_proxy_tty_here && exit 13
+TTY=/dev/pts/5
+__remnix_proxy_tty_here || exit 14
+`
+	cmd := exec.Command(zsh, "-c", script)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh helper: %v\n%s", err, out)
 	}
 }
 

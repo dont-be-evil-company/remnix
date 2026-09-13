@@ -10,9 +10,11 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
@@ -37,6 +39,20 @@ func TestChildEnvKeepsClientTmux(t *testing.T) {
 	}
 	if countPrefix(env, ptyproxy.EnvTmux+"=") != 1 {
 		t.Fatalf("duplicate %s in %v", ptyproxy.EnvTmux, env)
+	}
+}
+
+func TestChildEnvDropsInheritedProxyTTY(t *testing.T) {
+	env := childEnv([]string{
+		"PATH=/bin",
+		ptyproxy.EnvTTY + "=/dev/pts/5",
+		ptyproxy.EnvActive + "=1",
+	}, "/bin/zsh", "sess-inner", -1)
+	if got := envValue(env, ptyproxy.EnvTTY); got != "" {
+		t.Fatalf("nested wrap must not keep outer tty %q", got)
+	}
+	if envValue(env, EnvSessionID) != "sess-inner" {
+		t.Fatal("expected new session id")
 	}
 }
 
@@ -749,4 +765,38 @@ func winchPayload(cols, rows int) []byte {
 	binary.BigEndian.PutUint16(p[0:2], uint16(cols))
 	binary.BigEndian.PutUint16(p[2:4], uint16(rows))
 	return p[:]
+}
+
+func TestPtyWinsizeRoundTrip(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	fd, err := syscall.Dup(int(ptmx.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fd)
+	ptySetsize(fd, 100, 30)
+	c, r, ok := ptyWinsize(fd)
+	if !ok || c != 100 || r != 30 {
+		t.Fatalf("winsize %dx%d ok=%v", c, r, ok)
+	}
+}
+
+func TestForegroundPgidDuringCloseHasNoFileRace(t *testing.T) {
+	sess, _ := startCatSession(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			sess.ensureForeground()
+			_, _, _ = sess.foregroundPgid()
+		}
+	}()
+	time.Sleep(time.Millisecond)
+	sess.Close()
+	<-done
 }

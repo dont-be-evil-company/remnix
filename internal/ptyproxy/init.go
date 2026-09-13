@@ -38,10 +38,27 @@ func posixPreamble(bin, attach string) string {
 	return `if [[ "$-" == *i* ]] && [[ -t 0 ]] && [[ -t 1 ]]; then
   _remnix_pty_tmux_current="${TMUX:-}"
   _remnix_pty_tmux_previous="${REMNIX_PTY_PROXY_TMUX:-}"
-  if [[ -z "${REMNIX_PTY_PROXY_ACTIVE:-}${REMNIX_SESSION_ACTIVE:-}" ]] || [[ "$_remnix_pty_tmux_current" != "$_remnix_pty_tmux_previous" ]]; then
+  _remnix_pty_tty="${TTY:-}"
+  if [[ -z "$_remnix_pty_tty" ]]; then
+    _remnix_pty_tty="$(command tty < /dev/tty 2>/dev/null)" || _remnix_pty_tty=""
+  fi
+  _remnix_pty_tty_previous="${REMNIX_PTY_PROXY_TTY:-}"
+  _remnix_need_wrap=0
+  if [[ -z "${REMNIX_PTY_PROXY_ACTIVE:-}${REMNIX_SESSION_ACTIVE:-}" ]]; then
+    _remnix_need_wrap=1
+  elif [[ "$_remnix_pty_tmux_current" != "$_remnix_pty_tmux_previous" ]]; then
+    _remnix_need_wrap=1
+  elif [[ -n "$_remnix_pty_tty_previous" && -n "$_remnix_pty_tty" && "$_remnix_pty_tty" != "$_remnix_pty_tty_previous" ]]; then
+    # Nested PTY (nvim :terminal, emacs term, screen). TMUX is not the only
+    # extra slave; without this the inner shell keeps the outer session id
+    # and Ctrl+R places the overlay on nvim's alt-screen.
+    _remnix_need_wrap=1
+  fi
+  if [[ "$_remnix_need_wrap" == 1 ]]; then
     export REMNIX_PTY_PROXY_ACTIVE=1
     export REMNIX_SESSION_ACTIVE=1
     export REMNIX_PTY_PROXY_TMUX="$_remnix_pty_tmux_current"
+    unset REMNIX_PTY_PROXY_TTY
     _remnix_pty_zsh=""
     if [[ -n "${ZSH_VERSION:-}" ]]; then
       _remnix_pty_zsh="${ZSH_ARGZERO:-$(command -v zsh)}"
@@ -64,8 +81,10 @@ func posixPreamble(bin, attach string) string {
     else
       exec ` + qb + ` pty-proxy || true
     fi
+  elif [[ -n "$_remnix_pty_tty" ]]; then
+    export REMNIX_PTY_PROXY_TTY="$_remnix_pty_tty"
   fi
-  unset _remnix_pty_tmux_current _remnix_pty_tmux_previous _remnix_pty_zsh
+  unset _remnix_need_wrap _remnix_pty_tmux_current _remnix_pty_tmux_previous _remnix_pty_tty _remnix_pty_tty_previous _remnix_pty_zsh
 fi
 `
 }
@@ -82,22 +101,32 @@ func fishPreamble(bin, attach string) string {
   if set -q REMNIX_PTY_PROXY_TMUX
     set _remnix_pty_tmux_previous "$REMNIX_PTY_PROXY_TMUX"
   end
-  # exec fish must not nest another attach on this PTY. Only wrap again
-  # when TMUX becomes a new non-empty value (a new multiplexer pane).
+  set -l _remnix_pty_tty (command tty </dev/tty 2>/dev/null)
+  set -l _remnix_pty_tty_previous ""
+  if set -q REMNIX_PTY_PROXY_TTY
+    set _remnix_pty_tty_previous "$REMNIX_PTY_PROXY_TTY"
+  end
+  # exec fish must not nest another attach on this PTY. Wrap again for a
+  # new tmux pane, or any other nested slave (nvim :terminal).
   set -l _remnix_need_wrap 0
   if not set -q REMNIX_PTY_PROXY_ACTIVE; and not set -q REMNIX_SESSION_ACTIVE
     set _remnix_need_wrap 1
   else if test -n "$_remnix_pty_tmux_current"; and test "$_remnix_pty_tmux_current" != "$_remnix_pty_tmux_previous"
+    set _remnix_need_wrap 1
+  else if test -n "$_remnix_pty_tty_previous"; and test -n "$_remnix_pty_tty"; and test "$_remnix_pty_tty" != "$_remnix_pty_tty_previous"
     set _remnix_need_wrap 1
   end
   if test "$_remnix_need_wrap" = 1
     set -gx REMNIX_PTY_PROXY_ACTIVE 1
     set -gx REMNIX_SESSION_ACTIVE 1
     set -gx REMNIX_PTY_PROXY_TMUX "$_remnix_pty_tmux_current"
+    set -e REMNIX_PTY_PROXY_TTY
     if not set -q REMNIX_PTY_PROXY_LEGACY; and test -x ` + qa + `
       exec ` + qa + ` --shell (status fish-path) --remnix ` + qb + ` </dev/tty; or true
     end
     exec ` + qb + ` pty-proxy --shell (status fish-path) </dev/tty; or true
+  else if test -n "$_remnix_pty_tty"
+    set -gx REMNIX_PTY_PROXY_TTY "$_remnix_pty_tty"
   end
 end
 `
@@ -109,14 +138,19 @@ func nuPreamble(bin, attach string) string {
 	return `if $nu.is-interactive and ("/dev/tty" | path exists) {
   let tmux_current = ($env.TMUX? | default "")
   let tmux_previous = ($env.REMNIX_PTY_PROXY_TMUX? | default "")
-  if (($env.REMNIX_PTY_PROXY_ACTIVE? | default "") | is-empty) or ($tmux_current != $tmux_previous) {
+  let tty_current = (try { ^tty } catch { "" } | str trim)
+  let tty_previous = ($env.REMNIX_PTY_PROXY_TTY? | default "")
+  if (($env.REMNIX_PTY_PROXY_ACTIVE? | default "") | is-empty) or ($tmux_current != $tmux_previous) or ($tty_previous != "" and $tty_current != "" and $tty_current != $tty_previous) {
     $env.REMNIX_PTY_PROXY_ACTIVE = "1"
     $env.REMNIX_SESSION_ACTIVE = "1"
     $env.REMNIX_PTY_PROXY_TMUX = $tmux_current
+    hide-env -i REMNIX_PTY_PROXY_TTY
     if ($env.REMNIX_PTY_PROXY_LEGACY? | default "") == "" and (` + qa + ` | path exists) {
       try { exec ` + qa + ` --shell $nu.current-exe --remnix ` + qb + ` } catch { }
     }
     try { exec ` + qb + ` pty-proxy --shell $nu.current-exe } catch { }
+  } else if $tty_current != "" {
+    $env.REMNIX_PTY_PROXY_TTY = $tty_current
   }
 }
 `

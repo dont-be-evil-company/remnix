@@ -69,9 +69,17 @@ __remnix_widget_run() {
   return $st
 }
 
+__remnix_proxy_tty_here() {
+  [[ -n ${REMNIX_PTY_PROXY_TTY:-} ]] || { [[ -z ${NVIM:-} ]]; return; }
+  local now
+  now=$(command tty < /dev/tty 2>/dev/null) || now=""
+  [[ -z $now || $now == "$REMNIX_PTY_PROXY_TTY" ]]
+}
+
 __remnix_overlay() {
   local op=$1 query=$2
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  __remnix_proxy_tty_here || return 1
   if __remnix_rpc "$op" "$query" "$PWD" "$REMNIX_SESSION_ID"; then
     return 0
   fi
@@ -255,11 +263,23 @@ function __remnix_rpc
     and __remnix_rpc_read
 end
 
+function __remnix_proxy_tty_here
+    set -l now (command tty </dev/tty 2>/dev/null)
+    if set -q REMNIX_PTY_PROXY_TTY
+        test -z "$now"; or test "$now" = "$REMNIX_PTY_PROXY_TTY"
+        return $status
+    end
+    not set -q NVIM
+end
+
 function __remnix_overlay_rpc
     set -l op $argv[1]
     set -l query $argv[2]
     set -l cwd $argv[3]
     if not set -q REMNIX_SESSION_ID
+        return 1
+    end
+    if not __remnix_proxy_tty_here
         return 1
     end
     if __remnix_rpc $op $query $cwd $REMNIX_SESSION_ID
@@ -354,8 +374,17 @@ def --env __remnix_rebind [binding: record] {
   })
 }
 
+def __remnix_proxy_tty_here [] {
+  let proxy_tty = ($env.REMNIX_PTY_PROXY_TTY? | default "")
+  let now = (try { ^tty } catch { "" } | str trim)
+  if $proxy_tty != "" {
+    return ($now == "" or $now == $proxy_tty)
+  }
+  ($env.NVIM? | default "") == ""
+}
+
 def __remnix_overlay_or_tui [op: string, query: string] {
-  if ($env.REMNIX_SESSION_ID? | default "") != "" {
+  if ($env.REMNIX_SESSION_ID? | default "") != "" and (__remnix_proxy_tty_here) {
     let rpc = (do { ^$"($__remnix_attach)" --rpc $op $query $env.PWD $env.REMNIX_SESSION_ID } | complete)
     if $rpc.exit_code == 0 {
       return ($rpc.stdout | str trim)
@@ -490,6 +519,9 @@ end
 
 function __remnix_overlay_complete_begin --argument-names prefix
     if not set -q REMNIX_SESSION_ID
+        return 1
+    end
+    if not __remnix_proxy_tty_here
         return 1
     end
     __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" $REMNIX_SESSION_ID
@@ -652,7 +684,7 @@ def __remnix_nu_completions [buf: string] {
 
 def __remnix_complete_overlay [query: string, comps: record] {
   let n = ($comps.items | length)
-  if ($env.REMNIX_SESSION_ID? | default "") != "" {
+  if ($env.REMNIX_SESSION_ID? | default "") != "" and (__remnix_proxy_tty_here) {
     mut fields = [$query $env.PWD $env.REMNIX_SESSION_ID ($n | into string)]
     mut i = 0
     while $i < $n {

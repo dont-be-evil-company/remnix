@@ -10,6 +10,8 @@ func TestPreambleExecAndGuards(t *testing.T) {
 	for _, want := range []string{
 		"REMNIX_PTY_PROXY_ACTIVE",
 		"REMNIX_PTY_PROXY_TMUX",
+		"REMNIX_PTY_PROXY_TTY",
+		"nvim :terminal",
 		`exec '/opt/remnix-attach' --shell "$BASH" --remnix '/opt/remnix' || true`,
 		`exec '/opt/remnix-attach' --shell "$_remnix_pty_zsh" --remnix '/opt/remnix' || true`,
 		"ZSH_ARGZERO",
@@ -30,6 +32,8 @@ func TestPreambleExecAndGuards(t *testing.T) {
 		"test -x '/opt/remnix-attach'",
 		"_remnix_need_wrap",
 		`test -n "$_remnix_pty_tmux_current"`,
+		"REMNIX_PTY_PROXY_TTY",
+		"nvim :terminal",
 	} {
 		if !strings.Contains(fish, want) {
 			t.Fatalf("fish preamble missing %q\n%s", want, fish)
@@ -44,6 +48,7 @@ func TestPreambleExecAndGuards(t *testing.T) {
 		"$nu.is-interactive",
 		`"/dev/tty" | path exists`,
 		"REMNIX_PTY_PROXY_ACTIVE",
+		"REMNIX_PTY_PROXY_TTY",
 	} {
 		if !strings.Contains(nu, want) {
 			t.Fatalf("nu preamble missing %q\n%s", want, nu)

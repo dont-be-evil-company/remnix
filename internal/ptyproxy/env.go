@@ -6,6 +6,7 @@ const (
 	EnvActive    = "REMNIX_PTY_PROXY_ACTIVE"
 	EnvSocket    = "REMNIX_PTY_PROXY_SOCKET"
 	EnvTmux      = "REMNIX_PTY_PROXY_TMUX"
+	EnvTTY       = "REMNIX_PTY_PROXY_TTY"
 	EnvSessionID = "REMNIX_SESSION_ID"
 )
 

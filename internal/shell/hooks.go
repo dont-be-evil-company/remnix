@@ -74,11 +74,26 @@ __remnix_widget_run() {
 }
 
 # Daemon overlay when the shell is inside remnix-attach (REMNIX_SESSION_ID).
-# Falls through so the caller can spawn the local Go TUI.
+# Nested PTYs inherit that id; skip so the caller can spawn the local TUI.
+__remnix_proxy_tty_here() {
+  emulate -L zsh
+  local now=${TTY:-}
+  if [[ -z $now ]]; then
+    now=$(command tty < /dev/tty 2>/dev/null) || now=""
+  fi
+  if [[ -n ${REMNIX_PTY_PROXY_TTY:-} ]]; then
+    [[ -z $now || $now == "$REMNIX_PTY_PROXY_TTY" ]]
+    return
+  fi
+  # nvim :terminal inherits the outer session before a tty stamp exists.
+  [[ -z ${NVIM:-} ]]
+}
+
 __remnix_overlay() {
   emulate -L zsh
   local op=$1 query=$2
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  __remnix_proxy_tty_here || return 1
   if __remnix_rpc "$op" "$query" "$PWD" "$REMNIX_SESSION_ID"; then
     return 0
   fi
@@ -1302,6 +1317,7 @@ __remnix_overlay_complete_begin() {
   emulate -L zsh
   local prefix=$1
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  __remnix_proxy_tty_here || return 1
   __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID"
 }
 
@@ -1317,6 +1333,7 @@ __remnix_overlay_complete() {
   local prefix=$1 n=$2
   shift 2
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  __remnix_proxy_tty_here || return 1
   if __remnix_rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$n" "$@"; then
     return 0
   fi

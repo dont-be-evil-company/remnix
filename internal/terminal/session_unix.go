@@ -34,6 +34,7 @@ type Session struct {
 	cmd     *exec.Cmd
 	ptmx    *os.File
 	ptmxW   *os.File
+	ioctlFD int // dup of the master; ioctls must not call ptmx.Fd() during Read/Close
 	ptyMu   sync.Mutex
 	conn    net.Conn
 	writeMu sync.Mutex
@@ -105,6 +106,12 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		_ = ptmx.Close()
 		return nil, err
 	}
+	ctlFD, err := syscall.Dup(int(ptmx.Fd()))
+	if err != nil {
+		_ = syscall.Close(wfd)
+		_ = ptmx.Close()
+		return nil, err
+	}
 	ptmxW := os.NewFile(uintptr(wfd), "pty-master-w")
 	s := &Session{
 		ID:       id,
@@ -114,6 +121,7 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		cmd:      cmd,
 		ptmx:     ptmx,
 		ptmxW:    ptmxW,
+		ioctlFD:  ctlFD,
 		conn:     conn,
 		done:     make(chan int, 1),
 		closed:   make(chan struct{}),
@@ -176,6 +184,10 @@ func (s *Session) closePTY() {
 	}
 	if s.ptmxW != nil {
 		_ = s.ptmxW.Close()
+	}
+	if s.ioctlFD >= 0 {
+		_ = syscall.Close(s.ioctlFD)
+		s.ioctlFD = -1
 	}
 }
 
@@ -330,9 +342,8 @@ func (s *Session) applyPendingSize() {
 		return
 	}
 	s.ptyMu.Lock()
-	ptmx := s.ptmx
-	if ptmx != nil {
-		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.rows), Cols: uint16(sz.cols)})
+	if s.ioctlFD >= 0 {
+		ptySetsize(s.ioctlFD, sz.cols, sz.rows)
 	}
 	s.ptyMu.Unlock()
 	if s.screen != nil {
@@ -401,7 +412,8 @@ func childEnv(env []string, shellPath, sessionID string, controlFD int) []string
 			strings.HasPrefix(e, EnvControlFD+"=") ||
 			strings.HasPrefix(e, ptyproxy.EnvActive+"=") ||
 			strings.HasPrefix(e, EnvActive+"=") ||
-			strings.HasPrefix(e, ptyproxy.EnvTmux+"=") {
+			strings.HasPrefix(e, ptyproxy.EnvTmux+"=") ||
+			strings.HasPrefix(e, ptyproxy.EnvTTY+"=") {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -446,8 +458,35 @@ func (s *Session) sendIdleReset(opts idleResetOpts) {
 }
 
 func setForegroundPTY(ptmx *os.File, pid int) {
+	setForegroundFD(int(ptmx.Fd()), pid)
+}
+
+func setForegroundFD(fd, pid int) {
+	if fd < 0 || pid <= 0 {
+		return
+	}
 	pgid := int32(pid)
-	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, ptmx.Fd(), syscall.TIOCSPGRP, uintptr(unsafe.Pointer(&pgid)))
+	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSPGRP, uintptr(unsafe.Pointer(&pgid)))
+}
+
+func ptySetsize(fd, cols, rows int) {
+	if fd < 0 {
+		return
+	}
+	ws := pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
+	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
+}
+
+func ptyWinsize(fd int) (cols, rows int, ok bool) {
+	if fd < 0 {
+		return 0, 0, false
+	}
+	var ws pty.Winsize
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
+	if errno != 0 {
+		return 0, 0, false
+	}
+	return int(ws.Cols), int(ws.Rows), true
 }
 
 func (s *Session) restoreForeground() {
@@ -455,9 +494,8 @@ func (s *Session) restoreForeground() {
 		return
 	}
 	s.ptyMu.Lock()
-	ptmx := s.ptmx
-	if ptmx != nil {
-		setForegroundPTY(ptmx, s.cmd.Process.Pid)
+	if s.ioctlFD >= 0 {
+		setForegroundFD(s.ioctlFD, s.cmd.Process.Pid)
 	}
 	s.ptyMu.Unlock()
 	_ = s.cmd.Process.Signal(syscall.SIGCONT)
@@ -477,15 +515,11 @@ func (s *Session) restoreForegroundLater() {
 	}
 	cols, rows := s.size()
 	s.ptyMu.Lock()
-	ptmx := s.ptmx
-	if ptmx != nil {
-		if ws, err := pty.GetsizeFull(ptmx); err == nil {
-			if int(ws.Rows) != rows || int(ws.Cols) != cols {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-				if s.screen != nil {
-					s.screen.Resize(cols, rows)
-				}
-			}
+	c, r, ok := ptyWinsize(s.ioctlFD)
+	if ok && (r != rows || c != cols) {
+		ptySetsize(s.ioctlFD, cols, rows)
+		if s.screen != nil {
+			s.screen.Resize(cols, rows)
 		}
 	}
 	s.ptyMu.Unlock()
@@ -528,10 +562,10 @@ func (s *Session) foregroundPgid() (fg, shell int32, ok bool) {
 	}
 	s.ptyMu.Lock()
 	defer s.ptyMu.Unlock()
-	if s.ptmx == nil {
+	if s.ioctlFD < 0 {
 		return 0, 0, false
 	}
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, s.ptmx.Fd(), syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&fg)))
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(s.ioctlFD), syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&fg)))
 	if errno != 0 {
 		return 0, 0, false
 	}

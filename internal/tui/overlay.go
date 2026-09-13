@@ -257,12 +257,23 @@ type overlayGeom struct {
 
 func applyOverlayGeom(fallback ptyproxy.Snapshot, g overlayGeom) (ptyproxy.Snapshot, io.ReadCloser) {
 	if g.err == nil && g.snap.Rows >= 2 && g.snap.Cols >= 1 {
-		return g.snap, g.rest
+		// Nested PTYs (nvim :terminal) inherit the outer session. That
+		// snapshot is nvim's alt-screen, not this slave. Keep GetSize.
+		if overlayGeomMatchesTTY(g.snap, fallback.Cols, fallback.Rows) {
+			return g.snap, g.rest
+		}
 	}
 	if g.rest != nil {
 		_ = g.rest.Close()
 	}
 	return fallback, nil
+}
+
+func overlayGeomMatchesTTY(snap ptyproxy.Snapshot, cols, rows int) bool {
+	if cols < 1 || rows < 1 {
+		return true
+	}
+	return snap.Cols == cols && snap.Rows == rows
 }
 
 func closeOverlayGeom(gch <-chan overlayGeom, rest io.ReadCloser) {
