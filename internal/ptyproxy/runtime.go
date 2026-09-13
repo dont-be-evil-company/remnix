@@ -69,7 +69,7 @@ func Run(shellPath string) error {
 	cmd.Dir, _ = os.Getwd()
 	// Ctty is an index into the child's fd table after stdin is the slave
 	// (see syscall.SysProcAttr). 0 = stdin. Required so /dev/tty inside
-	// nvim/jj is the inner PTY, not the outer terminal the proxy is reading.
+	// the inner app is the inner PTY, not the outer terminal the proxy is reading.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,
@@ -87,7 +87,7 @@ func Run(shellPath string) error {
 	defer func() { _ = ptmx.Close() }()
 
 	// Keyboard-generated SIGINT/TSTP must not kill the proxy. Outer tty is
-	// raw, so ^C/^Z are bytes for the inner foreground app (nvim, jj, ...).
+	// raw, so ^C/^Z are bytes for the inner foreground process group.
 	signal.Ignore(syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTSTP, syscall.SIGTTIN, syscall.SIGTTOU)
 
 	old, err := term.MakeRaw(int(in.Fd()))
@@ -145,7 +145,7 @@ func Run(shellPath string) error {
 		_, _ = io.Copy(ptmxW, in)
 	}()
 
-	// Atuin parses the shadow VT off the byte pump. Parsing nvim output on
+	// Shadow VT parse runs off the byte pump. Parsing a high-output TUI on
 	// the same goroutine that forwards to the terminal fills the PTY and
 	// the inner app looks frozen.
 	parseCh := make(chan []byte, 256)

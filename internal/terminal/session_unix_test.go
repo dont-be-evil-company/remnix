@@ -3,6 +3,8 @@
 package terminal
 
 import (
+	"bytes"
+	"encoding/binary"
 	"net"
 	"os"
 	"os/exec"
@@ -582,4 +584,169 @@ func TestLeaveAltStillSendsIdleReset(t *testing.T) {
 	if !strings.Contains(got, "\x1b[=0;1u") {
 		t.Fatalf("leave-alt must still send idle-reset kitty teardown\n%s", trimForLog(got))
 	}
+}
+
+func TestSnapshotUnblocksOnClose(t *testing.T) {
+	sess, client := startCatSession(t)
+	blocked, release := stallScreenWrite(t, sess)
+
+	if err := WriteFrame(client, FrameData, []byte("CLOSE-WAIT\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("screen.Write never started")
+	}
+
+	done := make(chan ptyproxy.Snapshot, 1)
+	go func() { done <- sess.Snapshot() }()
+	select {
+	case <-done:
+		t.Fatal("Snapshot returned before close")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		sess.Close()
+		close(closed)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		release()
+		t.Fatal("Close did not unblock Snapshot")
+	}
+	release()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after parser unblocked")
+	}
+}
+
+func TestParseQueueSaturationDoesNotBlockPump(t *testing.T) {
+	old := parseQueueBudget
+	parseQueueBudget = 256
+	t.Cleanup(func() { parseQueueBudget = old })
+
+	sess, client := startCatSession(t)
+	blocked, release := stallScreenWrite(t, sess)
+	defer release()
+
+	col := startFrameCollector(client)
+	defer col.stop()
+
+	payload := append(bytes.Repeat([]byte("Y"), 200), '\n')
+	if err := WriteFrame(client, FrameData, payload); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("parser never received the stalled chunk")
+	}
+	if got := col.snapshot(); !strings.Contains(got, "YYYY") {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && !strings.Contains(col.snapshot(), "YYYY") {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !strings.Contains(col.snapshot(), "YYYY") {
+			t.Fatal("PTY forwarding blocked while the parser was stalled")
+		}
+	}
+
+	for i := 0; i < 8; i++ {
+		if err := WriteFrame(client, FrameData, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		st := sess.parseQ.stats()
+		if st.queuedBytes > parseQueueBudget {
+			t.Fatalf("queuedBytes %d over budget %d", st.queuedBytes, parseQueueBudget)
+		}
+		if st.dirty || st.saturations > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st := sess.parseQ.stats()
+	t.Fatalf("expected parser saturation, stats=%+v", st)
+}
+
+func TestSessionCPRUsesCursorAtQuery(t *testing.T) {
+	dir := t.TempDir()
+	script := dir + "/cpr.sh"
+	body := "#!/bin/sh\nstty -icanon -echo min 1 time 0\nprintf '\\033[10;20H\\033[6nAFTER'\nans=$(dd bs=16 count=1 2>/dev/null)\nprintf 'CPR:%s\\n' \"$ans\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	sess, err := startSession("cpr", CreateRequest{
+		Shell: script,
+		Cwd:   dir,
+		Cols:  80,
+		Rows:  24,
+		Env:   []string{"PATH=" + os.Getenv("PATH"), "TERM=xterm-256color"},
+	}, server, RPC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	got := readFrameDataUntil(t, client, 3*time.Second, "CPR:")
+	if !strings.Contains(got, "CPR:\x1b[10;20R") {
+		t.Fatalf("CPR must report cursor at the query, not stale or later position\n%s", trimForLog(got))
+	}
+}
+
+func TestSessionResizeAppliesSmallAndLatest(t *testing.T) {
+	sess, client := startCatSession(t)
+	if err := WriteFrame(client, FrameWinch, winchPayload(1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cols, rows := sess.size()
+		if cols == 1 && rows == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cols, rows := sess.size()
+	if cols != 1 || rows != 1 {
+		t.Fatalf("stable 1x1 must apply, got %dx%d", cols, rows)
+	}
+
+	if err := WriteFrame(client, FrameWinch, winchPayload(80, 24)); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFrame(client, FrameWinch, winchPayload(1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFrame(client, FrameWinch, winchPayload(120, 40)); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cols, rows = sess.size()
+		if cols == 120 && rows == 40 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cols, rows = sess.size()
+	t.Fatalf("latest WINCH should win, got %dx%d want 120x40", cols, rows)
+}
+
+func winchPayload(cols, rows int) []byte {
+	var p [4]byte
+	binary.BigEndian.PutUint16(p[0:2], uint16(cols))
+	binary.BigEndian.PutUint16(p[2:4], uint16(rows))
+	return p[:]
 }

@@ -35,24 +35,79 @@ func TestScreenAltScreenSplitAndCombined(t *testing.T) {
 	if s.IsAltScreen() {
 		t.Fatal("fresh emulator is on the main screen")
 	}
-	entered, left := s.Write([]byte("\x1b[?2026"))
+	events := s.Write([]byte("\x1b[?2026"))
+	entered, left := altHops(events)
 	if entered || left || s.IsAltScreen() {
 		t.Fatal("incomplete CSI must not switch screens")
 	}
-	entered, left = s.Write([]byte("h\x1b[?1;1049;2004h"))
+	events = s.Write([]byte("h\x1b[?1;1049;2004h"))
+	entered, left = altHops(events)
 	if !entered || left || !s.IsAltScreen() {
-		t.Fatalf("combined 1049h should enter alt, entered=%v left=%v alt=%v", entered, left, s.IsAltScreen())
+		t.Fatalf("combined 1049h should enter alt, entered=%v left=%v alt=%v events=%v", entered, left, s.IsAltScreen(), events)
 	}
-	entered, left = s.Write([]byte("\x1b[?2026\x1b[?1049l"))
+	events = s.Write([]byte("\x1b[?2026\x1b[?1049l"))
+	entered, left = altHops(events)
 	if entered || !left || s.IsAltScreen() {
 		t.Fatalf("nested ESC then 1049l should leave alt, entered=%v left=%v alt=%v", entered, left, s.IsAltScreen())
 	}
 
 	s2 := newScreen(80, 24)
 	t.Cleanup(s2.Close)
-	entered, left = s2.Write([]byte("\x1b[?1049h\x1b[?1049lLEFTALT"))
+	events = s2.Write([]byte("\x1b[?1049h\x1b[?1049lLEFTALT"))
+	entered, left = altHops(events)
 	if !entered || !left || s2.IsAltScreen() {
 		t.Fatalf("coalesced 1049h+1049l must report leave-alt, entered=%v left=%v alt=%v", entered, left, s2.IsAltScreen())
+	}
+}
+
+func TestScreenAltScreenEvents(t *testing.T) {
+	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
+
+	got := altKinds(s.Write([]byte("\x1b[?1049h")))
+	if !equalKinds(got, []TerminalEventKind{TerminalEventAltScreenEntered}) {
+		t.Fatalf("enter: %v", got)
+	}
+	if !s.IsAltScreen() {
+		t.Fatal("expected alt screen after 1049h")
+	}
+
+	got = altKinds(s.Write([]byte("\x1b[?1049l")))
+	if !equalKinds(got, []TerminalEventKind{TerminalEventAltScreenLeft}) {
+		t.Fatalf("leave: %v", got)
+	}
+
+	got = altKinds(s.Write([]byte("\x1b[?1049h\x1b[?1049l")))
+	if !equalKinds(got, []TerminalEventKind{TerminalEventAltScreenEntered, TerminalEventAltScreenLeft}) {
+		t.Fatalf("enter+leave in one write: %v", got)
+	}
+
+	got = altKinds(s.Write([]byte("\x1b[?1049h\x1b[?1049l\x1b[?1049h\x1b[?1049l")))
+	want := []TerminalEventKind{
+		TerminalEventAltScreenEntered, TerminalEventAltScreenLeft,
+		TerminalEventAltScreenEntered, TerminalEventAltScreenLeft,
+	}
+	if !equalKinds(got, want) {
+		t.Fatalf("multiple toggles: %v", got)
+	}
+}
+
+func TestScreenAltScreenSplitSequence(t *testing.T) {
+	s := newScreen(80, 24)
+	t.Cleanup(s.Close)
+	if kinds := altKinds(s.Write([]byte("\x1b[?1049"))); len(kinds) != 0 || s.IsAltScreen() {
+		t.Fatalf("split prefix must not enter alt, events=%v alt=%v", kinds, s.IsAltScreen())
+	}
+	got := altKinds(s.Write([]byte("h")))
+	if !equalKinds(got, []TerminalEventKind{TerminalEventAltScreenEntered}) || !s.IsAltScreen() {
+		t.Fatalf("completing 1049h must enter alt, events=%v alt=%v", got, s.IsAltScreen())
+	}
+	if kinds := altKinds(s.Write([]byte("\x1b[?10"))); len(kinds) != 0 {
+		t.Fatalf("partial leave must not emit, %v", kinds)
+	}
+	got = altKinds(s.Write([]byte("49l")))
+	if !equalKinds(got, []TerminalEventKind{TerminalEventAltScreenLeft}) || s.IsAltScreen() {
+		t.Fatalf("completing 1049l must leave alt, events=%v alt=%v", got, s.IsAltScreen())
 	}
 }
 
@@ -139,6 +194,50 @@ func TestScreenSnapshotWideCell(t *testing.T) {
 	plain := stripSGR(row)
 	if !strings.HasPrefix(strings.TrimRight(plain, " "), "你A") {
 		t.Fatalf("wide cell must not insert a placeholder space, got %q", row)
+	}
+}
+
+func altHops(events []TerminalEvent) (entered, left bool) {
+	for _, ev := range events {
+		switch ev.Kind {
+		case TerminalEventAltScreenEntered:
+			entered = true
+		case TerminalEventAltScreenLeft:
+			left = true
+		}
+	}
+	return entered, left
+}
+
+func altKinds(events []TerminalEvent) []TerminalEventKind {
+	var out []TerminalEventKind
+	for _, ev := range events {
+		if ev.Kind == TerminalEventAltScreenEntered || ev.Kind == TerminalEventAltScreenLeft {
+			out = append(out, ev.Kind)
+		}
+	}
+	return out
+}
+
+func equalKinds(got, want []TerminalEventKind) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func BenchmarkScreenWrite(b *testing.B) {
+	s := newScreen(80, 24)
+	b.Cleanup(s.Close)
+	data := bytes.Repeat([]byte("abcdefghijklmnop\r\n"), 50)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s.Write(data)
 	}
 }
 

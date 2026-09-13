@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"sync"
+	"sync/atomic"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -11,11 +12,36 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
+// TerminalEventKind is a semantic transition reported while parsing PTY bytes.
+type TerminalEventKind uint8
+
+const (
+	TerminalEventModeEnabled TerminalEventKind = iota
+	TerminalEventModeDisabled
+	TerminalEventAltScreenEntered
+	TerminalEventAltScreenLeft
+)
+
+// TerminalEvent is produced from VT emulator callbacks, not a second ANSI scan.
+type TerminalEvent struct {
+	Kind TerminalEventKind
+	Mode ansi.Mode
+}
+
+var (
+	modeAltScreenSaveCursor = ansi.ModeAltScreenSaveCursor // 1049
+	modeAltScreen           = ansi.ModeAltScreen           // 1047
+	modeAltScreenLegacy     = ansi.DECMode(47)
+)
+
 type Screen struct {
 	mu           sync.Mutex
 	emu          *vt.Emulator
 	sticky       map[int]bool
 	needKeyboard bool
+	events       []TerminalEvent
+	stopping     atomic.Bool
+	drainDone    sync.WaitGroup
 	beforeWrite  func() // tests: stall Write without blocking the PTY pump
 }
 
@@ -39,32 +65,89 @@ func (s *Screen) newEmulator(cols, rows int) *vt.Emulator {
 			if m != nil {
 				s.sticky[m.Mode()] = true
 			}
+			s.recordMode(TerminalEventModeEnabled, m)
 		},
 		DisableMode: func(m ansi.Mode) {
 			if m != nil {
 				delete(s.sticky, m.Mode())
 			}
+			s.recordMode(TerminalEventModeDisabled, m)
 		},
 	})
 	// vt.Emulator replies to DA/CPR on an unbuffered io.Pipe. Nobody consumes
-	// those replies (queryScanner answers the real PTY). Without a drain,
-	// emu.Write blocks forever on the first CSI c / CSI 6 n - nvim's handshake.
-	go drainEmulatorInput(emu)
+	// those replies (the session answers the real PTY). Without a drain,
+	// emu.Write blocks forever on the first CSI c / CSI 6 n.
+	s.stopping.Store(false)
+	s.drainDone.Add(1)
+	go drainEmulatorInput(s, emu)
 	return emu
 }
 
-func drainEmulatorInput(emu *vt.Emulator) {
+func drainEmulatorInput(s *Screen, emu *vt.Emulator) {
+	defer s.drainDone.Done()
 	buf := make([]byte, 512)
 	for {
 		if _, err := emu.Read(buf); err != nil {
 			return
 		}
+		if s.stopping.Load() {
+			return
+		}
 	}
 }
 
-func (s *Screen) Write(p []byte) (entered, left bool) {
+func (s *Screen) shutdownEmulator(emu *vt.Emulator) {
+	if emu == nil {
+		return
+	}
+	// Unblock the drain Read with a DA reply, then Close once drain has
+	// stopped so vt's unsynchronized e.closed flag is not racy.
+	s.stopping.Store(true)
+	_, _ = emu.Write([]byte("\x1b[c"))
+	s.drainDone.Wait()
+	_ = emu.Close()
+}
+
+func (s *Screen) recordMode(kind TerminalEventKind, m ansi.Mode) {
+	s.events = append(s.events, TerminalEvent{Kind: kind, Mode: m})
+	if !isAltScreenMode(m) {
+		return
+	}
+	switch kind {
+	case TerminalEventModeEnabled:
+		s.events = append(s.events, TerminalEvent{Kind: TerminalEventAltScreenEntered, Mode: m})
+		s.needKeyboard = true
+	case TerminalEventModeDisabled:
+		s.events = append(s.events, TerminalEvent{Kind: TerminalEventAltScreenLeft, Mode: m})
+	}
+}
+
+func isAltScreenMode(m ansi.Mode) bool {
+	if m == nil {
+		return false
+	}
+	switch m.Mode() {
+	case modeAltScreenSaveCursor.Mode(), modeAltScreen.Mode(), modeAltScreenLegacy.Mode():
+		return true
+	default:
+		return false
+	}
+}
+
+func hasAltScreenLeft(events []TerminalEvent) bool {
+	for _, ev := range events {
+		if ev.Kind == TerminalEventAltScreenLeft {
+			return true
+		}
+	}
+	return false
+}
+
+// Write parses p through the shadow emulator and returns every mode transition
+// observed in this chunk, including enter+leave of the alternate screen.
+func (s *Screen) Write(p []byte) []TerminalEvent {
 	if s == nil {
-		return false, false
+		return nil
 	}
 	if hook := s.beforeWrite; hook != nil {
 		hook()
@@ -72,82 +155,13 @@ func (s *Screen) Write(p []byte) (entered, left bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.emu == nil {
-		return false, false
+		return nil
 	}
-	was := s.emu.IsAltScreen()
+	s.events = s.events[:0]
 	_, _ = s.emu.Write(p)
-	now := s.emu.IsAltScreen()
-	entered, left = !was && now, was && !now
-	// One coalesced nvim burst can contain both 1049h and 1049l. Net emulator
-	// state is unchanged, but the TUI still left and the shell needs idle reset.
-	sawEnter, sawLeave := altScreenHops(p)
-	if !entered && !left && sawEnter && sawLeave {
-		entered, left = true, true
-	}
-	if entered {
-		s.needKeyboard = true
-	}
-	return entered, left
-}
-
-func altScreenHops(p []byte) (enter, leave bool) {
-	i := 0
-	for i < len(p) {
-		if p[i] != 0x1b {
-			i++
-			continue
-		}
-		if i+1 >= len(p) || p[i+1] != '[' {
-			i++
-			continue
-		}
-		j := i + 2
-		for j < len(p) && !csiFinal(p[j]) {
-			j++
-		}
-		if j >= len(p) {
-			return enter, leave
-		}
-		seq := p[i : j+1]
-		if hopEnter, hopLeave := altScreenCSI(seq); hopEnter || hopLeave {
-			enter = enter || hopEnter
-			leave = leave || hopLeave
-		}
-		i = j + 1
-	}
-	return enter, leave
-}
-
-func altScreenCSI(seq []byte) (enter, leave bool) {
-	n := len(seq)
-	if n < 5 || seq[0] != 0x1b || seq[1] != '[' || seq[2] != '?' {
-		return false, false
-	}
-	fin := seq[n-1]
-	if fin != 'h' && fin != 'l' {
-		return false, false
-	}
-	body := string(seq[3 : n-1])
-	start := 0
-	for start <= len(body) {
-		end := start
-		for end < len(body) && body[end] != ';' {
-			end++
-		}
-		mode := body[start:end]
-		if mode == "1049" || mode == "1047" || mode == "47" {
-			if fin == 'h' {
-				enter = true
-			} else {
-				leave = true
-			}
-		}
-		if end >= len(body) {
-			break
-		}
-		start = end + 1
-	}
-	return enter, leave
+	out := make([]TerminalEvent, len(s.events))
+	copy(out, s.events)
+	return out
 }
 
 func (s *Screen) IsAltScreen() bool {
@@ -204,9 +218,7 @@ func (s *Screen) Close() {
 	emu := s.emu
 	s.emu = nil
 	s.mu.Unlock()
-	if emu != nil {
-		_ = emu.Close()
-	}
+	s.shutdownEmulator(emu)
 }
 
 func (s *Screen) Reset(cols, rows int) {
@@ -218,13 +230,15 @@ func (s *Screen) Reset(cols, rows int) {
 	}
 	s.mu.Lock()
 	old := s.emu
+	s.emu = nil
+	s.mu.Unlock()
+	s.shutdownEmulator(old)
+	s.mu.Lock()
 	s.sticky = make(map[int]bool)
 	s.needKeyboard = false
+	s.events = nil
 	s.emu = s.newEmulator(cols, rows)
 	s.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
 }
 
 func (s *Screen) Resize(cols, rows int) {

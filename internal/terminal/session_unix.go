@@ -34,6 +34,7 @@ type Session struct {
 	cmd     *exec.Cmd
 	ptmx    *os.File
 	ptmxW   *os.File
+	ptyMu   sync.Mutex
 	conn    net.Conn
 	writeMu sync.Mutex
 	done    chan int
@@ -50,11 +51,11 @@ type Session struct {
 	afterAlt      atomic.Bool
 	idleMu        sync.Mutex
 
-	parseMu   sync.Mutex
-	parseCond *sync.Cond
-	parseBuf  []byte
-	parseGen  uint64
-	parseAt   uint64
+	sizeMu     sync.Mutex
+	sizeQ      *sizeCoalescer
+	resizeDone sync.WaitGroup
+
+	parseQ    *parseQueue
 	parseSig  chan struct{}
 	parseDone sync.WaitGroup
 }
@@ -117,10 +118,13 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		done:     make(chan int, 1),
 		closed:   make(chan struct{}),
 		parseSig: make(chan struct{}, 1),
+		parseQ:   newParseQueue(parseQueueBudget),
+		sizeQ:    newSizeCoalescer(),
 	}
-	s.parseCond = sync.NewCond(&s.parseMu)
 	s.parseDone.Add(1)
+	s.resizeDone.Add(1)
 	go s.parseLoop()
+	go s.resizeLoop()
 	go s.pumpOutput()
 	go s.pump(conn)
 	go s.watchForeground()
@@ -145,25 +149,39 @@ func (s *Session) Close() {
 		if s.cmd != nil && s.cmd.Process != nil {
 			_ = s.cmd.Process.Signal(syscall.SIGHUP)
 		}
-		if s.ptmx != nil {
-			_ = s.ptmx.Close()
-		}
-		if s.ptmxW != nil {
-			_ = s.ptmxW.Close()
+		s.closePTY()
+		if s.parseQ != nil {
+			s.parseQ.stop()
 		}
 		if s.closed != nil {
 			close(s.closed)
 		}
 		s.wakeParse()
 		s.parseDone.Wait()
+		s.resizeDone.Wait()
 		if s.screen != nil {
 			s.screen.Close()
 		}
 	})
 }
 
-// pumpOutput forwards PTY bytes immediately. Shadow VT parse runs off this
-// path; parsing nvim output here fills the PTY and the inner app looks frozen.
+func (s *Session) closePTY() {
+	if s == nil {
+		return
+	}
+	s.ptyMu.Lock()
+	defer s.ptyMu.Unlock()
+	if s.ptmx != nil {
+		_ = s.ptmx.Close()
+	}
+	if s.ptmxW != nil {
+		_ = s.ptmxW.Close()
+	}
+}
+
+// pumpOutput forwards PTY bytes immediately. Shadow VT parse is asynchronous
+// so terminal emulation cannot back-pressure the real PTY. Callers that need
+// an exact screen (Snapshot, overlay, CPR) wait on a parser barrier.
 func (s *Session) pumpOutput() {
 	buf := make([]byte, 8192)
 	var queries queryScanner
@@ -172,15 +190,13 @@ func (s *Session) pumpOutput() {
 		n, err := s.ptmx.Read(buf)
 		if n > 0 {
 			chunk := buf[:n]
-			cx, cy := s.screen.Cursor()
-			s.enqueueParse(chunk)
-			if reply := queries.feed(chunk, s.Rows, s.Cols, cy, cx); len(reply) > 0 {
+			got := queries.feed(chunk)
+			if len(got.replies) > 0 && !s.overlayActive.Load() {
 				// Overlay hides PTY output; queued replies would be typed
 				// onto the prompt after Ctrl+R (?0u / [?1;2c).
-				if !s.overlayActive.Load() {
-					_, _ = s.ptmxW.Write(reply)
-				}
+				_, _ = s.ptmxW.Write(got.replies)
 			}
+			s.enqueueParse(chunk, got.cprEnds)
 			stripped := kbStrip.feed(chunk)
 			if !s.overlayActive.Load() {
 				_ = s.sendFrame(FrameData, stripped)
@@ -192,14 +208,29 @@ func (s *Session) pumpOutput() {
 	}
 }
 
-func (s *Session) enqueueParse(p []byte) {
-	if s == nil || len(p) == 0 {
+func (s *Session) enqueueParse(p []byte, cprEnds []int) {
+	if s == nil || s.parseQ == nil || len(p) == 0 {
 		return
 	}
-	s.parseMu.Lock()
-	s.parseBuf = append(s.parseBuf, p...)
-	s.parseGen++
-	s.parseMu.Unlock()
+	start := 0
+	for _, end := range cprEnds {
+		if end < start {
+			continue
+		}
+		if end > len(p) {
+			end = len(p)
+		}
+		if end > start {
+			s.parseQ.enqueue(p[start:end], true)
+			start = end
+			continue
+		}
+		s.parseQ.enqueue(nil, true)
+		start = end
+	}
+	if start < len(p) {
+		s.parseQ.enqueue(p[start:], false)
+	}
 	s.wakeParse()
 }
 
@@ -218,7 +249,6 @@ func (s *Session) parseLoop() {
 	for {
 		select {
 		case <-s.closed:
-			s.drainParse()
 			return
 		case <-s.parseSig:
 			s.drainParse()
@@ -228,18 +258,17 @@ func (s *Session) parseLoop() {
 
 func (s *Session) drainParse() {
 	for {
-		s.parseMu.Lock()
-		if len(s.parseBuf) == 0 {
-			s.parseAt = s.parseGen
-			s.parseCond.Broadcast()
-			s.parseMu.Unlock()
+		item, ok := s.parseQ.pop()
+		if !ok {
 			return
 		}
-		chunk := s.parseBuf
-		s.parseBuf = nil
-		s.parseMu.Unlock()
-		_, leftAlt := s.screen.Write(chunk)
-		if leftAlt {
+		events := s.screen.Write(item.data)
+		if item.cpr && !s.overlayActive.Load() && s.ptmxW != nil {
+			cx, cy := s.screen.Cursor()
+			cols, rows := s.size()
+			_, _ = s.ptmxW.Write(formatCPR(rows, cols, cy, cx))
+		}
+		if hasAltScreenLeft(events) {
 			s.resetKeys.Store(true)
 			s.afterAlt.Store(true)
 			if !s.overlayActive.Load() {
@@ -249,18 +278,68 @@ func (s *Session) drainParse() {
 				}()
 			}
 		}
+		s.parseQ.markParsed(item.seq)
 	}
 }
 
 func (s *Session) syncScreen() {
-	if s == nil || s.parseCond == nil {
+	if s == nil || s.parseQ == nil {
 		return
 	}
-	s.parseMu.Lock()
-	defer s.parseMu.Unlock()
-	for s.parseAt < s.parseGen {
-		s.parseCond.Wait()
+	target := s.parseQ.currentSeq()
+	s.parseQ.wait(target)
+}
+
+func (s *Session) size() (cols, rows int) {
+	if s == nil {
+		return 1, 1
 	}
+	s.sizeMu.Lock()
+	cols, rows = s.Cols, s.Rows
+	s.sizeMu.Unlock()
+	return cols, rows
+}
+
+func (s *Session) setSize(cols, rows int) {
+	if s == nil {
+		return
+	}
+	s.sizeMu.Lock()
+	s.Cols, s.Rows = cols, rows
+	s.sizeMu.Unlock()
+}
+
+func (s *Session) resizeLoop() {
+	defer s.resizeDone.Done()
+	if s.sizeQ == nil {
+		return
+	}
+	for {
+		select {
+		case <-s.closed:
+			return
+		case <-s.sizeQ.sig:
+			s.applyPendingSize()
+		}
+	}
+}
+
+func (s *Session) applyPendingSize() {
+	sz, ok := s.sizeQ.take()
+	if !ok {
+		return
+	}
+	s.ptyMu.Lock()
+	ptmx := s.ptmx
+	if ptmx != nil {
+		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(sz.rows), Cols: uint16(sz.cols)})
+	}
+	s.ptyMu.Unlock()
+	if s.screen != nil {
+		s.screen.Resize(sz.cols, sz.rows)
+	}
+	s.setSize(sz.cols, sz.rows)
+	s.sendOverlayWinch(sz.cols, sz.rows)
 }
 
 func (s *Session) pump(conn net.Conn) {
@@ -286,14 +365,7 @@ func (s *Session) pump(conn net.Conn) {
 				if len(payload) >= 4 {
 					cols := int(binary.BigEndian.Uint16(payload[0:2]))
 					rows := int(binary.BigEndian.Uint16(payload[2:4]))
-					// nvim can emit a 1x1 WINCH on exit; that would make the
-					// next overlay a single blinking cell.
-					if cols >= 8 && rows >= 4 {
-						_ = pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-						s.screen.Resize(cols, rows)
-						s.Cols, s.Rows = cols, rows
-						s.sendOverlayWinch(cols, rows)
-					}
+					s.sizeQ.note(cols, rows)
 				}
 			case FrameExit:
 				s.Close()
@@ -379,10 +451,15 @@ func setForegroundPTY(ptmx *os.File, pid int) {
 }
 
 func (s *Session) restoreForeground() {
-	if s == nil || s.cmd == nil || s.cmd.Process == nil || s.ptmx == nil {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
 		return
 	}
-	setForegroundPTY(s.ptmx, s.cmd.Process.Pid)
+	s.ptyMu.Lock()
+	ptmx := s.ptmx
+	if ptmx != nil {
+		setForegroundPTY(ptmx, s.cmd.Process.Pid)
+	}
+	s.ptyMu.Unlock()
 	_ = s.cmd.Process.Signal(syscall.SIGCONT)
 }
 
@@ -398,14 +475,20 @@ func (s *Session) restoreForegroundLater() {
 	if ok && fg != shell {
 		s.restoreForeground()
 	}
-	if s.ptmx != nil && s.Cols >= 8 && s.Rows >= 4 {
-		if ws, err := pty.GetsizeFull(s.ptmx); err == nil {
-			if int(ws.Rows) != s.Rows || int(ws.Cols) != s.Cols {
-				_ = pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(s.Rows), Cols: uint16(s.Cols)})
-				s.screen.Resize(s.Cols, s.Rows)
+	cols, rows := s.size()
+	s.ptyMu.Lock()
+	ptmx := s.ptmx
+	if ptmx != nil {
+		if ws, err := pty.GetsizeFull(ptmx); err == nil {
+			if int(ws.Rows) != rows || int(ws.Cols) != cols {
+				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+				if s.screen != nil {
+					s.screen.Resize(cols, rows)
+				}
 			}
 		}
 	}
+	s.ptyMu.Unlock()
 }
 
 // watchForeground force-leaves the alt screen when the foreground process is
@@ -440,7 +523,12 @@ func (s *Session) watchForeground() {
 }
 
 func (s *Session) foregroundPgid() (fg, shell int32, ok bool) {
-	if s == nil || s.ptmx == nil || s.cmd == nil || s.cmd.Process == nil {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0, 0, false
+	}
+	s.ptyMu.Lock()
+	defer s.ptyMu.Unlock()
+	if s.ptmx == nil {
 		return 0, 0, false
 	}
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, s.ptmx.Fd(), syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&fg)))
@@ -466,9 +554,9 @@ func (s *Session) foregroundIdle() bool {
 	return pgidDead(fg)
 }
 
-// ensureForeground gives the shell the PTY if the previous foreground group
-// (nvim, less, ...) is gone. Otherwise keys and Ctrl+C land on a dead pgid and
-// zsh sits stopped on SIGTTIN.
+// ensureForeground gives the shell the PTY if the previous foreground process
+// group is gone. Otherwise keys and Ctrl+C land on a dead pgid and the shell
+// sits stopped on SIGTTIN.
 func (s *Session) ensureForeground() {
 	fg, shell, ok := s.foregroundPgid()
 	if !ok || fg <= 1 || fg == shell || !pgidDead(fg) {

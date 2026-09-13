@@ -62,17 +62,19 @@ func (s *Session) BeginOverlay(rowsFor func(termRows int) int) (*Overlay, error)
 		s.sendIdleReset(idleResetOpts{includeAlt: true})
 	}
 	snap := s.Snapshot()
-	if s.Cols >= 8 {
-		snap.Cols = s.Cols
+	if cols, rows := s.size(); cols > 0 || rows > 0 {
+		if cols > 0 {
+			snap.Cols = cols
+		}
+		if rows > 0 {
+			snap.Rows = rows
+		}
 	}
-	if s.Rows >= 4 {
-		snap.Rows = s.Rows
+	if snap.Cols < 1 {
+		snap.Cols = 1
 	}
-	if snap.Rows < 4 {
-		snap.Rows = 24
-	}
-	if snap.Cols < 8 {
-		snap.Cols = 80
+	if snap.Rows < 1 {
+		snap.Rows = 1
 	}
 	if s.afterAlt.Swap(false) || snap.CursorRow < 0 || snap.CursorRow >= snap.Rows {
 		snap.CursorRow = snap.Rows - 1

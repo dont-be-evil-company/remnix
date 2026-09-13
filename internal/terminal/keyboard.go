@@ -7,8 +7,8 @@ import (
 )
 
 // kittyKeyDecoder turns CSI-u key reports into legacy bytes before they hit
-// the inner PTY. After nvim (and other TUIs) the outer emulator can stay in
-// kitty keyboard mode; zsh then sees \x1b[97u instead of 'a' and looks dead.
+// the inner PTY. After a full-screen TUI the outer emulator can stay in
+// kitty keyboard mode; the shell then sees \x1b[97u instead of 'a' and looks dead.
 type kittyKeyDecoder struct {
 	hold []byte
 }
@@ -186,8 +186,8 @@ func kittyKeyToLegacy(key, mods int) []byte {
 }
 
 // keyboardModeStripper removes kitty / modifyOtherKeys mode changes from PTY
-// output so nvim cannot leave the outer emulator in CSI-u mode. Overlay paint
-// still writes those sequences via sendFrame directly.
+// output so an inner TUI cannot leave the outer emulator in CSI-u mode.
+// Overlay paint still writes those sequences via sendFrame directly.
 type keyboardModeStripper struct {
 	hold []byte
 }
@@ -316,7 +316,7 @@ func modifyOtherKeysEnables(body []byte) bool {
 }
 
 // rewriteFocusTracking removes DECSET 1004 (focus reporting) from CSI ? ... h
-// so tmux's combined \x1b[?1;1004;2004h cannot arm Kitty. DECRST 1004 is
+// so a combined DECSET list cannot arm Kitty focus reporting. DECRST 1004 is
 // forwarded so an alt-screen unstick can actually turn reporting off.
 func rewriteFocusTracking(seq []byte) (out []byte, drop, focusOff bool) {
 	n := len(seq)

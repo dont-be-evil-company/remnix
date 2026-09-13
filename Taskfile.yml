@@ -55,6 +55,7 @@ tasks:
     desc: Runs tests
     cmds:
       - go test ./...
+      - go test -race ./... -count=1 -timeout 180s
     silent: true
   ci:
     desc: Runs golangci-lint
