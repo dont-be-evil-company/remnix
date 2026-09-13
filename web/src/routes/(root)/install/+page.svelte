@@ -25,7 +25,15 @@
 	let installSystem = '';
 	let form: HTMLFormElement;
 	const onInstallSystemChange = () => {
-		form.submit();
+		if (!browser) return;
+		const formData = new FormData(form);
+		const typeParam = formData.get('type');
+		if (typeParam && typeof typeParam === 'string') {
+			installSystem = typeParam;
+			const url = new URL(window.location.href);
+			url.searchParams.set('type', typeParam);
+			window.history.replaceState({}, '', url.toString());
+		}
 	};
 	onMount(() => {
 		if (!browser) return;
