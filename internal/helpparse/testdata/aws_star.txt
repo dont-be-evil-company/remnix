@@ -1,0 +1,222 @@
+AVAILABLE SERVICES
+     * accessanalyzer
+
+     * account
+
+     * account-access
+
+     * acm
+
+     * acm-pca
+
+     * agent-registry
+
+     * agent-registry-control
+
+     * agent-toolkit
+
+     * aiops
+
+     * amp
+
+     * amplify
+
+     * amplifybackend
+
+     * amplifyuibuilder
+
+     * apigateway
+
+     * apigatewaymanagementapi
+
+     * apigatewayv2
+
+     * appconfig
+
+     * appconfigdata
+
+     * appfabric
+
+     * appflow
+
+     * appintegrations
+
+     * application-autoscaling
+
+     * application-insights
+
+     * application-signals
+
+     * applicationcostprofiler
+
+     * appmesh
+
+     * apprunner
+
+     * appstream
+
+     * appsync
+
+     * arc-region-switch
+
+     * arc-zonal-shift
+
+     * artifact
+
+     * athena
+
+     * auditmanager
+
+     * autoscaling
+
+     * autoscaling-plans
+
+     * b2bi
+
+     * backup
+
+     * backup-gateway
+
+     * backupsearch
+
+     * batch
+
+     * bcm-dashboards
+
+     * bcm-data-exports
+
+     * bcm-pricing-calculator
+
+     * bcm-recommended-actions
+
+     * bedrock
+
+     * bedrock-agent
+
+     * bedrock-agent-runtime
+
+     * bedrock-agentcore
+
+     * bedrock-agentcore-control
+
+     * bedrock-data-automation
+
+     * bedrock-data-automation-runtime
+
+     * bedrock-runtime
+
+     * billing
+
+     * billingconductor
+
+     * braket
+
+     * budgets
+
+     * ce
+
+     * chatbot
+
+     * chime
+
+     * chime-sdk-identity
+
+     * chime-sdk-media-pipelines
+
+     * chime-sdk-meetings
+
+     * chime-sdk-messaging
+
+     * chime-sdk-voice
+
+     * cleanrooms
+
+     * cleanroomsml
+
+     * cli-dev
+
+     * cloud9
+
+     * cloudcontrol
+
+     * clouddirectory
+
+     * cloudformation
+
+     * cloudfront
+
+     * cloudfront-keyvaluestore
+
+     * cloudhsm
+
+     * cloudhsmv2
+
+     * cloudsearch
+
+     * cloudsearchdomain
+
+     * cloudtrail
+
+     * cloudtrail-data
+
+     * cloudwatch
+
+     * codeartifact
+
+     * codebuild
+
+     * codecatalyst
+
+     * codecommit
+
+     * codeconnections
+
+     * codeguru-reviewer
+
+     * codeguru-security
+
+     * codeguruprofiler
+
+     * codepipeline
+
+     * codestar-connections
+
+     * codestar-notifications
+
+     * cognito-identity
+
+     * cognito-idp
+
+     * cognito-sync
+
+     * comprehend
+
+     * comprehendmedical
+
+     * compute-optimizer
+
+     * compute-optimizer-automation
+
+     * configservice
+
+     * configure
+
+     * connect
+
+     * connect-contact-lens
+
+     * connectcampaigns
+
+     * connectcampaignsv2
+
+     * connectcases
+
+     * connecthealth
+
+     * connectparticipant
+
+     * controlcatalog
+
+     * controltower
+
+     * cost-optimizatio

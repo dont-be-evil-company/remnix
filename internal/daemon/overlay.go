@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
+	"github.com/dont-be-evil-company/remnix/internal/helpparse"
 	"github.com/dont-be-evil-company/remnix/internal/history"
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 	"github.com/dont-be-evil-company/remnix/internal/terminal"
@@ -23,6 +25,48 @@ func (s *Server) uiTheme() tui.Theme {
 		return tui.NewTheme(s.app.Config.UI)
 	}
 	return tui.DefaultTheme()
+}
+
+func (s *Server) suggestCacheFor(sessionID string) *tui.SuggestCache {
+	s.suggestMu.Lock()
+	defer s.suggestMu.Unlock()
+	if s.suggestCaches == nil {
+		s.suggestCaches = make(map[string]*tui.SuggestCache)
+	}
+	c := s.suggestCaches[sessionID]
+	if c == nil {
+		c = tui.NewSuggestCache()
+		s.suggestCaches[sessionID] = c
+	}
+	return c
+}
+
+func (s *Server) helpCacheFor(sessionID string) *helpparse.Cache {
+	s.suggestMu.Lock()
+	defer s.suggestMu.Unlock()
+	if s.helpCaches == nil {
+		s.helpCaches = make(map[string]*helpparse.Cache)
+	}
+	c := s.helpCaches[sessionID]
+	if c == nil {
+		c = helpparse.NewCache()
+		s.helpCaches[sessionID] = c
+	}
+	return c
+}
+
+func (s *Server) dropSuggestCache(sessionID string) {
+	s.suggestMu.Lock()
+	defer s.suggestMu.Unlock()
+	delete(s.suggestCaches, sessionID)
+	delete(s.helpCaches, sessionID)
+}
+
+func (s *Server) finishSuggestOverlay(sessionID, sel string, err error) (string, error) {
+	if err != nil || !strings.HasPrefix(sel, tui.ContinuePrefix) {
+		s.dropSuggestCache(sessionID)
+	}
+	return sel, err
 }
 
 func (s *Server) searchInteractive(query, cwd, sessionID string) (string, error) {
@@ -90,10 +134,20 @@ func (s *Server) suggestInteractive(prefix, cwd, sessionID string) (string, erro
 		}
 		items = s.suggestList(prefix, cwd, cands, limit)
 	}
-	return s.runSuggestOverlay(prefix, sessionID, items, nil, typed, hist, limit, nil)
+	sel, err := s.runSuggestOverlay(prefix, sessionID, items, nil, typed, hist, limit, nil)
+	return s.finishSuggestOverlay(sessionID, sel, err)
 }
 
-func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID string, waitItems func() (items, descrs []string, abort bool, err error)) (string, error) {
+func (s *Server) probeFn(path string) helpparse.ProbeFunc {
+	if s.helpProbe != nil {
+		return s.helpProbe
+	}
+	return func(ctx context.Context, argv []string) (string, error) {
+		return helpparse.ProbeWithPATH(ctx, argv, path)
+	}
+}
+
+func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID, path string, waitItems func() (items, descrs []string, abort bool, err error)) (string, error) {
 	if s.sessions == nil {
 		if _, _, _, err := waitItems(); err != nil {
 			return "", err
@@ -114,40 +168,50 @@ func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID string, waitI
 		typed = s.app.Config.IconTyped()
 		itemIco = s.app.Config.IconCompletion()
 	}
-	itemsCh := make(chan tui.SuggestItems, 1)
+	itemsCh := make(chan tui.SuggestItems, 16)
 	type overlayResult struct {
 		sel string
 		err error
 	}
 	done := make(chan overlayResult, 1)
+	overlayDone := make(chan struct{})
 	go func() {
 		sel, err := s.runSuggestOverlay(prefix, sessionID, nil, nil, typed, itemIco, limit, itemsCh)
+		close(overlayDone)
 		done <- overlayResult{sel: sel, err: err}
 	}()
+	send := func(payload tui.SuggestItems) bool {
+		select {
+		case itemsCh <- payload:
+			return true
+		case <-overlayDone:
+			return false
+		}
+	}
 	items, descrs, abort, err := waitItems()
 	if err != nil {
 		select {
 		case itemsCh <- tui.SuggestItems{Abort: true}:
 			res := <-done
 			if res.err != nil {
-				return "", res.err
+				return s.finishSuggestOverlay(sessionID, "", res.err)
 			}
-			return "", err
+			return s.finishSuggestOverlay(sessionID, "", err)
 		case res := <-done:
 			if res.err != nil {
-				return "", res.err
+				return s.finishSuggestOverlay(sessionID, "", res.err)
 			}
-			return "", err
+			return s.finishSuggestOverlay(sessionID, "", err)
 		}
 	}
 	if abort {
 		select {
 		case itemsCh <- tui.SuggestItems{Abort: true}:
 		case res := <-done:
-			return res.sel, res.err
+			return s.finishSuggestOverlay(sessionID, res.sel, res.err)
 		}
 		res := <-done
-		return res.sel, res.err
+		return s.finishSuggestOverlay(sessionID, res.sel, res.err)
 	}
 	if len(items) == 0 && s.history != nil {
 		cands, histErr := s.history.SuggestCandidates(prefix, cwd)
@@ -156,13 +220,39 @@ func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID string, waitI
 			descrs = nil
 		}
 	}
-	select {
-	case itemsCh <- tui.SuggestItems{Items: items, Descrs: descrs}:
+	if !send(tui.SuggestItems{Items: items, Descrs: descrs}) {
 		res := <-done
-		return res.sel, res.err
-	case res := <-done:
-		return res.sel, res.err
+		return s.finishSuggestOverlay(sessionID, res.sel, res.err)
 	}
+	go func() {
+		defer close(itemsCh)
+		if !helpparse.NeedsEnrich(items, descrs) {
+			return
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			select {
+			case <-overlayDone:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		cache := s.helpCacheFor(sessionID)
+		probe := s.probeFn(path)
+		d := helpparse.FillEmpty(ctx, prefix, items, descrs, cache, probe)
+		if !send(tui.SuggestItems{Items: items, Descrs: d}) {
+			return
+		}
+		if !helpparse.NeedsEnrich(items, d) {
+			return
+		}
+		helpparse.FillNodes(ctx, prefix, items, d, cache, probe, limit, func(next []string) {
+			send(tui.SuggestItems{Items: items, Descrs: next})
+		})
+	}()
+	res := <-done
+	return s.finishSuggestOverlay(sessionID, res.sel, res.err)
 }
 
 func (s *Server) runSuggestOverlay(prefix, sessionID string, items, descrs []string, typed, itemIco string, limit int, wait <-chan tui.SuggestItems) (string, error) {
@@ -184,6 +274,7 @@ func (s *Server) runSuggestOverlay(prefix, sessionID string, items, descrs []str
 			OverlayHeight: h,
 			Widget:        true,
 			ItemsCh:       wait,
+			Cache:         s.suggestCacheFor(sessionID),
 			Theme:         s.uiTheme(),
 		}, tuiRemote(keys, paint, snap, place, winch, ctx))
 		if err != nil {
@@ -228,4 +319,8 @@ func tuiRemote(keys io.Reader, paint io.Writer, snap ptyproxy.Snapshot, place pt
 		Winch: out,
 		Ctx:   ctx,
 	}
+}
+
+func (s *Server) enrichSuggestDescrs(sessionID, prefix string, items, descrs []string) []string {
+	return helpparse.FillEmpty(context.Background(), prefix, items, descrs, s.helpCacheFor(sessionID), s.probeFn(""))
 }

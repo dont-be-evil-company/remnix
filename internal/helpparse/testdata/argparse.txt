@@ -1,0 +1,11 @@
+usage: tool [-h] [--project PROJECT] {auth,compute} ...
+
+options:
+  -h, --help            show this help message and exit
+  --project PROJECT     Google Cloud project ID
+
+subcommands:
+  {auth,compute}
+
+    auth                Manage credentials
+    compute             Create and manipulate Compute Engine resources

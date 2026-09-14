@@ -1,0 +1,11 @@
+Usage:
+  tool [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  daemon      Run the remnix core daemon
+  help        Help about any command
+
+Flags:
+  -h, --help      help for tool
+      --verbose   more output

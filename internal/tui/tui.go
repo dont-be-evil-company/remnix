@@ -491,7 +491,8 @@ func (m model) RunSelected() bool {
 const AcceptPrefix = "__remnix_accept__:"
 
 // ContinuePrefix means the shell should insert the command and reopen the
-// suggest overlay with fresh completions for that prefix.
+// suggest overlay to fetch completions for that prefix. The overlay skips
+// this when the prefix is already cached.
 const ContinuePrefix = "__remnix_continue__:"
 
 // FormatSelection is the widget RPC payload: accept-prefix when Enter should

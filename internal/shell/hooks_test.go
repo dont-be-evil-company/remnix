@@ -585,6 +585,9 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if !strings.Contains(over, "__remnix_continue__:") {
 		t.Fatal("proxy-on Ctrl+Space must drill into a suggestion and reload completions")
 	}
+	if !strings.Contains(over, `"$PATH"`) {
+		t.Fatal("overlay RPC must send the caller's PATH so help probes find user-installed tools")
+	}
 	if !strings.Contains(over, `[[ $LBUFFER == *[[:space:]] ]] || LBUFFER="$LBUFFER "`) {
 		t.Fatal("ctrl+space continue must add a trailing space so the next completer runs")
 	}
@@ -633,6 +636,9 @@ func TestFishOverlayMenuNoGhost(t *testing.T) {
 	if !strings.Contains(out, "__remnix_overlay_complete_begin") {
 		t.Fatal("fish must open the overlay before capturing completions")
 	}
+	if !strings.Contains(out, "string join : $PATH") {
+		t.Fatal("fish overlay RPC must send the caller's PATH")
+	}
 	if strings.Contains(out, "carapace") {
 		t.Fatal("fish must not shell out to carapace")
 	}
@@ -663,6 +669,9 @@ func TestNuOverlayMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "suggest-complete-interactive") {
 		t.Fatal("nu must pass completion items to the overlay")
+	}
+	if !strings.Contains(out, "str join (char esep)") {
+		t.Fatal("nu overlay RPC must send the caller's PATH")
 	}
 	if strings.Contains(out, "carapace") {
 		t.Fatal("nu must not shell out to carapace")

@@ -1333,7 +1333,7 @@ __remnix_overlay_complete_begin() {
   local prefix=$1
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
   __remnix_proxy_tty_here || return 1
-  __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID"
+  __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$PATH"
 }
 
 __remnix_overlay_complete_finish() {
@@ -1349,11 +1349,11 @@ __remnix_overlay_complete() {
   shift 2
   [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
   __remnix_proxy_tty_here || return 1
-  if __remnix_rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$n" "$@"; then
+  if __remnix_rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$PATH" "$n" "$@"; then
     return 0
   fi
   if [[ -n ${__remnix_attach:-} ]]; then
-    REPLY=$("$__remnix_attach" --rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$n" "$@" 2>/dev/null) || return 1
+    REPLY=$("$__remnix_attach" --rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$PATH" "$n" "$@" 2>/dev/null) || return 1
     return 0
   fi
   return 1

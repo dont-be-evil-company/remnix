@@ -524,7 +524,7 @@ function __remnix_overlay_complete_begin --argument-names prefix
     if not __remnix_proxy_tty_here
         return 1
     end
-    __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" $REMNIX_SESSION_ID
+    __remnix_rpc_write suggest-complete-interactive "$prefix" "$PWD" $REMNIX_SESSION_ID (string join : $PATH)
 end
 
 function __remnix_overlay_complete_finish --argument-names n
@@ -685,7 +685,7 @@ def __remnix_nu_completions [buf: string] {
 def __remnix_complete_overlay [query: string, comps: record] {
   let n = ($comps.items | length)
   if ($env.REMNIX_SESSION_ID? | default "") != "" and (__remnix_proxy_tty_here) {
-    mut fields = [$query $env.PWD $env.REMNIX_SESSION_ID ($n | into string)]
+    mut fields = [$query $env.PWD $env.REMNIX_SESSION_ID ($env.PATH | str join (char esep)) ($n | into string)]
     mut i = 0
     while $i < $n {
       let item = ($comps.items | get $i)

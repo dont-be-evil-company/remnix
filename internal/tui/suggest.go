@@ -27,6 +27,7 @@ type SuggestItems struct {
 type suggestItemsMsg struct {
 	items []suggestItem
 	abort bool
+	eof   bool
 }
 
 type SuggestMenuOptions struct {
@@ -42,8 +43,19 @@ type SuggestMenuOptions struct {
 	// ItemsCh, when set, opens the menu in a loading state until a payload
 	// arrives (or Abort). Used so compsys can run while the spinner paints.
 	ItemsCh <-chan SuggestItems
-	Theme   Theme
+	// Cache, when set, is shared across overlay continue RPCs so backspace can
+	// restore parent completions and Ctrl+Space can drill cached children
+	// without re-running the completer.
+	Cache *SuggestCache
+	Theme Theme
 }
+
+type filterCursor int
+
+const (
+	filterCursorFirst filterCursor = iota
+	filterCursorTyped
+)
 
 type suggestItem struct {
 	cmd   string
@@ -72,6 +84,8 @@ type suggestModel struct {
 	loading          bool
 	spinFrame        int
 	itemsCh          <-chan SuggestItems
+	cache            *SuggestCache
+	loadedPrefix     string
 	theme            Theme
 }
 
@@ -88,16 +102,10 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 	if item == "" {
 		item = hist
 	}
-	all := make([]suggestItem, 0, len(opts.Items))
-	for i, cmd := range opts.Items {
-		if cmd == "" {
-			continue
-		}
-		d := ""
-		if i < len(opts.Descrs) {
-			d = strings.TrimSpace(opts.Descrs[i])
-		}
-		all = append(all, suggestItem{cmd: cmd, descr: d})
+	all := suggestItemsFrom(opts.Items, opts.Descrs)
+	cache := opts.Cache
+	if cache == nil {
+		cache = NewSuggestCache()
 	}
 	m := suggestModel{
 		prefix:   opts.Prefix,
@@ -108,12 +116,14 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 		histIco:  item,
 		loading:  opts.ItemsCh != nil,
 		itemsCh:  opts.ItemsCh,
+		cache:    cache,
 		theme:    opts.Theme.OrDefault(),
 	}
 	if m.loading {
 		m.cursor = 0
 	} else {
-		m.applyFilter()
+		m.cache.store(opts.Prefix, all)
+		m.applyFilter(filterCursorFirst)
 	}
 	return m
 }
@@ -127,44 +137,47 @@ func suggestSpinTick() tea.Cmd {
 func waitSuggestItems(ch <-chan SuggestItems) tea.Cmd {
 	return func() tea.Msg {
 		if ch == nil {
-			return suggestItemsMsg{}
+			return suggestItemsMsg{eof: true}
 		}
 		got, ok := <-ch
 		if !ok {
-			return suggestItemsMsg{}
+			return suggestItemsMsg{eof: true}
 		}
 		if got.Abort {
 			return suggestItemsMsg{abort: true}
 		}
-		items := make([]suggestItem, 0, len(got.Items))
-		for i, cmd := range got.Items {
-			if cmd == "" {
-				continue
-			}
-			d := ""
-			if i < len(got.Descrs) {
-				d = strings.TrimSpace(got.Descrs[i])
-			}
-			items = append(items, suggestItem{cmd: cmd, descr: d})
-		}
-		return suggestItemsMsg{items: items}
+		return suggestItemsMsg{items: suggestItemsFrom(got.Items, got.Descrs)}
 	}
 }
 
-func (m *suggestModel) applyFilter() {
-	prefix := m.prefix
-	items := make([]suggestItem, 0, len(m.allItems))
-	for _, it := range m.allItems {
-		if strings.HasPrefix(it.cmd, prefix) && it.cmd != prefix {
-			items = append(items, it)
+func (m *suggestModel) applyFilter(cur filterCursor) {
+	source := m.allItems
+	if _, items, ok := m.cache.best(m.prefix); ok {
+		source = items
+	}
+	filtered := make([]suggestItem, 0, len(source))
+	for _, it := range source {
+		if strings.HasPrefix(it.cmd, m.prefix) && it.cmd != m.prefix {
+			filtered = append(filtered, it)
 		}
 	}
-	m.items = items
+	m.items = filtered
+	if cur == filterCursorTyped {
+		m.cursor = 0
+		return
+	}
 	if len(m.items) > 0 {
 		m.cursor = 1
 	} else {
 		m.cursor = 0
 	}
+}
+
+func drillPrefix(cmd string) string {
+	if cmd == "" || strings.HasSuffix(cmd, " ") {
+		return cmd
+	}
+	return cmd + " "
 }
 
 func (m *suggestModel) EnableOverlay(st OverlayState) {
@@ -240,6 +253,9 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinFrame = (m.spinFrame + 1) % len(suggestSpinFrames)
 		return m, suggestSpinTick()
 	case suggestItemsMsg:
+		if msg.eof {
+			return m, nil
+		}
 		if msg.abort {
 			m.loading = false
 			m.quitting = true
@@ -247,10 +263,31 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = ""
 			return m, tea.Quit
 		}
+		first := m.loading
 		m.loading = false
+		if m.loadedPrefix == "" {
+			m.loadedPrefix = m.prefix
+		}
+		prev := ""
+		if !first {
+			prev = m.commandAt(m.cursor)
+		}
 		m.allItems = msg.items
-		m.applyFilter()
-		return m, nil
+		m.cache.store(m.loadedPrefix, msg.items)
+		if first {
+			m.applyFilter(filterCursorFirst)
+		} else if m.cursor == 0 {
+			m.applyFilter(filterCursorTyped)
+		} else {
+			m.applyFilter(filterCursorFirst)
+			for i, it := range m.items {
+				if it.cmd == prev {
+					m.cursor = i + 1
+					break
+				}
+			}
+		}
+		return m, waitSuggestItems(m.itemsCh)
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
@@ -269,8 +306,18 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.loading {
 				return m, nil
 			}
-			m.selected = m.commandAt(m.cursor)
-			m.print = m.selected != ""
+			sel := m.commandAt(m.cursor)
+			if m.cursor <= 0 {
+				if m.cache.Has(m.prefix) {
+					return m, nil
+				}
+			} else if m.cache.Has(sel) {
+				m.prefix = drillPrefix(sel)
+				m.applyFilter(filterCursorFirst)
+				return m, nil
+			}
+			m.selected = sel
+			m.print = sel != ""
 			m.run = false
 			m.cont = m.print
 			m.quitting = true
@@ -292,14 +339,14 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r := []rune(m.prefix)
 			m.prefix = string(r[:len(r)-1])
 			if !m.loading {
-				m.applyFilter()
+				m.applyFilter(filterCursorTyped)
 			}
 			return m, nil
 		default:
 			if msg.Text != "" && msg.Mod&^(tea.ModShift|tea.ModCapsLock|tea.ModNumLock) == 0 {
 				m.prefix += msg.Text
 				if !m.loading {
-					m.applyFilter()
+					m.applyFilter(filterCursorFirst)
 				}
 			}
 			return m, nil

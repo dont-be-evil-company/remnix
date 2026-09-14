@@ -1,0 +1,30 @@
+NAME
+    tool - manage cloud resources
+
+SYNOPSIS
+    tool GROUP | COMMAND [--help]
+
+DESCRIPTION
+    Unified command-line interface.
+
+GROUPS
+    GROUP is one of the following:
+
+     auth
+        Manage oauth2 credentials for the cloud CLI.
+
+     compute
+        Create and manipulate Compute Engine resources.
+
+COMMANDS
+    COMMAND is one of the following:
+
+     help
+        Search help text.
+
+     version
+        Print version information.
+
+AVAILABLE COMMANDS
+     config          View and edit configuration
+     storage         Upload and download objects

@@ -76,6 +76,9 @@ func TestSuggestMenuTypingNarrowsItems(t *testing.T) {
 	if m.prefix != "gcloud" || len(m.items) != 3 {
 		t.Fatalf("after backspace prefix=%q items=%+v", m.prefix, m.items)
 	}
+	if m.cursor != 0 {
+		t.Fatalf("backspace should keep the typed row selected, cursor=%d", m.cursor)
+	}
 }
 
 func TestSuggestMenuCtrlSpaceContinues(t *testing.T) {
@@ -207,6 +210,24 @@ func TestSuggestMenuShowsSpinnerWhileLoading(t *testing.T) {
 	}
 }
 
+func TestSuggestMenuDescrsArriveLater(t *testing.T) {
+	ch := make(chan SuggestItems)
+	m := newSuggestModel(SuggestMenuOptions{Prefix: "gcloud ", ItemsCh: ch})
+	got, _ := m.Update(suggestItemsMsg{items: []suggestItem{{cmd: "gcloud auth"}}})
+	m = got.(suggestModel)
+	if m.loading || m.items[0].descr != "" {
+		t.Fatalf("loading=%v descr=%q", m.loading, m.items[0].descr)
+	}
+	got, _ = m.Update(suggestItemsMsg{items: []suggestItem{{cmd: "gcloud auth", descr: "Manage oauth2 credentials"}}})
+	m = got.(suggestModel)
+	if m.items[0].descr != "Manage oauth2 credentials" {
+		t.Fatalf("descr %q", m.items[0].descr)
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor %d", m.cursor)
+	}
+}
+
 func TestSuggestMenuAbortWhileLoading(t *testing.T) {
 	ch := make(chan SuggestItems)
 	m := newSuggestModel(SuggestMenuOptions{Prefix: "gcloud", ItemsCh: ch})
@@ -227,5 +248,130 @@ func TestSuggestMenuCtrlSpaceIgnoredWhileLoading(t *testing.T) {
 	gm := got.(suggestModel)
 	if gm.quitting || gm.ContinueSelected() || !gm.loading {
 		t.Fatal("ctrl+space during load should leave the spinner running")
+	}
+}
+
+func TestSuggestCacheBestLongestPrefix(t *testing.T) {
+	c := NewSuggestCache()
+	c.Store("remnix", []string{"remnix changelog", "remnix daemon", "remnix database"}, nil)
+	c.Store("remnix daemon ", []string{"remnix daemon compact", "remnix daemon install"}, nil)
+	key, items, ok := c.best("remnix daemon compact")
+	if !ok || key != "remnix daemon " || len(items) != 2 {
+		t.Fatalf("child key=%q items=%+v ok=%v", key, items, ok)
+	}
+	key, items, ok = c.best("remnix daemon")
+	if !ok || key != "remnix" || len(items) != 3 {
+		t.Fatalf("parent after dropping trailing space key=%q items=%+v ok=%v", key, items, ok)
+	}
+	if !c.Has("remnix daemon") || !c.Has("remnix") {
+		t.Fatal("Has should treat trailing space as the same level")
+	}
+}
+
+func TestSuggestMenuBackspaceRestoresCachedParent(t *testing.T) {
+	cache := NewSuggestCache()
+	cache.Store("remnix", []string{"remnix changelog", "remnix daemon", "remnix database"}, nil)
+	cache.Store("remnix daemon ", []string{"remnix daemon compact", "remnix daemon install"}, nil)
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "remnix daemon ",
+		Items:  []string{"remnix daemon compact", "remnix daemon install"},
+		Cache:  cache,
+	})
+	if m.cursor != 1 || len(m.items) != 2 || m.items[0].cmd != "remnix daemon compact" {
+		t.Fatalf("start cursor=%d items=%+v", m.cursor, m.items)
+	}
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = got.(suggestModel)
+	if m.prefix != "remnix daemon" || m.cursor != 0 {
+		t.Fatalf("after space drop prefix=%q cursor=%d", m.prefix, m.cursor)
+	}
+	for i := 0; i < len("daemon"); i++ {
+		got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m = got.(suggestModel)
+	}
+	if m.prefix != "remnix " {
+		t.Fatalf("prefix %q", m.prefix)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor %d want typed row", m.cursor)
+	}
+	if len(m.items) != 3 {
+		t.Fatalf("parent items %+v", m.items)
+	}
+	if m.ContinueSelected() || m.quitting {
+		t.Fatal("restoring parent from cache must stay in the overlay")
+	}
+}
+
+func TestSuggestMenuCtrlSpaceCachedChildDrillsInPlace(t *testing.T) {
+	cache := NewSuggestCache()
+	cache.Store("remnix", []string{"remnix daemon", "remnix database"}, nil)
+	cache.Store("remnix daemon ", []string{"remnix daemon compact", "remnix daemon install"}, nil)
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "remnix",
+		Items:  []string{"remnix daemon", "remnix database"},
+		Cache:  cache,
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.quitting || m.ContinueSelected() {
+		t.Fatal("cached child should drill in-place")
+	}
+	if m.prefix != "remnix daemon " {
+		t.Fatalf("prefix %q", m.prefix)
+	}
+	if m.cursor != 1 || len(m.items) != 2 || m.items[0].cmd != "remnix daemon compact" {
+		t.Fatalf("cursor=%d items=%+v", m.cursor, m.items)
+	}
+}
+
+func TestSuggestMenuCtrlSpaceTypedRowCachedStays(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "remnix",
+		Items:  []string{"remnix daemon", "remnix database"},
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = got.(suggestModel)
+	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.quitting || m.ContinueSelected() {
+		t.Fatal("typed row with cached prefix should stay")
+	}
+	if m.prefix != "remnix" || m.cursor != 0 {
+		t.Fatalf("prefix=%q cursor=%d", m.prefix, m.cursor)
+	}
+}
+
+func TestSuggestMenuCtrlSpaceUncachedChildContinues(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "remnix",
+		Items:  []string{"remnix daemon", "remnix database"},
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+	gm := got.(suggestModel)
+	cmd, ok := gm.SelectedCommand()
+	if !ok || cmd != "remnix daemon" {
+		t.Fatalf("got %q ok=%v", cmd, ok)
+	}
+	if !gm.ContinueSelected() || gm.RunSelected() {
+		t.Fatal("uncached child should continue so the completer can run")
+	}
+}
+
+func TestSuggestMenuBackspaceCtrlSpaceUsesTypedPrefix(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "gcloud storage",
+		Items:  []string{"gcloud storage buckets"},
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = got.(suggestModel)
+	if m.cursor != 0 || m.prefix != "gcloud storag" {
+		t.Fatalf("prefix=%q cursor=%d", m.prefix, m.cursor)
+	}
+	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	gm := got.(suggestModel)
+	cmd, ok := gm.SelectedCommand()
+	if !ok || cmd != "gcloud storag" || gm.ContinueSelected() {
+		t.Fatalf("typed after backspace: %q ok=%v cont=%v", cmd, ok, gm.ContinueSelected())
 	}
 }

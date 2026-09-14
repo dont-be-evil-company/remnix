@@ -1,0 +1,15 @@
+S3()                                                                      S3()
+
+NAME
+       s3 -
+
+DESCRIPTION
+       This command is used to manage Amazon S3.
+
+AVAILABLE COMMANDS
+
+       + cp          Copies a local file or S3 object to another location
+
+       + ls          List S3 objects and common prefixes
+
+       + mb          Creates an S3 bucket

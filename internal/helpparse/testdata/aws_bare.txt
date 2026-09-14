@@ -1,0 +1,15 @@
+AWS()                                                                    AWS()
+
+NAME
+       aws -
+
+DESCRIPTION
+       The  AWS  Command  Line  Interface is a unified tool to manage AWS services.
+
+AVAILABLE SERVICES
+
+       o accessanalyzer
+
+       o acm
+
+       o s3

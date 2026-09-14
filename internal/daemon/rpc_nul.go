@@ -144,7 +144,11 @@ func (s *Server) serveNULOne(r *bufio.Reader, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		sel, err := s.suggestCompleteInteractive(prefix, cwd, sessionID, func() (items, descrs []string, abort bool, err error) {
+		path, err := nulReadField(r)
+		if err != nil {
+			return err
+		}
+		sel, err := s.suggestCompleteInteractive(prefix, cwd, sessionID, path, func() (items, descrs []string, abort bool, err error) {
 			return readSuggestCompleteItems(r)
 		})
 		if err != nil {

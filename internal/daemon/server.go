@@ -12,25 +12,31 @@ import (
 
 	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/helpparse"
 	"github.com/dont-be-evil-company/remnix/internal/history"
 	"github.com/dont-be-evil-company/remnix/internal/protocol"
 	"github.com/dont-be-evil-company/remnix/internal/search"
 	"github.com/dont-be-evil-company/remnix/internal/terminal"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/version"
 )
 
 type Server struct {
-	app       *app.App
-	history   *history.Service
-	sessions  *terminal.Manager
-	syncer    *SyncScheduler
-	started   time.Time
-	mu        sync.Mutex
-	lastSync  Status
-	stage     string
-	cfgMu     sync.RWMutex
-	controlLn net.Listener
-	termLn    net.Listener
+	app           *app.App
+	history       *history.Service
+	sessions      *terminal.Manager
+	syncer        *SyncScheduler
+	started       time.Time
+	mu            sync.Mutex
+	lastSync      Status
+	stage         string
+	cfgMu         sync.RWMutex
+	controlLn     net.Listener
+	termLn        net.Listener
+	suggestMu     sync.Mutex
+	suggestCaches map[string]*tui.SuggestCache
+	helpCaches    map[string]*helpparse.Cache
+	helpProbe     helpparse.ProbeFunc
 }
 
 func NewServer() *Server {

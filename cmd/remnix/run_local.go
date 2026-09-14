@@ -12,6 +12,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/client"
 	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/helpparse"
 	"github.com/dont-be-evil-company/remnix/internal/history"
 	"github.com/dont-be-evil-company/remnix/internal/importers"
 	"github.com/dont-be-evil-company/remnix/internal/protocol"
@@ -367,17 +368,33 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 			return err
 		}
 	}
+	ch := make(chan tui.SuggestItems, 16)
+	go func() {
+		defer close(ch)
+		ch <- tui.SuggestItems{Items: items, Descrs: descrs}
+		if !helpparse.NeedsEnrich(items, descrs) {
+			return
+		}
+		cache := helpparse.NewCache()
+		d := helpparse.FillEmpty(context.Background(), prefix, items, descrs, cache, nil)
+		ch <- tui.SuggestItems{Items: items, Descrs: d}
+		if !helpparse.NeedsEnrich(items, d) {
+			return
+		}
+		helpparse.FillNodes(context.Background(), prefix, items, d, cache, nil, cfg.Suggest.MenuLimit(), func(next []string) {
+			ch <- tui.SuggestItems{Items: items, Descrs: next}
+		})
+	}()
 	h := cfg.Suggest.MenuLimit() + 3
 	return tui.RunSuggestMenu(tui.SuggestMenuOptions{
 		Prefix:        prefix,
-		Items:         items,
-		Descrs:        descrs,
 		TypedIcon:     cfg.Suggest.IconTyped(),
 		HistoryIcon:   cfg.Suggest.IconHistory(),
 		ItemIcon:      itemIco,
 		OverlayHeight: h,
 		Widget:        true,
 		ResultFile:    resultFile,
+		ItemsCh:       ch,
 		Theme:         uiTheme(cfg),
 	}, cmd.OutOrStdout())
 }
