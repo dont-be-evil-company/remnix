@@ -70,12 +70,23 @@ func newStatsCmd() *cobra.Command {
 }
 
 func newInspectCmd() *cobra.Command {
-	return &cobra.Command{
+	var advanced bool
+	cmd := &cobra.Command{
 		Use:     "inspect",
 		Aliases: []string{"explore"},
 		Short:   "Explore local history statistics",
-		RunE:    runInspect,
+		Long: `Explore unique commands and their runs.
+
+ctrl+f (or --advanced) opens advanced search: a left sidebar of regex
+criteria (ctrl+s toggles criteria vs results), multi-select delete of
+matching runs, and per-command usage charts in the run view (g cycles
+day/month/year).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInspect(advanced)
+		},
 	}
+	cmd.Flags().BoolVar(&advanced, "advanced", false, "open advanced search with a criteria sidebar")
+	return cmd
 }
 
 func newSuggestCmd() *cobra.Command {

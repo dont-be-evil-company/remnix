@@ -57,11 +57,11 @@ func TestInspectTabCyclesSort(t *testing.T) {
 	if m.sort != history.SortRecent {
 		t.Fatalf("recent sort %v", m.sort)
 	}
-	if last := m.visible[m.cursor].Command; last != "make test" || m.cursor != len(m.visible)-1 {
-		t.Fatalf("recent newest at bottom: cursor=%d cmd=%q", m.cursor, last)
+	if first := m.visible[m.cursor].Command; first != "make test" || m.cursor != 0 {
+		t.Fatalf("recent newest at top: cursor=%d cmd=%q", m.cursor, first)
 	}
-	if m.visible[0].Command != "ls" {
-		t.Fatalf("oldest at top: %q", m.visible[0].Command)
+	if m.visible[len(m.visible)-1].Command != "ls" {
+		t.Fatalf("oldest at bottom: %q", m.visible[len(m.visible)-1].Command)
 	}
 	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = got.(inspectModel)
@@ -73,7 +73,7 @@ func TestInspectTabCyclesSort(t *testing.T) {
 	if m.sort != history.SortFailed {
 		t.Fatalf("failed sort %v", m.sort)
 	}
-	if len(m.visible) != 2 || m.visible[len(m.visible)-1].Command != "make test" || m.visible[0].Command != "git status" {
+	if len(m.visible) != 2 || m.visible[0].Command != "make test" || m.visible[1].Command != "git status" {
 		t.Fatalf("failed list %+v", inspectCommands(m.visible))
 	}
 	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -128,7 +128,7 @@ func TestInspectCtrlDDeletesCommand(t *testing.T) {
 		return nil
 	}
 	m := NewInspect(opts)
-	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	m = got.(inspectModel)
 	if len(deleted) != 1 || deleted[0] != "make test" {
 		t.Fatalf("deleted %v", deleted)
@@ -156,7 +156,7 @@ func TestInspectCtrlDDeletesRunAndPopsWhenEmpty(t *testing.T) {
 	m := NewInspect(opts)
 	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = got.(inspectModel)
-	got, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	got, _ = m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	m = got.(inspectModel)
 	if len(deleted) != 1 || deleted[0] != "m1" {
 		t.Fatalf("deleted %v", deleted)
@@ -175,7 +175,7 @@ func TestInspectCtrlDKeepsRowOnError(t *testing.T) {
 	opts := inspectFixture()
 	opts.DeleteCommand = func(string) error { return errors.New("nope") }
 	m := NewInspect(opts)
-	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	m = got.(inspectModel)
 	if len(m.visible) != 3 {
 		t.Fatalf("visible %d", len(m.visible))
@@ -187,7 +187,7 @@ func TestInspectCtrlDKeepsRowOnError(t *testing.T) {
 
 func TestInspectRunSearchFiltersCwd(t *testing.T) {
 	m := NewInspect(inspectFixture())
-	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = got.(inspectModel)
 	if m.visible[m.cursor].Command != "git status" {
 		t.Fatalf("cursor %q", m.visible[m.cursor].Command)
@@ -242,4 +242,34 @@ func inspectCommands(in []history.CommandSummary) []string {
 		out[i] = s.Command
 	}
 	return out
+}
+
+func TestInspectCtrlDPagesWithoutDeleting(t *testing.T) {
+	summaries := make([]history.CommandSummary, 40)
+	for i := range summaries {
+		summaries[i] = history.CommandSummary{Command: fmt.Sprintf("cmd-%02d", i), LastTS: time.Unix(int64(40-i), 0)}
+	}
+	var deleted []string
+	m := NewInspect(InspectOptions{
+		Summaries: summaries,
+		DeleteCommand: func(command string) error {
+			deleted = append(deleted, command)
+			return nil
+		},
+	})
+	m = inspectUpdate(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if m.cursor != 0 {
+		t.Fatalf("start cursor %d", m.cursor)
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if m.cursor != 12 {
+		t.Fatalf("ctrl+d page down cursor=%d want 12", m.cursor)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("ctrl+d must not delete, deleted=%v", deleted)
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if m.cursor != 0 {
+		t.Fatalf("ctrl+u page up cursor=%d", m.cursor)
+	}
 }

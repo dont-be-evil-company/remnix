@@ -21,41 +21,62 @@ type inspectView int
 const (
 	inspectOverview inspectView = iota
 	inspectRuns
+	inspectAdvanced
 )
 
 type InspectOptions struct {
-	Stats         history.Stats
-	Summaries     []history.CommandSummary
-	Load          func(sort history.SummarySort, query string) ([]history.CommandSummary, history.Stats, error)
-	ListRuns      func(command string) ([]history.Entry, error)
-	DeleteCommand func(command string) error
-	DeleteEntry   func(history.Entry) error
-	Theme         Theme
+	Stats            history.Stats
+	Summaries        []history.CommandSummary
+	Load             func(sort history.SummarySort, query string) ([]history.CommandSummary, history.Stats, error)
+	AdvancedLoad     func(sort history.SummarySort, f history.AdvancedFilter) ([]history.CommandSummary, history.Stats, error)
+	ListRuns         func(command string) ([]history.Entry, error)
+	ListMatchingRuns func(command string, f history.AdvancedFilter) ([]history.Entry, error)
+	DeleteCommand    func(command string) error
+	DeleteEntry      func(history.Entry) error
+	DeleteEntries    func([]history.Entry) error
+	StartAdvanced    bool
+	Theme            Theme
 }
 
 type inspectModel struct {
-	input         textinput.Model
-	stats         history.Stats
-	all           []history.CommandSummary
-	visible       []history.CommandSummary
-	cursor        int
-	sort          history.SummarySort
-	view          inspectView
-	runs          []history.Entry
-	runVisible    []history.Entry
-	runCursor     int
-	runCmd        string
-	runSummary    history.CommandSummary
-	overviewQuery string
-	width         int
-	height        int
-	quitting      bool
-	status        string
-	load          func(sort history.SummarySort, query string) ([]history.CommandSummary, history.Stats, error)
-	listRuns      func(command string) ([]history.Entry, error)
-	deleteCommand func(command string) error
-	deleteEntry   func(history.Entry) error
-	theme         Theme
+	input            textinput.Model
+	stats            history.Stats
+	all              []history.CommandSummary
+	visible          []history.CommandSummary
+	cursor           int
+	sort             history.SummarySort
+	view             inspectView
+	returnView       inspectView
+	pane             inspectPane
+	fields           []textinput.Model
+	fieldIdx         int
+	fieldErrs        []string
+	selectedCmds     map[string]struct{}
+	selectedRuns     map[string]struct{}
+	deletedIDs       map[string]struct{}
+	confirmN         int
+	confirmKind      string
+	confirmEntries   []history.Entry
+	chartGran        chartGranularity
+	runs             []history.Entry
+	runVisible       []history.Entry
+	runCursor        int
+	runCmd           string
+	runSummary       history.CommandSummary
+	overviewQuery    string
+	width            int
+	height           int
+	quitting         bool
+	status           string
+	load             func(sort history.SummarySort, query string) ([]history.CommandSummary, history.Stats, error)
+	advancedLoad     func(sort history.SummarySort, f history.AdvancedFilter) ([]history.CommandSummary, history.Stats, error)
+	listRuns         func(command string) ([]history.Entry, error)
+	listMatchingRuns func(command string, f history.AdvancedFilter) ([]history.Entry, error)
+	deleteCommand    func(command string) error
+	deleteEntry      func(history.Entry) error
+	deleteEntries    func([]history.Entry) error
+	lastFilter       history.AdvancedFilter
+	theme            Theme
 }
 
 func NewInspect(opts InspectOptions) inspectModel {
@@ -66,23 +87,38 @@ func NewInspect(opts InspectOptions) inspectModel {
 	ti.Focus()
 	applyThemeInput(&ti, th)
 	m := inspectModel{
-		input:         ti,
-		stats:         opts.Stats,
-		all:           opts.Summaries,
-		width:         80,
-		height:        24,
-		load:          opts.Load,
-		listRuns:      opts.ListRuns,
-		deleteCommand: opts.DeleteCommand,
-		deleteEntry:   opts.DeleteEntry,
-		theme:         th,
+		input:            ti,
+		stats:            opts.Stats,
+		all:              opts.Summaries,
+		width:            80,
+		height:           24,
+		load:             opts.Load,
+		advancedLoad:     opts.AdvancedLoad,
+		listRuns:         opts.ListRuns,
+		listMatchingRuns: opts.ListMatchingRuns,
+		deleteCommand:    opts.DeleteCommand,
+		deleteEntry:      opts.DeleteEntry,
+		deleteEntries:    opts.DeleteEntries,
+		theme:            th,
+		fields:           newAdvancedFields(th),
+		fieldErrs:        make([]string, advancedFieldCount),
+		selectedCmds:     map[string]struct{}{},
+		selectedRuns:     map[string]struct{}{},
+		deletedIDs:       map[string]struct{}{},
 	}
 	m.refilter()
 	m.snapOverview()
+	if opts.StartAdvanced {
+		m.enterAdvanced()
+	}
 	return m
 }
 
 func (m inspectModel) Init() tea.Cmd {
+	if m.view == inspectAdvanced {
+		m.input.Blur()
+		return nil
+	}
 	return m.input.Focus()
 }
 
@@ -92,47 +128,166 @@ func (m inspectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(1, msg.Width)
 		m.height = max(1, msg.Height)
 		m.input.SetWidth(max(8, m.width-16))
+		m.resizeAdvancedFields()
 		return m, nil
 	case tea.FocusMsg, tea.BlurMsg:
 		return m, nil
 	case tea.KeyReleaseMsg:
 		return m, nil
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		case "esc":
-			if m.view == inspectRuns {
-				m.backToOverview()
-				return m, nil
-			}
-			m.quitting = true
-			return m, tea.Quit
-		case "enter":
-			if m.view == inspectOverview {
-				m.openRuns()
-			}
-			return m, nil
-		case "up", "ctrl+p":
-			m.moveCursor(-1)
-			return m, nil
-		case "down", "ctrl+n":
-			m.moveCursor(1)
-			return m, nil
-		case "tab":
-			if m.view == inspectOverview {
-				m.cycleSort()
-			}
-			return m, nil
-		case "ctrl+d":
-			if m.view == inspectRuns {
-				m.deleteSelectedRun()
-			} else {
-				m.deleteSelectedCommand()
-			}
-			return m, nil
+		if m.confirmN > 0 {
+			return m.handleConfirm(msg)
 		}
+		if handled, cmd := m.handleInspectKey(msg); handled {
+			return m, cmd
+		}
+		return m.updateFocusedInput(msg)
+	}
+	return m, nil
+}
+
+func (m *inspectModel) handleInspectKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return true, tea.Quit
+	case "ctrl+f":
+		if m.view == inspectRuns {
+			return true, nil
+		}
+		if m.view == inspectAdvanced {
+			m.leaveAdvanced()
+		} else {
+			m.enterAdvanced()
+		}
+		return true, nil
+	case "esc":
+		if m.view == inspectRuns {
+			m.backToOverview()
+			return true, nil
+		}
+		if m.view == inspectAdvanced {
+			m.leaveAdvanced()
+			return true, nil
+		}
+		m.quitting = true
+		return true, tea.Quit
+	case "enter":
+		if m.view == inspectAdvanced && m.pane == paneSidebar {
+			m.setPane(paneResults)
+			return true, nil
+		}
+		if m.view == inspectOverview || m.view == inspectAdvanced {
+			m.openRuns()
+			return true, nil
+		}
+		return true, nil
+	case "up", "ctrl+p":
+		if m.view == inspectAdvanced && m.pane == paneSidebar {
+			m.moveField(-1)
+			return true, nil
+		}
+		m.moveCursor(-1)
+		return true, nil
+	case "down", "ctrl+n":
+		if m.view == inspectAdvanced && m.pane == paneSidebar {
+			m.moveField(1)
+			return true, nil
+		}
+		m.moveCursor(1)
+		return true, nil
+	case "k":
+		if m.view == inspectAdvanced && m.pane == paneResults {
+			m.moveCursor(-1)
+			return true, nil
+		}
+		return false, nil
+	case "j":
+		if m.view == inspectAdvanced && m.pane == paneResults {
+			m.moveCursor(1)
+			return true, nil
+		}
+		return false, nil
+	case "ctrl+w":
+		if m.view == inspectAdvanced {
+			if m.pane == paneSidebar {
+				m.setPane(paneResults)
+			} else {
+				m.setPane(paneSidebar)
+			}
+			return true, nil
+		}
+		return false, nil
+	case "tab":
+		if m.view == inspectAdvanced && m.pane == paneSidebar {
+			m.moveField(1)
+			return true, nil
+		}
+		if m.view == inspectOverview || (m.view == inspectAdvanced && m.pane == paneResults) {
+			m.cycleSort()
+			return true, nil
+		}
+		return true, nil
+	case "shift+tab":
+		if m.view == inspectAdvanced && m.pane == paneSidebar {
+			m.moveField(-1)
+			return true, nil
+		}
+		return m.view == inspectAdvanced, nil
+	case " ", "space":
+		if m.view == inspectAdvanced || m.view == inspectRuns {
+			if m.view == inspectAdvanced && m.pane == paneSidebar {
+				return false, nil
+			}
+			m.toggleSelected()
+			return true, nil
+		}
+		return false, nil
+	case "ctrl+a":
+		if m.view == inspectAdvanced || m.view == inspectRuns {
+			if m.view == inspectAdvanced && m.pane == paneSidebar {
+				return false, nil
+			}
+			m.toggleSelectAll()
+			return true, nil
+		}
+		return false, nil
+	case "ctrl+d":
+		m.moveCursor(m.pageDelta())
+		return true, nil
+	case "ctrl+u":
+		m.moveCursor(-m.pageDelta())
+		return true, nil
+	case "ctrl+x":
+		m.requestDelete()
+		return true, nil
+	case "g":
+		if m.view == inspectRuns {
+			m.chartGran = m.chartGran.Next()
+			return true, nil
+		}
+		return false, nil
+	}
+	return false, nil
+}
+
+func (m inspectModel) updateFocusedInput(msg tea.Msg) (inspectModel, tea.Cmd) {
+	if m.view == inspectAdvanced && m.pane == paneSidebar && len(m.fields) > 0 {
+		prev := m.fields[m.fieldIdx].Value()
+		var cmd tea.Cmd
+		m.fields[m.fieldIdx], cmd = m.fields[m.fieldIdx].Update(msg)
+		if m.fields[m.fieldIdx].Value() != prev {
+			m.status = ""
+			if m.refilterAdvanced() {
+				m.snapOverview()
+			} else {
+				m.clampCursor()
+			}
+		}
+		return m, cmd
+	}
+	if m.view == inspectAdvanced {
+		return m, nil
 	}
 	prev := m.input.Value()
 	var cmd tea.Cmd
@@ -147,6 +302,9 @@ func (m inspectModel) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")
 	}
+	if m.view == inspectAdvanced {
+		return m.viewAdvanced()
+	}
 	w := max(1, m.width)
 	h := max(1, m.height)
 	inner := max(1, w-1)
@@ -157,8 +315,16 @@ func (m inspectModel) View() tea.View {
 	help := clampLine(m.renderInspectHelp(), inner)
 	input := clampLine(m.renderInspectInput(), inner)
 	rule := m.theme.Rule.Render(strings.Repeat("─", inner))
+	charts := ""
+	if m.view == inspectRuns {
+		chartBudget := min(12, max(0, h/3))
+		charts = renderChartBlock(m.theme, m.runs, m.chartGran, inner, chartBudget)
+	}
 
 	chrome := lipgloss.Height(header) + lipgloss.Height(stats) + 1 + lipgloss.Height(detail) + lipgloss.Height(help) + lipgloss.Height(input)
+	if charts != "" {
+		chrome += lipgloss.Height(charts)
+	}
 	listH := h - chrome
 	if listH < 0 {
 		listH = 0
@@ -173,6 +339,12 @@ func (m inspectModel) View() tea.View {
 	b.WriteByte('\n')
 	if listH > 0 {
 		b.WriteString(m.renderInspectList(inner, listH))
+	}
+	if charts != "" {
+		b.WriteString(charts)
+		if !strings.HasSuffix(charts, "\n") {
+			b.WriteByte('\n')
+		}
 	}
 	b.WriteString(detail)
 	b.WriteByte('\n')
@@ -209,9 +381,18 @@ func (m *inspectModel) moveCursor(delta int) {
 	m.cursor = min(n-1, max(0, m.cursor+delta))
 }
 
+func (m inspectModel) pageDelta() int {
+	return max(1, m.height/2)
+}
+
 func (m *inspectModel) cycleSort() {
 	m.sort = m.sort.Next()
 	m.status = ""
+	if m.view == inspectAdvanced {
+		m.refilterAdvanced()
+		m.snapOverview()
+		return
+	}
 	if m.load != nil {
 		all, st, err := m.load(m.sort, "")
 		if err != nil {
@@ -241,35 +422,51 @@ func (m *inspectModel) openRuns() {
 		return
 	}
 	s := m.visible[m.cursor]
-	if m.listRuns != nil {
-		runs, err := m.listRuns(s.Command)
-		if err != nil {
-			m.status = err.Error()
-			return
-		}
-		m.runs = runs
-	} else {
-		m.runs = nil
+	m.returnView = m.view
+	runs, err := m.loadCurrentRuns(s.Command)
+	if err != nil {
+		m.status = err.Error()
+		return
 	}
-	m.overviewQuery = m.input.Value()
+	m.runs = runs
+	if m.view != inspectAdvanced {
+		m.overviewQuery = m.input.Value()
+	}
 	m.input.SetValue("")
 	m.input.Placeholder = "filter cwd, host, exit"
+	_ = m.input.Focus()
 	m.view = inspectRuns
 	m.runCmd = s.Command
-	m.runSummary = s
+	m.runSummary = history.SummarizeRuns(s.Command, runs)
+	if m.runSummary.Runs == 0 {
+		m.runSummary = s
+	}
 	m.status = ""
+	m.selectedRuns = map[string]struct{}{}
 	m.refilterRuns()
 	m.snapRuns()
 }
 
 func (m *inspectModel) backToOverview() {
-	m.view = inspectOverview
+	prev := m.returnView
 	m.runs = nil
 	m.runVisible = nil
 	m.runCmd = ""
+	m.selectedRuns = map[string]struct{}{}
+	m.status = ""
+	if prev == inspectAdvanced {
+		m.view = inspectAdvanced
+		m.input.SetValue("")
+		m.input.Blur()
+		m.refilterAdvanced()
+		m.clampCursor()
+		return
+	}
+	m.view = inspectOverview
+	m.returnView = inspectOverview
 	m.input.SetValue(m.overviewQuery)
 	m.input.Placeholder = "type to search"
-	m.status = ""
+	_ = m.input.Focus()
 	m.reloadBase()
 }
 
@@ -327,72 +524,6 @@ func (m *inspectModel) deleteSelectedCommand() {
 	m.clampCursor()
 }
 
-func (m *inspectModel) deleteSelectedRun() {
-	if len(m.runVisible) == 0 || m.runCursor >= len(m.runVisible) {
-		return
-	}
-	e := m.runVisible[m.runCursor]
-	if m.deleteEntry != nil {
-		if err := m.deleteEntry(e); err != nil {
-			m.status = err.Error()
-			return
-		}
-	}
-	m.status = ""
-	kept := make([]history.Entry, 0, len(m.runs))
-	for _, x := range m.runs {
-		if x.ID != e.ID {
-			kept = append(kept, x)
-		}
-	}
-	m.runs = kept
-	m.runSummary.Runs--
-	if e.ExitStatus != nil {
-		if *e.ExitStatus == 0 {
-			m.runSummary.Success--
-		} else {
-			m.runSummary.Failed--
-		}
-	}
-	if m.runSummary.Runs < 0 {
-		m.runSummary.Runs = 0
-	}
-	if m.stats.Commands > 0 {
-		m.stats.Commands--
-	}
-	m.stats.Deleted++
-	if e.ExitStatus != nil {
-		if *e.ExitStatus == 0 && m.stats.Success > 0 {
-			m.stats.Success--
-		} else if *e.ExitStatus != 0 && m.stats.Failed > 0 {
-			m.stats.Failed--
-		}
-	}
-	if len(m.runs) == 0 {
-		if m.load == nil {
-			keptSum := make([]history.CommandSummary, 0, len(m.all))
-			for _, x := range m.all {
-				if x.Command != m.runCmd {
-					keptSum = append(keptSum, x)
-				}
-			}
-			m.all = keptSum
-		}
-		m.backToOverview()
-		return
-	}
-	if m.listRuns != nil {
-		runs, err := m.listRuns(m.runCmd)
-		if err != nil {
-			m.status = err.Error()
-		} else {
-			m.runs = runs
-		}
-	}
-	m.refilterRuns()
-	m.clampRunCursor()
-}
-
 func (m *inspectModel) refilter() {
 	src := m.all
 	q := m.input.Value()
@@ -402,28 +533,21 @@ func (m *inspectModel) refilter() {
 			src = mergeSummaries(src, extra)
 		}
 	}
-	m.visible = reverseSummaries(filterSummaries(src, q, m.sort))
+	m.visible = filterSummaries(src, q, m.sort)
 	m.clampCursor()
 }
 
 func (m *inspectModel) refilterRuns() {
-	m.runVisible = reverseEntries(filterRuns(m.runs, m.input.Value()))
+	m.runVisible = filterRuns(m.runs, m.input.Value())
 	m.clampRunCursor()
 }
 
 func (m *inspectModel) snapOverview() {
-	m.cursor = lastIndex(len(m.visible))
+	m.cursor = 0
 }
 
 func (m *inspectModel) snapRuns() {
-	m.runCursor = lastIndex(len(m.runVisible))
-}
-
-func lastIndex(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return n - 1
+	m.runCursor = 0
 }
 
 func (m *inspectModel) clampCursor() {
@@ -495,14 +619,6 @@ func sortSummaries(s []history.CommandSummary, mode history.SummarySort) {
 	})
 }
 
-func reverseSummaries(in []history.CommandSummary) []history.CommandSummary {
-	out := make([]history.CommandSummary, len(in))
-	for i, s := range in {
-		out[len(in)-1-i] = s
-	}
-	return out
-}
-
 func mergeSummaries(a, b []history.CommandSummary) []history.CommandSummary {
 	seen := make(map[string]struct{}, len(a)+len(b))
 	out := make([]history.CommandSummary, 0, len(a)+len(b))
@@ -542,6 +658,9 @@ func filterRuns(in []history.Entry, query string) []history.Entry {
 
 func (m inspectModel) renderInspectHeader(w int) string {
 	left := m.theme.Title.Render("remnix inspect")
+	if m.view == inspectAdvanced {
+		left += "  " + m.theme.Muted.Render("advanced")
+	}
 	if m.view == inspectRuns {
 		cmd := strings.ReplaceAll(strings.ReplaceAll(m.runCmd, "\r", ""), "\n", " ")
 		remain := w - lipgloss.Width(left) - 2
@@ -583,15 +702,30 @@ func (m inspectModel) renderInspectHelp() string {
 	if m.status != "" {
 		return m.theme.Failed.Render(m.status)
 	}
+	if m.confirmN > 0 {
+		return m.renderConfirmHelp()
+	}
 	if m.view == inspectRuns {
 		return key("esc", "back") + m.theme.Help.Render("  ·  ") +
-			key("ctrl+d", "delete run") + m.theme.Help.Render("  ·  ") +
+			key("space", "select") + m.theme.Help.Render("  ·  ") +
+			key("g", "chart") + m.theme.Help.Render("  ·  ") +
+			key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
 			key(m.theme.Move(), "move") + m.theme.Help.Render("  ·  ") +
 			key("ctrl+c", "quit")
 	}
+	if m.view == inspectAdvanced {
+		return key("ctrl+w", "criteria") + m.theme.Help.Render("  ·  ") +
+			key("space", "select") + m.theme.Help.Render("  ·  ") +
+			key("ctrl+a", "all") + m.theme.Help.Render("  ·  ") +
+			key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
+			key("enter", "open") + m.theme.Help.Render("  ·  ") +
+			key("ctrl+f", "simple") + m.theme.Help.Render("  ·  ") +
+			key("esc", "back")
+	}
 	return key("enter", "open") + m.theme.Help.Render("  ·  ") +
 		key("tab", "sort") + m.theme.Help.Render("  ·  ") +
-		key("ctrl+d", "delete") + m.theme.Help.Render("  ·  ") +
+		key("ctrl+f", "advanced") + m.theme.Help.Render("  ·  ") +
+		key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
 		key(m.theme.Move(), "move") + m.theme.Help.Render("  ·  ") +
 		key("esc", "quit")
 }
@@ -599,12 +733,21 @@ func (m inspectModel) renderInspectHelp() string {
 func (m inspectModel) renderInspectInput() string {
 	badge := "[ RECENT ]"
 	switch {
+	case m.view == inspectAdvanced:
+		badge = "[ ADVANCED ]"
 	case m.view == inspectRuns:
 		badge = "[ RUNS ]"
 	case m.sort == history.SortTop:
 		badge = "[ TOP ]"
 	case m.sort == history.SortFailed:
 		badge = "[ FAIL ]"
+	}
+	if m.view == inspectAdvanced {
+		hint := m.theme.Muted.Render("ctrl+w criteria · space select")
+		if m.pane == paneSidebar {
+			hint = m.theme.Muted.Render("tab fields · ctrl+w results")
+		}
+		return m.theme.Badge.Render(badge) + " " + hint
 	}
 	return m.theme.Badge.Render(badge) + " " + m.input.View()
 }
@@ -656,17 +799,17 @@ func (m inspectModel) renderInspectList(w, listH int) string {
 		return m.renderRunList(w, listH)
 	}
 	if len(m.visible) == 0 {
-		pad := max(0, listH-1)
-		return strings.Repeat("\n", pad) + m.theme.Muted.Render("  no matches") + "\n"
+		return m.theme.Muted.Render("  no matches") + strings.Repeat("\n", max(0, listH-1))
 	}
 	start, end := listWindow(len(m.visible), m.cursor, listH)
 	now := time.Now()
 	var b strings.Builder
-	for i := 0; i < listH-(end-start); i++ {
+	for i := start; i < end; i++ {
+		s := m.visible[i]
+		b.WriteString(clampLine(m.renderSummaryRow(s, i == m.cursor, m.view == inspectAdvanced, m.cmdSelected(s.Command), w, now), w))
 		b.WriteByte('\n')
 	}
-	for i := start; i < end; i++ {
-		b.WriteString(clampLine(m.renderSummaryRow(m.visible[i], i == m.cursor, w, now), w))
+	for i := 0; i < listH-(end-start); i++ {
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -674,43 +817,40 @@ func (m inspectModel) renderInspectList(w, listH int) string {
 
 func (m inspectModel) renderRunList(w, listH int) string {
 	if len(m.runVisible) == 0 {
-		pad := max(0, listH-1)
-		return strings.Repeat("\n", pad) + m.theme.Muted.Render("  no runs") + "\n"
+		return m.theme.Muted.Render("  no runs") + strings.Repeat("\n", max(0, listH-1))
 	}
 	start, end := listWindow(len(m.runVisible), m.runCursor, listH)
 	now := time.Now()
 	var b strings.Builder
-	for i := 0; i < listH-(end-start); i++ {
+	for i := start; i < end; i++ {
+		e := m.runVisible[i]
+		b.WriteString(clampLine(m.renderRunRow(e, i == m.runCursor, m.runSelected(e.ID), w, now), w))
 		b.WriteByte('\n')
 	}
-	for i := start; i < end; i++ {
-		b.WriteString(clampLine(m.renderRunRow(m.runVisible[i], i == m.runCursor, w, now), w))
+	for i := 0; i < listH-(end-start); i++ {
 		b.WriteByte('\n')
 	}
 	return b.String()
 }
 
 func listWindow(n, cursor, listH int) (start, end int) {
-	if n == 0 {
+	if n == 0 || listH <= 0 {
 		return 0, 0
 	}
 	if listH >= n {
 		return 0, n
 	}
-	end = cursor + 1
-	start = end - listH
+	start = cursor - listH + 1
 	if start < 0 {
 		start = 0
-		end = listH
 	}
-	if end > n {
-		end = n
+	if start > n-listH {
 		start = n - listH
 	}
-	return start, end
+	return start, start + listH
 }
 
-func (m inspectModel) renderSummaryRow(s history.CommandSummary, selected bool, w int, now time.Time) string {
+func (m inspectModel) renderSummaryRow(s history.CommandSummary, selected, showCheck, checked bool, w int, now time.Time) string {
 	durStyle := m.theme.Duration
 	if s.LastExit != nil && *s.LastExit != 0 {
 		durStyle = m.theme.Failed
@@ -719,11 +859,21 @@ func (m inspectModel) renderSummaryRow(s history.CommandSummary, selected bool, 
 	if selected {
 		marker = m.theme.Accent.Render(m.theme.Cursor())
 	}
+	check := ""
+	if showCheck {
+		var box string
+		if checked {
+			box = m.theme.Accent.Render("[x]")
+		} else {
+			box = m.theme.Muted.Render("[ ]")
+		}
+		check = box + " "
+	}
 	count := alignRight(m.theme.Muted.Render(formatCount(int(s.Runs))+"×"), inspectCountCol)
 	rate := alignRight(m.theme.Muted.Render(successRate(s)), inspectRateCol)
 	dur := alignRight(durStyle.Render(formatDuration(s.LastDurationMs)), durCol)
 	rel := alignRight(m.theme.Time.Render(formatRelative(s.LastTS, now)), relCol)
-	prefix := alignRight(marker, markCol) + " " + count + "  " + rate + "  " + dur + "  " + rel + "  "
+	prefix := alignRight(marker, markCol) + " " + check + count + "  " + rate + "  " + dur + "  " + rel + "  "
 	remain := w - lipgloss.Width(prefix)
 	if remain < 8 {
 		remain = 8
@@ -736,7 +886,7 @@ func (m inspectModel) renderSummaryRow(s history.CommandSummary, selected bool, 
 	return prefix + cmd
 }
 
-func (m inspectModel) renderRunRow(e history.Entry, selected bool, w int, now time.Time) string {
+func (m inspectModel) renderRunRow(e history.Entry, selected, checked bool, w int, now time.Time) string {
 	durStyle := m.theme.Duration
 	if failed(e) {
 		durStyle = m.theme.Failed
@@ -745,10 +895,14 @@ func (m inspectModel) renderRunRow(e history.Entry, selected bool, w int, now ti
 	if selected {
 		marker = m.theme.Accent.Render(m.theme.Cursor())
 	}
+	box := m.theme.Muted.Render("[ ]")
+	if checked {
+		box = m.theme.Accent.Render("[x]")
+	}
 	dur := alignRight(durStyle.Render(formatDuration(e.DurationMs)), durCol)
 	rel := alignRight(m.theme.Time.Render(formatRelative(e.StartTS, now)), relCol)
 	exit := alignRight(m.exitLabel(e), inspectExitCol)
-	prefix := alignRight(marker, markCol) + " " + dur + "  " + rel + "  " + exit + "  "
+	prefix := alignRight(marker, markCol) + " " + box + " " + dur + "  " + rel + "  " + exit + "  "
 	remain := w - lipgloss.Width(prefix)
 	if remain < 8 {
 		remain = 8

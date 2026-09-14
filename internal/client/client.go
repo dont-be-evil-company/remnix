@@ -261,6 +261,7 @@ func HitsToEntries(hits []protocol.SearchHit) []history.Entry {
 			Hostname:   h.Hostname,
 			Shell:      h.Shell,
 			StartTS:    time.UnixMilli(h.StartTS).UTC(),
+			DurationMs: h.DurationMs,
 			ExitStatus: h.Exit,
 		}
 		out = append(out, e)

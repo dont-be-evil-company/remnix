@@ -386,6 +386,10 @@ LIMIT ?`)
 		return nil, err
 	}
 	defer rows.Close()
+	return scanCommandSummaries(rows)
+}
+
+func scanCommandSummaries(rows *sql.Rows) ([]CommandSummary, error) {
 	var out []CommandSummary
 	for rows.Next() {
 		var (

@@ -93,15 +93,16 @@ type HistorySearchReq struct {
 }
 
 type SearchHit struct {
-	ID        string `cbor:"id"`
-	Command   string `cbor:"command"`
-	Cwd       string `cbor:"cwd"`
-	DeviceID  string `cbor:"device"`
-	SessionID string `cbor:"session"`
-	Hostname  string `cbor:"host"`
-	Shell     string `cbor:"shell"`
-	StartTS   int64  `cbor:"start_ts"`
-	Exit      *int   `cbor:"exit,omitempty"`
+	ID         string `cbor:"id"`
+	Command    string `cbor:"command"`
+	Cwd        string `cbor:"cwd"`
+	DeviceID   string `cbor:"device"`
+	SessionID  string `cbor:"session"`
+	Hostname   string `cbor:"host"`
+	Shell      string `cbor:"shell"`
+	StartTS    int64  `cbor:"start_ts"`
+	DurationMs *int64 `cbor:"duration_ms,omitempty"`
+	Exit       *int   `cbor:"exit,omitempty"`
 }
 
 type HistorySearchRes struct {

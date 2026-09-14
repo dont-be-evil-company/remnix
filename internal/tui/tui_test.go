@@ -194,7 +194,7 @@ func TestCtrlDDeletesSelected(t *testing.T) {
 	if gm.visible[gm.cursor].Command != "secret" {
 		t.Fatalf("want secret under cursor, got %q", gm.visible[gm.cursor].Command)
 	}
-	got, _ = gm.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	got, _ = gm.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	gm = got.(model)
 	if len(deleted) != 1 || deleted[0] != "secret" {
 		t.Fatalf("deleted %v", deleted)
@@ -219,13 +219,42 @@ func TestCtrlDKeepsRowOnError(t *testing.T) {
 	m := New([]history.Entry{{ID: "1", Command: "keep me", StartTS: time.Unix(1, 0)}}, Options{
 		Delete: func(history.Entry) error { return errors.New("nope") },
 	})
-	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	gm := got.(model)
 	if len(gm.visible) != 1 {
 		t.Fatal("row should remain on error")
 	}
 	if gm.status == "" {
 		t.Fatal("expected status")
+	}
+}
+
+func TestCtrlDPagesWithoutDeleting(t *testing.T) {
+	entries := make([]history.Entry, 40)
+	for i := range entries {
+		entries[i] = history.Entry{ID: fmt.Sprintf("%d", i), Command: fmt.Sprintf("cmd-%02d", i), StartTS: time.Unix(int64(i), 0)}
+	}
+	var deleted []string
+	m := New(entries, Options{Delete: func(e history.Entry) error {
+		deleted = append(deleted, e.Command)
+		return nil
+	}})
+	end := len(m.visible) - 1
+	if m.cursor != end {
+		t.Fatalf("start cursor %d want %d", m.cursor, end)
+	}
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	gm := got.(model)
+	if gm.cursor != end {
+		t.Fatalf("ctrl+d at bottom cursor=%d want %d", gm.cursor, end)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("ctrl+d must not delete, deleted=%v", deleted)
+	}
+	got, _ = gm.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	gm = got.(model)
+	if gm.cursor != end-12 {
+		t.Fatalf("ctrl+u cursor=%d want %d", gm.cursor, end-12)
 	}
 }
 

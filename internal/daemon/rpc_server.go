@@ -200,15 +200,16 @@ func (s *Server) dispatch(req protocol.Request) protocol.Response {
 		hits := make([]protocol.SearchHit, 0, len(entries))
 		for _, e := range entries {
 			hits = append(hits, protocol.SearchHit{
-				ID:        e.ID,
-				Command:   e.Command,
-				Cwd:       e.Cwd,
-				DeviceID:  e.DeviceID,
-				SessionID: e.SessionID,
-				Hostname:  e.Hostname,
-				Shell:     e.Shell,
-				StartTS:   e.StartTS.UnixMilli(),
-				Exit:      e.ExitStatus,
+				ID:         e.ID,
+				Command:    e.Command,
+				Cwd:        e.Cwd,
+				DeviceID:   e.DeviceID,
+				SessionID:  e.SessionID,
+				Hostname:   e.Hostname,
+				Shell:      e.Shell,
+				StartTS:    e.StartTS.UnixMilli(),
+				DurationMs: e.DurationMs,
+				Exit:       e.ExitStatus,
 			})
 		}
 		resp, err := protocol.EncodeOK(req.ID, protocol.HistorySearchRes{Hits: hits})

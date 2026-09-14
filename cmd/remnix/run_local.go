@@ -211,7 +211,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runInspect(_ *cobra.Command, _ []string) error {
+func runInspect(advanced bool) error {
 	a, err := openApp()
 	if err != nil {
 		return err
@@ -235,11 +235,25 @@ func runInspect(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	return tui.RunInspect(tui.InspectOptions{
-		Stats:     st,
-		Summaries: summaries,
-		Load:      load,
-		ListRuns:  store.ListByCommand,
-		Theme:     uiTheme(a.Config),
+		Stats:            st,
+		Summaries:        summaries,
+		Load:             load,
+		StartAdvanced:    advanced,
+		ListRuns:         store.ListByCommand,
+		ListMatchingRuns: store.ListByCommandMatching,
+		AdvancedLoad: func(sort history.SummarySort, f history.AdvancedFilter) ([]history.CommandSummary, history.Stats, error) {
+			st, err := store.Stats()
+			if err != nil {
+				return nil, st, err
+			}
+			f.Sort = sort
+			if f.Limit == 0 {
+				f.Limit = 5000
+			}
+			sums, err := store.CommandSummariesAdvanced(f)
+			return sums, st, err
+		},
+		Theme: uiTheme(a.Config),
 		DeleteCommand: func(command string) error {
 			if err := client.HistoryDelete(command); err == nil {
 				return nil
@@ -251,6 +265,12 @@ func runInspect(_ *cobra.Command, _ []string) error {
 				return nil
 			}
 			return a.TombstoneEntries([]history.Entry{e})
+		},
+		DeleteEntries: func(entries []history.Entry) error {
+			if err := client.TombstoneEntries(entries); err == nil {
+				return nil
+			}
+			return a.TombstoneEntries(entries)
 		},
 	})
 }

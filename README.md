@@ -225,6 +225,8 @@ remnix suggest --prefix 'git st' --cwd "$PWD" --list
 remnix suggest --interactive --prefix 'git st' --cwd "$PWD"
 remnix stats
 remnix inspect                    # history stats TUI (`explore` alias)
+remnix inspect --advanced         # regex criteria sidebar, multi-select delete
+
 remnix import histfile ~/.histfile
 remnix import atuin ~/.local/share/atuin/history.db
 ```
@@ -232,6 +234,16 @@ remnix import atuin ~/.local/share/atuin/history.db
 Ranking is a deterministic weighted score: match quality (prefix over fuzzy),
 recency, frequency, cwd, device, and session. The daemon keeps a compact
 in-memory command index; SQLite remains the durable source of truth.
+
+`remnix inspect` opens a unique-command overview (`tab` cycles sort, `enter`
+drills into runs, `ctrl+x` deletes, `ctrl+d`/`ctrl+u` half-page). `ctrl+f`
+or `--advanced` splits a left criteria sidebar (command, cwd, host, shell,
+session, device, exit, since, until - regex except the time bounds). `ctrl+s`
+toggles the criteria fields versus the result list (arrow keys stay in the
+focused input). Results stay unique commands with at least one matching run.
+`space` / `ctrl+a` multi-select; `ctrl+x` tombstones matching runs
+(confirms when more than one command is selected). The run view shows usage
+charts by day/month/year (`g` to cycle), hostname, and directory.
 
 Colors and icons are configurable under `ui` in `config.yaml` (Catppuccin-like
 defaults). `suggest.icons` still works as an alias. After editing config,

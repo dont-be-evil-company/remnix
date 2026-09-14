@@ -155,6 +155,19 @@ func (m *model) clampCursor() {
 	}
 }
 
+func (m model) pageDelta() int {
+	return max(1, m.height/2)
+}
+
+func (m *model) moveCursor(delta int) {
+	n := len(m.visible)
+	if n == 0 {
+		m.cursor = 0
+		return
+	}
+	m.cursor = min(n-1, max(0, m.cursor+delta))
+}
+
 func (m *model) deleteSelected() {
 	if len(m.visible) == 0 || m.cursor >= len(m.visible) {
 		return
@@ -230,11 +243,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 			return m, nil
+		case "ctrl+d":
+			m.moveCursor(m.pageDelta())
+			return m, nil
+		case "ctrl+u":
+			m.moveCursor(-m.pageDelta())
+			return m, nil
 		case "tab":
 			m.cwdOnly = !m.cwdOnly
 			m.refresh()
 			return m, nil
-		case "ctrl+d":
+		case "ctrl+x":
 			m.deleteSelected()
 			return m, nil
 		}
@@ -343,7 +362,7 @@ func (m model) renderHelp() string {
 	return key("enter", "run") + m.theme.Help.Render("  ·  ") +
 		key("ctrl+o", "edit") + m.theme.Help.Render("  ·  ") +
 		key("tab", "cwd") + m.theme.Help.Render("  ·  ") +
-		key("ctrl+d", "delete") + m.theme.Help.Render("  ·  ") +
+		key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
 		key(m.theme.Move(), "move") + m.theme.Help.Render("  ·  ") +
 		key("esc", "cancel")
 }

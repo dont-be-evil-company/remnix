@@ -136,3 +136,57 @@ func TestCacheCompactPrunesSessionChurn(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestCacheAllUniqueKeepsDuration(t *testing.T) {
+	dur := int64(2500)
+	ok := 0
+	c := NewCache()
+	c.ApplyCreated(Entry{
+		ID: "1", Command: "sleep 2", StartTS: time.UnixMilli(1000).UTC(),
+		DurationMs: &dur, ExitStatus: &ok, Cwd: "/tmp", DeviceID: "d",
+	})
+	got := c.AllUnique()
+	if len(got) != 1 || got[0].DurationMs == nil || *got[0].DurationMs != 2500 {
+		t.Fatalf("duration %+v", got)
+	}
+}
+
+func TestCacheApplyCompletedSetsDuration(t *testing.T) {
+	c := NewCache()
+	start := time.UnixMilli(1000).UTC()
+	c.ApplyCreated(Entry{ID: "1", Command: "ls", StartTS: start, Cwd: "/", DeviceID: "d"})
+	c.ApplyCompleted("1", start.Add(1500*time.Millisecond), 0)
+	got := c.AllUnique()
+	if len(got) != 1 || got[0].DurationMs == nil || *got[0].DurationMs != 1500 {
+		t.Fatalf("duration %+v", got)
+	}
+	if got[0].ExitStatus == nil || *got[0].ExitStatus != 0 {
+		t.Fatalf("exit %+v", got[0].ExitStatus)
+	}
+}
+
+func TestCacheRebuildKeepsStoreDuration(t *testing.T) {
+	d, err := db.OpenAndMigrate(t.TempDir() + "/h.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	store := NewSQLStore(d.SQL)
+	start := time.UnixMilli(1_000).UTC()
+	dur := int64(3200)
+	ok := 0
+	if _, err := store.Insert(Entry{
+		ID: "1", Command: "make test", StartTS: start, DurationMs: &dur,
+		ExitStatus: &ok, Cwd: "/src", DeviceID: "d",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewCache()
+	if err := cache.Rebuild(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	got := cache.AllUnique()
+	if len(got) != 1 || got[0].DurationMs == nil || *got[0].DurationMs != 3200 {
+		t.Fatalf("rebuild duration %+v", got)
+	}
+}

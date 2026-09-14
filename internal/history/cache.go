@@ -35,6 +35,7 @@ type Cache struct {
 type cacheRec struct {
 	cmd, cwd, device, session int32
 	lastStart                 int64
+	lastDurationMs            int64
 	lastExit                  int32
 	freq                      int32
 }
@@ -142,15 +143,7 @@ func (c *Cache) ApplyCreated(e Entry) {
 func (c *Cache) ApplyCompleted(id string, end time.Time, exit int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cmdID, ok := c.idToCmd[id]
-	if !ok {
-		return
-	}
-	idx, ok := c.byCmd[cmdID]
-	if !ok {
-		return
-	}
-	c.recs[idx].lastExit = int32(exit)
+	c.applyCompletedLocked(id, end.UnixMilli(), exit)
 }
 
 func (c *Cache) ApplyTombstoned(ids []string) {
@@ -206,11 +199,7 @@ func (c *Cache) ApplyBatch(cs ChangeSet) {
 		c.applyCreatedLocked(e)
 	}
 	for _, done := range cs.Completed {
-		if cmdID, ok := c.idToCmd[done.ID]; ok {
-			if idx, ok := c.byCmd[cmdID]; ok {
-				c.recs[idx].lastExit = int32(done.Exit)
-			}
-		}
+		c.applyCompletedLocked(done.ID, done.End, done.Exit)
 	}
 	for _, id := range cs.Tombstoned {
 		cmdID, ok := c.idToCmd[id]
@@ -282,6 +271,33 @@ func (c *Cache) Compact() {
 	c.refreshStatsLocked()
 }
 
+func (c *Cache) applyCompletedLocked(id string, endMs int64, exit int) {
+	cmdID, ok := c.idToCmd[id]
+	if !ok {
+		return
+	}
+	idx, ok := c.byCmd[cmdID]
+	if !ok {
+		return
+	}
+	c.recs[idx].lastExit = int32(exit)
+	c.recs[idx].lastDurationMs = completeDurationMs(c.recs[idx].lastStart, endMs)
+}
+
+func durationMsOf(e Entry) int64 {
+	if e.DurationMs == nil || *e.DurationMs < 0 {
+		return 0
+	}
+	return *e.DurationMs
+}
+
+func completeDurationMs(startMs, endMs int64) int64 {
+	if startMs <= 0 || endMs < startMs {
+		return 0
+	}
+	return endMs - startMs
+}
+
 func (c *Cache) applyCreatedLocked(e Entry) {
 	if e.Deleted || e.Command == "" {
 		return
@@ -293,11 +309,13 @@ func (c *Cache) applyCreatedLocked(e Entry) {
 	if e.ExitStatus != nil {
 		exit = int32(*e.ExitStatus)
 	}
+	dur := durationMsOf(e)
 	if idx, ok := c.byCmd[cmdID]; ok {
 		c.recs[idx].freq++
 		if start >= c.recs[idx].lastStart {
 			c.recs[idx].lastStart = start
 			c.recs[idx].lastExit = exit
+			c.recs[idx].lastDurationMs = dur
 			c.recs[idx].cwd = c.pool.intern(e.Cwd)
 			c.recs[idx].device = c.pool.intern(e.DeviceID)
 			c.recs[idx].session = c.pool.intern(e.SessionID)
@@ -306,13 +324,14 @@ func (c *Cache) applyCreatedLocked(e Entry) {
 	}
 	c.byCmd[cmdID] = len(c.recs)
 	c.recs = append(c.recs, cacheRec{
-		cmd:       cmdID,
-		cwd:       c.pool.intern(e.Cwd),
-		device:    c.pool.intern(e.DeviceID),
-		session:   c.pool.intern(e.SessionID),
-		lastStart: start,
-		lastExit:  exit,
-		freq:      1,
+		cmd:            cmdID,
+		cwd:            c.pool.intern(e.Cwd),
+		device:         c.pool.intern(e.DeviceID),
+		session:        c.pool.intern(e.SessionID),
+		lastStart:      start,
+		lastDurationMs: dur,
+		lastExit:       exit,
+		freq:           1,
 	})
 }
 
@@ -376,6 +395,10 @@ func (c *Cache) entryFromLocked(rec cacheRec) Entry {
 	if rec.lastExit >= 0 {
 		v := int(rec.lastExit)
 		e.ExitStatus = &v
+	}
+	if rec.lastDurationMs > 0 {
+		d := rec.lastDurationMs
+		e.DurationMs = &d
 	}
 	return e
 }
