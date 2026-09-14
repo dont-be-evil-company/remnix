@@ -57,7 +57,6 @@ type Session struct {
 	resizeDone sync.WaitGroup
 
 	parseQ    *parseQueue
-	parseSig  chan struct{}
 	parseDone sync.WaitGroup
 }
 
@@ -114,20 +113,19 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 	}
 	ptmxW := os.NewFile(uintptr(wfd), "pty-master-w")
 	s := &Session{
-		ID:       id,
-		Cols:     cols,
-		Rows:     rows,
-		screen:   scr,
-		cmd:      cmd,
-		ptmx:     ptmx,
-		ptmxW:    ptmxW,
-		ioctlFD:  ctlFD,
-		conn:     conn,
-		done:     make(chan int, 1),
-		closed:   make(chan struct{}),
-		parseSig: make(chan struct{}, 1),
-		parseQ:   newParseQueue(parseQueueBudget),
-		sizeQ:    newSizeCoalescer(),
+		ID:      id,
+		Cols:    cols,
+		Rows:    rows,
+		screen:  scr,
+		cmd:     cmd,
+		ptmx:    ptmx,
+		ptmxW:   ptmxW,
+		ioctlFD: ctlFD,
+		conn:    conn,
+		done:    make(chan int, 1),
+		closed:  make(chan struct{}),
+		parseQ:  newParseQueue(parseQueueBudget),
+		sizeQ:   newSizeCoalescer(),
 	}
 	s.parseDone.Add(1)
 	s.resizeDone.Add(1)
@@ -164,7 +162,6 @@ func (s *Session) Close() {
 		if s.closed != nil {
 			close(s.closed)
 		}
-		s.wakeParse()
 		s.parseDone.Wait()
 		s.resizeDone.Wait()
 		if s.screen != nil {
@@ -243,34 +240,12 @@ func (s *Session) enqueueParse(p []byte, cprEnds []int) {
 	if start < len(p) {
 		s.parseQ.enqueue(p[start:], false)
 	}
-	s.wakeParse()
-}
-
-func (s *Session) wakeParse() {
-	if s == nil || s.parseSig == nil {
-		return
-	}
-	select {
-	case s.parseSig <- struct{}{}:
-	default:
-	}
 }
 
 func (s *Session) parseLoop() {
 	defer s.parseDone.Done()
 	for {
-		select {
-		case <-s.closed:
-			return
-		case <-s.parseSig:
-			s.drainParse()
-		}
-	}
-}
-
-func (s *Session) drainParse() {
-	for {
-		item, ok := s.parseQ.pop()
+		item, ok := s.parseQ.popWait()
 		if !ok {
 			return
 		}

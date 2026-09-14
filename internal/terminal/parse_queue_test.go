@@ -70,6 +70,36 @@ func TestParseQueueBarrierIgnoresLaterItems(t *testing.T) {
 	}
 }
 
+func TestParseQueuePopWaitWakesOnEnqueue(t *testing.T) {
+	q := newParseQueue(1024)
+	done := make(chan parseItem, 1)
+	go func() {
+		item, ok := q.popWait()
+		if ok {
+			done <- item
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("popWait returned before enqueue")
+	case <-time.After(30 * time.Millisecond):
+	}
+	if _, ok := q.enqueue([]byte("Z"), false); !ok {
+		t.Fatal("enqueue")
+	}
+	select {
+	case item := <-done:
+		if string(item.data) != "Z" {
+			t.Fatalf("got %q", item.data)
+		}
+	case <-time.After(time.Second):
+		q.stop()
+		t.Fatal("popWait did not wake on enqueue")
+	}
+	q.stop()
+}
+
 func TestParseQueueStopUnblocksWait(t *testing.T) {
 	q := newParseQueue(1024)
 	seq, _ := q.enqueue([]byte("A"), false)

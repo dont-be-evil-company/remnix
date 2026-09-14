@@ -45,6 +45,15 @@ type Screen struct {
 	beforeWrite  func() // tests: stall Write without blocking the PTY pump
 }
 
+func (s *Screen) setBeforeWrite(fn func()) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.beforeWrite = fn
+	s.mu.Unlock()
+}
+
 func newScreen(cols, rows int) *Screen {
 	if cols < 1 {
 		cols = 80
@@ -149,7 +158,10 @@ func (s *Screen) Write(p []byte) []TerminalEvent {
 	if s == nil {
 		return nil
 	}
-	if hook := s.beforeWrite; hook != nil {
+	s.mu.Lock()
+	hook := s.beforeWrite
+	s.mu.Unlock()
+	if hook != nil {
 		hook()
 	}
 	s.mu.Lock()

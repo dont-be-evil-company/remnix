@@ -491,13 +491,13 @@ func stallScreenWrite(t *testing.T, sess *Session) (blocked <-chan struct{}, rel
 		once.Do(func() { close(stall) })
 	}
 	t.Cleanup(release)
-	sess.screen.beforeWrite = func() {
+	sess.screen.setBeforeWrite(func() {
 		select {
 		case hit <- struct{}{}:
 		default:
 		}
 		<-stall
-	}
+	})
 	return hit, release
 }
 
@@ -516,6 +516,34 @@ func readFrameDataUntil(t *testing.T, conn net.Conn, d time.Duration, needle str
 		}
 		b.Write(payload)
 		if needle == "" || strings.Contains(b.String(), needle) {
+			return b.String()
+		}
+	}
+	return b.String()
+}
+
+func readFrameDataUntilAll(t *testing.T, conn net.Conn, d time.Duration, needles ...string) string {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	var b strings.Builder
+	for time.Now().Before(deadline) {
+		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		kind, payload, err := ReadFrame(conn)
+		if err != nil {
+			continue
+		}
+		if kind != FrameData && kind != FrameRaw {
+			continue
+		}
+		b.Write(payload)
+		all := true
+		for _, n := range needles {
+			if n != "" && !strings.Contains(b.String(), n) {
+				all = false
+				break
+			}
+		}
+		if all {
 			return b.String()
 		}
 	}
@@ -593,7 +621,7 @@ func TestLeaveAltStillSendsIdleReset(t *testing.T) {
 	}
 	defer sess.Close()
 
-	got := readFrameDataUntil(t, client, 3*time.Second, "\x1b[=0;1u")
+	got := readFrameDataUntilAll(t, client, 3*time.Second, "LEFTALT", "\x1b[=0;1u")
 	if !strings.Contains(got, "LEFTALT") {
 		t.Fatalf("missing LEFTALT marker\n%s", trimForLog(got))
 	}
@@ -658,19 +686,17 @@ func TestParseQueueSaturationDoesNotBlockPump(t *testing.T) {
 	if err := WriteFrame(client, FrameData, payload); err != nil {
 		t.Fatal(err)
 	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(col.snapshot(), "YYYY") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(col.snapshot(), "YYYY") {
+		t.Fatal("PTY forwarding blocked while the parser was stalled")
+	}
 	select {
 	case <-blocked:
 	case <-time.After(2 * time.Second):
 		t.Fatal("parser never received the stalled chunk")
-	}
-	if got := col.snapshot(); !strings.Contains(got, "YYYY") {
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) && !strings.Contains(col.snapshot(), "YYYY") {
-			time.Sleep(5 * time.Millisecond)
-		}
-		if !strings.Contains(col.snapshot(), "YYYY") {
-			t.Fatal("PTY forwarding blocked while the parser was stalled")
-		}
 	}
 
 	for i := 0; i < 8; i++ {
@@ -678,7 +704,7 @@ func TestParseQueueSaturationDoesNotBlockPump(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		st := sess.parseQ.stats()
 		if st.queuedBytes > parseQueueBudget {

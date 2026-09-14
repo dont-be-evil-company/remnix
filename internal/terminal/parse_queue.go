@@ -83,6 +83,7 @@ func (q *parseQueue) enqueue(data []byte, cpr bool) (seq uint64, ok bool) {
 	if q.queuedBytes > q.maxQueued {
 		q.maxQueued = q.queuedBytes
 	}
+	q.cond.Broadcast()
 	return seq, true
 }
 
@@ -92,6 +93,23 @@ func (q *parseQueue) pop() (parseItem, bool) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.popLocked()
+}
+
+// popWait blocks until an item is available or the queue is stopped.
+func (q *parseQueue) popWait() (parseItem, bool) {
+	if q == nil {
+		return parseItem{}, false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.items) == 0 && !q.stopped {
+		q.cond.Wait()
+	}
+	return q.popLocked()
+}
+
+func (q *parseQueue) popLocked() (parseItem, bool) {
 	if len(q.items) == 0 {
 		return parseItem{}, false
 	}
