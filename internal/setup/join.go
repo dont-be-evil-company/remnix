@@ -7,6 +7,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/tui/wizard"
 )
 
@@ -32,7 +33,7 @@ func RequireValidRemote(ctx context.Context, a *app.App) error {
 func ConfigureJoin(ctx context.Context, a *app.App) error {
 	cfg := a.Config
 	if cfg.DeviceName == "" {
-		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Device name").Value(&cfg.DeviceName))).RunWithContext(ctx)
+		_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("Device name").Value(&cfg.DeviceName))).RunWithContext(ctx)
 	}
 	ep, err := wizard.AddEndpoint(ctx, cfg, true)
 	if err != nil {

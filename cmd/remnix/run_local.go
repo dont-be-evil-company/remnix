@@ -438,6 +438,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		IconCompletion:     cfg.IconCompletion(),
 		PtyProxyEnabled:    cfg.PtyProxy.IsEnabled(),
 		AttachBin:          attach,
+		ColorAccent:        cfg.UI.Colors.AccentOrDefault(),
+		ColorSelect:        cfg.UI.Colors.SelectOrDefault(),
+		ColorText:          cfg.UI.Colors.TextOrDefault(),
+		ColorMuted:         cfg.UI.Colors.MutedOrDefault(),
 	})
 	if err != nil {
 		return err

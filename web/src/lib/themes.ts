@@ -16,6 +16,7 @@ export type RemnixColors = {
 	title: string;
 	muted: string;
 	rule: string;
+	select: string;
 	badge: string;
 	duration: string;
 	failed: string;
@@ -53,6 +54,7 @@ function colorsToYaml(colors: RemnixColors): string {
         title: "${hex(colors.title)}"
         muted: "${hex(colors.muted)}"
         rule: "${hex(colors.rule)}"
+        select: "${hex(colors.select)}"
         badge: "${hex(colors.badge)}"
         duration: "${hex(colors.duration)}"
         failed: "${hex(colors.failed)}"
@@ -87,6 +89,7 @@ const catppuccinLatte = flavor('latte', 'Latte', '#EFF1F5', {
 	title: '#8839EF',
 	muted: '#ACB0BE',
 	rule: '#CCD0DA',
+	select: '#CCD0DA',
 	badge: '#1E66F5',
 	duration: '#40A02B',
 	failed: '#D20F39',
@@ -111,6 +114,7 @@ const catppuccinFrappe = flavor('frappe', 'Frappé', '#303446', {
 	title: '#CA9EE6',
 	muted: '#626880',
 	rule: '#414559',
+	select: '#414559',
 	badge: '#8CAAEE',
 	duration: '#A6D189',
 	failed: '#E78284',
@@ -135,6 +139,7 @@ const catppuccinMacchiato = flavor('macchiato', 'Macchiato', '#24273A', {
 	title: '#C6A0F6',
 	muted: '#5B6078',
 	rule: '#363A4F',
+	select: '#363A4F',
 	badge: '#8AADF4',
 	duration: '#A6DA95',
 	failed: '#ED8796',
@@ -159,6 +164,7 @@ const catppuccinMocha = flavor('mocha', 'Mocha', '#1E1E2E', {
 	title: '#CBA6F7',
 	muted: '#585B70',
 	rule: '#313244',
+	select: '#313244',
 	badge: '#89B4FA',
 	duration: '#A6E3A1',
 	failed: '#F38BA8',
@@ -183,6 +189,7 @@ const dracula = palette('#282A36', {
 	title: '#BD93F9',
 	muted: '#6272A4',
 	rule: '#44475A',
+	select: '#44475A',
 	badge: '#8BE9FD',
 	duration: '#50FA7B',
 	failed: '#FF5555',
@@ -207,6 +214,7 @@ const oneDarkPro = palette('#282C34', {
 	title: '#61AFEF',
 	muted: '#5C6370',
 	rule: '#3E4451',
+	select: '#3E4451',
 	badge: '#61AFEF',
 	duration: '#98C379',
 	failed: '#E06C75',
@@ -231,6 +239,7 @@ const tokyoNight = palette('#1A1B26', {
 	title: '#7AA2F7',
 	muted: '#565F89',
 	rule: '#414868',
+	select: '#292E42',
 	badge: '#7AA2F7',
 	duration: '#9ECE6A',
 	failed: '#F7768E',
@@ -255,6 +264,7 @@ const synthwave84 = palette('#262335', {
 	title: '#FF7EDB',
 	muted: '#848BBD',
 	rule: '#495495',
+	select: '#2A2139',
 	badge: '#03EDF9',
 	duration: '#72F1B8',
 	failed: '#FE4450',
@@ -279,6 +289,7 @@ const vhsEra = palette('#161616', {
 	title: '#C49BFF',
 	muted: '#8D8D8D',
 	rule: '#393939',
+	select: '#262626',
 	badge: '#33B1FF',
 	duration: '#55E07A',
 	failed: '#FF4D6D',
@@ -303,6 +314,7 @@ const monokaiPro = palette('#2D2A2E', {
 	title: '#AB9DF2',
 	muted: '#727072',
 	rule: '#403E41',
+	select: '#403E41',
 	badge: '#78DCE8',
 	duration: '#A9DC76',
 	failed: '#FF6188',

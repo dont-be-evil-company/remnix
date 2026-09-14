@@ -199,7 +199,12 @@ func runRemoteBrowse(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), res.Path)
 		return nil
 	}
-	res, err := picker.Run(rclonetr.NewBrowser(rt), picker.Options{Title: "Browse remote", ConfirmDest: false})
+	res, err := picker.Run(rclonetr.NewBrowser(rt), picker.Options{
+		Title:       "Browse remote",
+		ConfirmDest: false,
+		Accent:      a.Config.UI.Colors.AccentOrDefault(),
+		SelectBg:    a.Config.UI.Colors.SelectOrDefault(),
+	})
 	if err != nil {
 		return err
 	}

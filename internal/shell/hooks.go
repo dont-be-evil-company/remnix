@@ -18,6 +18,10 @@ type Options struct {
 	IconCompletion     string
 	PtyProxyEnabled    bool
 	AttachBin          string
+	ColorAccent        string
+	ColorSelect        string
+	ColorText          string
+	ColorMuted         string
 }
 
 func Integration(shellName, binary string, opts Options) (string, error) {
@@ -521,7 +525,7 @@ typeset -g __remnix_suggest_icon_typed=%s
 typeset -g __remnix_suggest_icon_history=%s
 typeset -g __remnix_suggest_icon_completion=%s
 `, max, zshQuote(typed), zshQuote(histIcon), zshQuote(compIcon))
-	out += zshSuggestMenuBody()
+	out += zshSuggestMenuBody(opts)
 	if opts.SuggestCompletions {
 		out += zshSuggestCompletions(true)
 	}
@@ -869,15 +873,18 @@ bindkey -M viins $'\t' remnix-suggest-complete
 	return out
 }
 
-func zshSuggestMenuBody() string {
-	return `
-# Match internal/tui Catppuccin: accent #F5C2E7, text #CDD6F4, muted #585B70,
-# rule/surface #313244, base #1E1E2E.
-typeset -g __remnix_menu_hl_border='fg=#585B70,bg=#1E1E2E'
-typeset -g __remnix_menu_hl_row='fg=#CDD6F4,bg=#1E1E2E'
-typeset -g __remnix_menu_hl_sel='fg=#F5C2E7,bold,bg=#313244'
-typeset -g __remnix_menu_hl_desc='fg=#585B70,bg=#1E1E2E'
-
+func zshSuggestMenuBody(opts Options) string {
+	accent := menuColor(opts.ColorAccent, "#F5C2E7")
+	text := menuColor(opts.ColorText, "#CDD6F4")
+	muted := menuColor(opts.ColorMuted, "#585B70")
+	sel := menuColor(opts.ColorSelect, "#313244")
+	return fmt.Sprintf(`
+# Match internal/tui colors. Selected row uses ui.colors.select.
+typeset -g __remnix_menu_hl_border='fg=%s,bg=#1E1E2E'
+typeset -g __remnix_menu_hl_row='fg=%s,bg=#1E1E2E'
+typeset -g __remnix_menu_hl_sel='fg=%s,bold,bg=%s'
+typeset -g __remnix_menu_hl_desc='fg=%s,bg=#1E1E2E'
+`, muted, text, accent, sel, muted) + `
 __remnix_suggest_highlight() {
   region_highlight=(${region_highlight:#*memo=remnix-suggest*})
   local suf="${__remnix_suggest_suffix:-}"
@@ -1305,6 +1312,14 @@ zle -N remnix-suggest-dismiss
   bindkey '\e' remnix-suggest-dismiss
 }
 `
+}
+
+func menuColor(v, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func zshQuote(s string) string {

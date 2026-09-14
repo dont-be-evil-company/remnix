@@ -10,6 +10,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/config"
 	"github.com/dont-be-evil-company/remnix/internal/repository"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
 )
 
@@ -30,7 +31,7 @@ type Outcome struct {
 
 func ChooseIntent(ctx context.Context, preselect Intent) (Intent, error) {
 	intent := preselect
-	form := huh.NewForm(huh.NewGroup(
+	form := tui.NewForm(huh.NewGroup(
 		huh.NewSelect[Intent]().
 			Title("What would you like to do?").
 			Options(
@@ -49,7 +50,7 @@ func ChooseIntent(ctx context.Context, preselect Intent) (Intent, error) {
 
 func ChooseTransport(ctx context.Context) (string, error) {
 	tr := "rclone"
-	form := huh.NewForm(huh.NewGroup(
+	form := tui.NewForm(huh.NewGroup(
 		huh.NewSelect[string]().
 			Title("How should remnix synchronize your encrypted history?").
 			Description("rclone gives remnix direct access to cloud and network storage while your history remains encrypted by remnix. No remnix account or server is required.").
@@ -70,7 +71,17 @@ func ChooseTransport(ctx context.Context) (string, error) {
 
 func PickLocalDir(ctx context.Context, title string, confirm bool) (picker.Result, error) {
 	start, _ := os.UserHomeDir()
-	return picker.Run(picker.NewLocal(start), picker.Options{Title: title, Start: start, ConfirmDest: confirm, CreateMode: confirm})
+	return picker.Run(picker.NewLocal(start), themedPicker(picker.Options{Title: title, Start: start, ConfirmDest: confirm, CreateMode: confirm}))
+}
+
+func themedPicker(opts picker.Options) picker.Options {
+	cfg, err := config.Load()
+	if err != nil {
+		return opts
+	}
+	opts.Accent = cfg.UI.Colors.AccentOrDefault()
+	opts.SelectBg = cfg.UI.Colors.SelectOrDefault()
+	return opts
 }
 
 func uniqueEndpointID(cfg *config.Config, want string) string {
@@ -114,11 +125,11 @@ func AddEndpoint(ctx context.Context, cfg *config.Config, join bool) (config.End
 		return ConfigureRcloneRemoteMode(ctx, cfg, join)
 	case "rsync":
 		var remote string
-		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&remote))).RunWithContext(ctx)
+		_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("rsync remote").Value(&remote))).RunWithContext(ctx)
 		return config.Endpoint{ID: uniqueEndpointID(cfg, "rsync"), Type: config.TypeRsync, Remote: remote, Enabled: true}, nil
 	case "scp":
 		ep := config.Endpoint{Type: config.TypeSCP, Enabled: true}
-		_ = huh.NewForm(huh.NewGroup(
+		_ = tui.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Host").Value(&ep.Host),
 			huh.NewInput().Title("User").Value(&ep.User),
 			huh.NewInput().Title("Path").Value(&ep.Path),

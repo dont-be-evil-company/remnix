@@ -439,9 +439,13 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 		}
 		label = label + strings.Repeat(" ", max(0, labelw-lipgloss.Width(label)))
 		cmdPart := icon + " " + label
+		th := m.theme
+		if i == m.cursor {
+			th = th.ForSelect()
+		}
 		switch i {
 		case m.cursor:
-			cmdPart = m.theme.Accent.Render(cmdPart)
+			cmdPart = th.Accent.Render(cmdPart)
 		case 0:
 			cmdPart = m.theme.Muted.Render(cmdPart)
 		}
@@ -450,9 +454,17 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 			if lipgloss.Width(descr) > descBudget {
 				descr = ansi.Truncate(descr, descBudget, "...")
 			}
-			line = cmdPart + "  " + m.theme.Muted.Render(descr)
+			style := m.theme.Muted
+			if i == m.cursor {
+				style = th.Muted
+			}
+			line = cmdPart + "  " + style.Render(descr)
 		}
-		b.WriteString(clampLine(line, inner))
+		line = clampLine(line, inner)
+		if i == m.cursor {
+			line = m.theme.PaintSelect(line, inner)
+		}
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	for i := end - start; i < listH; i++ {

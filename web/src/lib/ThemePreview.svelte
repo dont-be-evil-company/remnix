@@ -14,7 +14,7 @@
 		<span style="color: {colors.badge}">local</span>
 	</div>
 	<div class="mb-1" style="color: {colors.rule}">────────────────────────</div>
-	<div>
+	<div class="rounded-sm px-1" style="background: {colors.select}">
 		<span class="font-bold" style="color: {colors.accent}">❯</span>
 		<span class="font-bold" style="color: {colors.syntax.command}">git</span>
 		<span class="font-bold" style="color: {colors.syntax.keyword}">commit</span>

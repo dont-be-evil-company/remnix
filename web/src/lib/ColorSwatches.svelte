@@ -6,6 +6,7 @@
 	const swatches = $derived([
 		colors.accent,
 		colors.title,
+		colors.select,
 		colors.badge,
 		colors.duration,
 		colors.failed,

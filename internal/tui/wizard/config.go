@@ -7,12 +7,13 @@ import (
 
 	"charm.land/huh/v2"
 	"github.com/dont-be-evil-company/remnix/internal/config"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 )
 
 func RunConfig(ctx context.Context, cfg *config.Config) error {
 	for {
 		action := "save"
-		form := huh.NewForm(huh.NewGroup(
+		form := tui.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Configuration").Options(
 				huh.NewOption("Enable or disable synchronization", "enable"),
 				huh.NewOption("Manage sync endpoints", "endpoints"),
@@ -31,7 +32,7 @@ func RunConfig(ctx context.Context, cfg *config.Config) error {
 			return nil
 		case "enable":
 			enable := cfg.Sync.IsEnabled()
-			if err := huh.NewForm(huh.NewGroup(
+			if err := tui.NewForm(huh.NewGroup(
 				huh.NewConfirm().Title("Enable synchronization?").
 					Description("Local history is kept either way. Remote data is not deleted.").
 					Value(&enable),
@@ -45,7 +46,7 @@ func RunConfig(ctx context.Context, cfg *config.Config) error {
 			}
 		case "callbacks":
 			raw := strings.Join(cfg.Sync.Callbacks, "\n")
-			if err := huh.NewForm(huh.NewGroup(
+			if err := tui.NewForm(huh.NewGroup(
 				huh.NewInput().Title("Callbacks (one per line, or | separated)").
 					Description("Optional commands after a successful sync. Do not put secrets here.").
 					Value(&raw),
@@ -79,7 +80,7 @@ func editEndpoints(ctx context.Context, cfg *config.Config) error {
 			opts = append(opts, huh.NewOption("Remove "+label, "rm:"+ep.ID))
 		}
 		opts = append(opts, huh.NewOption("Back", "back"))
-		form := huh.NewForm(huh.NewGroup(
+		form := tui.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Sync endpoints").Options(opts...).Value(&action),
 		))
 		if err := form.RunWithContext(ctx); err != nil {

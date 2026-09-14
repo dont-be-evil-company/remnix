@@ -18,6 +18,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/device"
 	"github.com/dont-be-evil-company/remnix/internal/repository"
 	"github.com/dont-be-evil-company/remnix/internal/sync/syncer"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/tui/wizard"
 )
 
@@ -71,7 +72,7 @@ func Run(ctx context.Context, a *app.App) (Result, error) {
 		offerDaemon(ctx)
 		return Result{Joined: true}, nil
 	}
-	if err := huh.NewForm(huh.NewGroup(
+	if err := tui.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Device name").Value(&cfg.DeviceName),
 		huh.NewConfirm().Title("Enroll a hardware key").Value(&enrollHW),
 	)).RunWithContext(ctx); err != nil {
@@ -217,7 +218,7 @@ func finishCreate(ctx context.Context, a *app.App, enrollHW bool, marker *State)
 
 func offerDaemon(ctx context.Context) {
 	startDaemon := true
-	dform := huh.NewForm(huh.NewGroup(
+	dform := tui.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title("Start sync at login on this device?").Value(&startDaemon),
 	))
 	if err := dform.RunWithContext(ctx); err != nil || !startDaemon {

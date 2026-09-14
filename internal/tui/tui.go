@@ -387,7 +387,11 @@ func (m model) renderList(w, listH int) string {
 		b.WriteByte('\n')
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(clampLine(m.renderRow(m.visible[i], i == m.cursor, w, now), w))
+		line := clampLine(m.renderRow(m.visible[i], i == m.cursor, w, now), w)
+		if i == m.cursor {
+			line = m.theme.PaintSelect(line, w)
+		}
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -415,26 +419,27 @@ func (m model) listWindow(listH int) (start, end int) {
 }
 
 func (m model) renderRow(e history.Entry, selected bool, w int, now time.Time) string {
-	durStyle := m.theme.Duration
+	th := m.theme
+	if selected {
+		th = th.ForSelect()
+	}
+	durStyle := th.Duration
 	if failed(e) {
-		durStyle = m.theme.Failed
+		durStyle = th.Failed
 	}
 	marker := " "
 	if selected {
-		marker = m.theme.Accent.Render(m.theme.Cursor())
+		marker = th.Accent.Render(th.Cursor())
 	}
 	dur := alignRight(durStyle.Render(formatDuration(e.DurationMs)), durCol)
-	rel := alignRight(m.theme.Time.Render(formatRelative(e.StartTS, now)), relCol)
+	rel := alignRight(th.Time.Render(formatRelative(e.StartTS, now)), relCol)
 	prefix := alignRight(marker, markCol) + " " + dur + "  " + rel + "  "
 	remain := w - lipgloss.Width(prefix)
 	if remain < 8 {
 		remain = 8
 	}
 	cmdText := strings.ReplaceAll(strings.ReplaceAll(e.Command, "\r", ""), "\n", " ")
-	cmd := ansi.Truncate(HighlightCommandTheme(m.theme, cmdText), remain, "...")
-	if selected {
-		cmd = lipgloss.NewStyle().Bold(true).Render(cmd)
-	}
+	cmd := ansi.Truncate(HighlightCommandTheme(th, cmdText), remain, "...")
 	return prefix + cmd
 }
 

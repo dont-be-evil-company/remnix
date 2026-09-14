@@ -334,6 +334,25 @@ func TestZshSuggestMenu(t *testing.T) {
 	}
 }
 
+func TestZshSuggestMenuSelectColor(t *testing.T) {
+	on, err := Integration("zsh", "remnix", Options{
+		SuggestEnabled: true,
+		SuggestMenu:    true,
+		SuggestAccept:  []string{"Right"},
+		ColorAccent:    "#00FF00",
+		ColorSelect:    "#112233",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(on, "fg=#00FF00,bold,bg=#112233") {
+		t.Fatal("custom select color should appear in __remnix_menu_hl_sel")
+	}
+	if strings.Contains(on, "fg=#F5C2E7,bold,bg=#313244") {
+		t.Fatal("default mocha select highlight should not be used when colors are set")
+	}
+}
+
 func TestZshSuggestCompletions(t *testing.T) {
 	on, err := Integration("zsh", "remnix", Options{
 		SuggestEnabled:     true,

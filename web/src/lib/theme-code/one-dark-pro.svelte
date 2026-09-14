@@ -13,6 +13,7 @@
         title: "#61AFEF"
         muted: "#5C6370"
         rule: "#3E4451"
+        select: "#3E4451"
         badge: "#61AFEF"
         duration: "#98C379"
         failed: "#E06C75"

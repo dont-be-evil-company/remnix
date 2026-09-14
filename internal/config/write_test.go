@@ -34,6 +34,7 @@ func TestMarshalUserConfigInitialWriteIncludesDefaults(t *testing.T) {
 		"- Right",
 		"height: 100",
 		`accent: "#F5C2E7"`,
+		`select: "#313244"`,
 		`command: "#89B4FA"`,
 		`cursor: "❯"`,
 		`separator: "·"`,

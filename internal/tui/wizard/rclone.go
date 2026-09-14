@@ -14,6 +14,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/transport"
 	rclonetr "github.com/dont-be-evil-company/remnix/internal/transport/rclone"
 	"github.com/dont-be-evil-company/remnix/internal/transport/rclone/providers"
+	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/tui/picker"
 	"github.com/rclone/rclone/fs/rc"
 )
@@ -51,7 +52,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 		}
 		opts = append(opts, huh.NewOption("Generic rclone backend (advanced)", "custom"))
 		id := "google-drive"
-		form := huh.NewForm(huh.NewGroup(
+		form := tui.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Provider").Description("Tokens live in the local data directory (next to local.yaml), not in config.yaml.").Options(opts...).Value(&id),
 		))
 		if err := form.RunWithContext(ctx); err != nil {
@@ -74,14 +75,14 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			for _, n := range types {
 				to = append(to, huh.NewOption(n, n))
 			}
-			form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Backend").Options(to...).Value(&t)))
+			form := tui.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Backend").Options(to...).Value(&t)))
 			if err := form.RunWithContext(ctx); err != nil {
 				return config.Endpoint{}, err
 			}
 			backend = t
 		}
 		logical = "remnix-" + def.ID
-		_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Remote name").Value(&logical))).RunWithContext(ctx)
+		_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("Remote name").Value(&logical))).RunWithContext(ctx)
 		params, err = collectProviderParams(ctx, def)
 		if err != nil {
 			return config.Endpoint{}, err
@@ -132,7 +133,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 		}
 		if tr.Capabilities().VirtualDirs && st.State == transport.HealthPermissionDenied {
 			extra := ""
-			form := huh.NewForm(huh.NewGroup(
+			form := tui.NewForm(huh.NewGroup(
 				huh.NewInput().
 					Title("Prefix to list").
 					Description("ListBucket was denied at this path. If IAM uses s3:prefix, enter that prefix (for example remnix). Leave empty to abort.").
@@ -157,7 +158,7 @@ func ConfigureRcloneRemoteMode(ctx context.Context, cfg *config.Config, join boo
 			return config.Endpoint{}, fmt.Errorf("connection test failed (%s): %s", st.State, redact.String(st.Message))
 		}
 		save := false
-		_ = huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Save even though the connection test failed?").Value(&save))).RunWithContext(ctx)
+		_ = tui.NewForm(huh.NewGroup(huh.NewConfirm().Title("Save even though the connection test failed?").Value(&save))).RunWithContext(ctx)
 		if !save {
 			rclonetr.DeleteSection(section)
 			return config.Endpoint{}, fmt.Errorf("cancelled")
@@ -221,7 +222,7 @@ func maybeImportRemote(ctx context.Context) (string, error) {
 		return "", err
 	}
 	use := false
-	form := huh.NewForm(huh.NewGroup(
+	form := tui.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title("Import a copy of an existing rclone remote?").
 			Description("The original ~/.config/rclone/rclone.conf is not modified.").
 			Value(&use),
@@ -234,12 +235,12 @@ func maybeImportRemote(ctx context.Context) (string, error) {
 	for _, n := range names {
 		opts = append(opts, huh.NewOption(n, n))
 	}
-	form = huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("User rclone remote").Options(opts...).Value(&src)))
+	form = tui.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("User rclone remote").Options(opts...).Value(&src)))
 	if err := form.RunWithContext(ctx); err != nil {
 		return "", err
 	}
 	dst := src
-	_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Name inside remnix").Value(&dst))).RunWithContext(ctx)
+	_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("Name inside remnix").Value(&dst))).RunWithContext(ctx)
 	if err := rclonetr.ImportUserRemote(src, dst); err != nil {
 		return "", err
 	}
@@ -249,7 +250,7 @@ func maybeImportRemote(ctx context.Context) (string, error) {
 func promptBucketPath(ctx context.Context) (string, error) {
 	bucket := ""
 	prefix := ""
-	form := huh.NewForm(huh.NewGroup(
+	form := tui.NewForm(huh.NewGroup(
 		huh.NewInput().
 			Title("Bucket").
 			Description("Bucket name only, for example dont-be-evil-company. Do not include s3://.").
@@ -297,12 +298,12 @@ func pickRcloneFolder(ctx context.Context, tr *rclonetr.Transport, logical strin
 	if join {
 		title += " - pick the existing remnix folder"
 	}
-	res, err := picker.Run(rclonetr.NewBrowser(tr), picker.Options{
+	res, err := picker.Run(rclonetr.NewBrowser(tr), themedPicker(picker.Options{
 		Title:       title,
 		Start:       start,
 		CreateMode:  true,
 		ConfirmDest: false,
-	})
+	}))
 	if err != nil {
 		return "", err
 	}
@@ -332,7 +333,7 @@ func resolveRcloneDest(ctx context.Context, section, path string, rooted *rclone
 		} else {
 			desc += " Create a dedicated remnix subfolder so other files on this remote are not scanned."
 		}
-		form := huh.NewForm(huh.NewGroup(
+		form := tui.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("This folder is not a remnix repository yet").
 				Description(desc).
 				Options(
@@ -385,7 +386,7 @@ func collectProviderParams(ctx context.Context, def providers.Definition) (rc.Pa
 	switch def.ID {
 	case "s3":
 		kind := "AWS"
-		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("S3 flavor").Options(
+		form := tui.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("S3 flavor").Options(
 			huh.NewOption("Amazon AWS", "AWS"),
 			huh.NewOption("S3-compatible (MinIO, R2, B2, ...)", "Other"),
 		).Value(&kind)))
@@ -395,14 +396,14 @@ func collectProviderParams(ctx context.Context, def providers.Definition) (rc.Pa
 		p["provider"] = kind
 		if kind == "Other" {
 			ep := ""
-			_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Endpoint URL").Value(&ep))).RunWithContext(ctx)
+			_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("Endpoint URL").Value(&ep))).RunWithContext(ctx)
 			if ep != "" {
 				p["endpoint"] = ep
 			}
 		}
 	case "gcs":
 		mode := "adc"
-		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Google Cloud auth").Options(
+		form := tui.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Google Cloud auth").Options(
 			huh.NewOption("Application Default Credentials", "adc"),
 			huh.NewOption("Service account JSON file", "sa"),
 		).Value(&mode)))
@@ -413,7 +414,7 @@ func collectProviderParams(ctx context.Context, def providers.Definition) (rc.Pa
 			p["env_auth"] = true
 		} else {
 			sa := ""
-			_ = huh.NewForm(huh.NewGroup(huh.NewInput().Title("Service account JSON path").Value(&sa))).RunWithContext(ctx)
+			_ = tui.NewForm(huh.NewGroup(huh.NewInput().Title("Service account JSON path").Value(&sa))).RunWithContext(ctx)
 			sa = config.Expand(sa)
 			if sa == "" {
 				return nil, fmt.Errorf("service account file required")
@@ -424,7 +425,7 @@ func collectProviderParams(ctx context.Context, def providers.Definition) (rc.Pa
 		fmt.Fprintln(os.Stderr, "If the URL is http:// (not https://), credentials may be sent in the clear.")
 	case "smb":
 		guest := false
-		_ = huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Connect as guest?").Value(&guest))).RunWithContext(ctx)
+		_ = tui.NewForm(huh.NewGroup(huh.NewConfirm().Title("Connect as guest?").Value(&guest))).RunWithContext(ctx)
 		if guest {
 			p["spn"] = ""
 			p["user"] = "guest"
@@ -478,14 +479,14 @@ func askQuestion(ctx context.Context, q *rclonetr.Question) (string, error) {
 			}
 			opts = append(opts, huh.NewOption(label, c.Value))
 		}
-		form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title(q.Name).Description(help).Options(opts...).Value(&ans)))
+		form := tui.NewForm(huh.NewGroup(huh.NewSelect[string]().Title(q.Name).Description(help).Options(opts...).Value(&ans)))
 		return ans, form.RunWithContext(ctx)
 	}
 	in := huh.NewInput().Title(q.Name).Description(help).Value(&ans)
 	if q.IsPassword {
 		in = in.EchoMode(huh.EchoModePassword)
 	}
-	form := huh.NewForm(huh.NewGroup(in))
+	form := tui.NewForm(huh.NewGroup(in))
 	return ans, form.RunWithContext(ctx)
 }
 

@@ -132,6 +132,7 @@
             "title": { "$ref": "#/definitions/color" },
             "muted": { "$ref": "#/definitions/color" },
             "rule": { "$ref": "#/definitions/color" },
+            "select": { "$ref": "#/definitions/color" },
             "badge": { "$ref": "#/definitions/color" },
             "duration": { "$ref": "#/definitions/color" },
             "failed": { "$ref": "#/definitions/color" },

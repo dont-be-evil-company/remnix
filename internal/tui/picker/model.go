@@ -38,6 +38,8 @@ type Options struct {
 	Start       string
 	ConfirmDest bool
 	CreateMode  bool
+	Accent      string
+	SelectBg    string
 }
 
 type Model struct {
@@ -619,7 +621,11 @@ func (m Model) View() tea.View {
 			if i == m.destCursor {
 				cur = "> "
 			}
-			fmt.Fprintf(&b, "%s%s\n", cur, destChoiceLabel(ch, m.dest))
+			line := cur + destChoiceLabel(ch, m.dest)
+			if i == m.destCursor {
+				line = m.paintSelect(line)
+			}
+			fmt.Fprintf(&b, "%s\n", line)
 		}
 		return altView(b.String())
 	}
@@ -635,7 +641,11 @@ func (m Model) View() tea.View {
 		if e.Inaccessible {
 			mark = " (permission denied)"
 		}
-		fmt.Fprintf(&b, "%s%s%s\n", cur, e.Name, mark)
+		line := cur + e.Name + mark
+		if i == m.cursor {
+			line = m.paintSelect(line)
+		}
+		fmt.Fprintf(&b, "%s\n", line)
 	}
 	if m.mode == modeMkdir || m.mode == modeRename || m.mode == modeDeleteRecursive || m.mode == modeFilter || m.mode == modePath {
 		fmt.Fprintf(&b, "\n%s %s", m.status, m.prompt.View())
@@ -695,6 +705,23 @@ func destChoiceLabel(ch DestChoice, d DestReport) string {
 	default:
 		return ""
 	}
+}
+
+func (m Model) paintSelect(s string) string {
+	bg := strings.TrimSpace(m.opts.SelectBg)
+	if bg == "" {
+		bg = "#313244"
+	}
+	st := lipgloss.NewStyle().Background(lipgloss.Color(bg))
+	if fg := strings.TrimSpace(m.opts.Accent); fg != "" {
+		st = st.Foreground(lipgloss.Color(fg)).Bold(true)
+	}
+	if m.width > 2 {
+		if pad := m.width - lipgloss.Width(s); pad > 0 {
+			s += strings.Repeat(" ", pad)
+		}
+	}
+	return st.Render(s)
 }
 
 func Run(fs BrowserFS, opts Options) (Result, error) {

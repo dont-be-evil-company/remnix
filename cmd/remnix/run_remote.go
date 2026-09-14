@@ -822,7 +822,7 @@ func offerDaemonInstall(cmd *cobra.Command) {
 		return
 	}
 	startDaemon := true
-	form := huh.NewForm(huh.NewGroup(
+	form := tui.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title("Start sync at login on this device?").Value(&startDaemon),
 	))
 	if err := form.RunWithContext(cmd.Context()); err != nil || !startDaemon {

@@ -246,7 +246,9 @@ focused input). Results stay unique commands with at least one matching run.
 charts by day/month/year (`g` to cycle), hostname, and directory.
 
 Colors and icons are configurable under `ui` in `config.yaml` (Catppuccin-like
-defaults). `suggest.icons` still works as an alias. After editing config,
+defaults), including `ui.colors.select` for the selected-row background in
+search, inspect, suggest, pickers, wizards, and the zsh completion menu.
+`suggest.icons` still works as an alias. After editing config,
 `remnix daemon` reloads on SIGHUP, `remnix daemon reload`, or the next mtime poll; `remnix init` must
 be re-sourced for shell-generated glyphs.
 

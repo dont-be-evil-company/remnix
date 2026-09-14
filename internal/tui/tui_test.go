@@ -340,3 +340,46 @@ func TestSearchUsesConfigTheme(t *testing.T) {
 		t.Fatal("custom accent color should change the selected row")
 	}
 }
+
+func TestSearchUsesSelectBackground(t *testing.T) {
+	e := history.Entry{Command: "ls", StartTS: time.Unix(1, 0)}
+	custom := New([]history.Entry{e}, Options{
+		Theme: NewTheme(config.UI{Colors: config.Colors{Select: "#112233"}}),
+	})
+	got := custom.renderList(80, 1)
+	if !strings.Contains(got, "\x1b[48;2;17;34;51m") {
+		t.Fatalf("selected row should include select background:\n%q", got)
+	}
+	if strings.Count(got, "\n") > 1 {
+		t.Fatalf("select paint should stay on one row, got %q", got)
+	}
+	idx := strings.Index(got, "ls")
+	if idx < 0 {
+		t.Fatal("command text missing")
+	}
+	if !strings.Contains(got[:idx], "\x1b[48;2;17;34;51m") {
+		t.Fatal("select background should apply before the command text")
+	}
+}
+
+func TestPaintSelectMergesIntoStyledText(t *testing.T) {
+	th := NewTheme(config.UI{Colors: config.Colors{Select: "#AABBCC"}})
+	styled := th.Command.Render("git") + " " + th.Flag.Render("-m")
+	got := th.PaintSelect(styled, 40)
+	if !strings.Contains(got, "\x1b[48;2;170;187;204m") {
+		t.Fatalf("missing background: %q", got)
+	}
+	gitAt := strings.Index(got, "git")
+	flagAt := strings.Index(got, "-m")
+	if gitAt < 0 || flagAt < 0 {
+		t.Fatalf("text missing: %q", got)
+	}
+	resetThenText := strings.Contains(got[gitAt:flagAt+2], "git") && strings.Contains(got, "git")
+	if !resetThenText {
+		t.Fatalf("expected command text: %q", got)
+	}
+	// After each reset the select background must be restored so glyphs keep the fill.
+	if !strings.Contains(got, "\x1b[0m\x1b[48;2;170;187;204m") {
+		t.Fatalf("background should resume after SGR reset: %q", got)
+	}
+}

@@ -806,7 +806,11 @@ func (m inspectModel) renderInspectList(w, listH int) string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		s := m.visible[i]
-		b.WriteString(clampLine(m.renderSummaryRow(s, i == m.cursor, m.view == inspectAdvanced, m.cmdSelected(s.Command), w, now), w))
+		line := clampLine(m.renderSummaryRow(s, i == m.cursor, m.view == inspectAdvanced, m.cmdSelected(s.Command), w, now), w)
+		if i == m.cursor {
+			line = m.theme.PaintSelect(line, w)
+		}
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	for i := 0; i < listH-(end-start); i++ {
@@ -824,7 +828,11 @@ func (m inspectModel) renderRunList(w, listH int) string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		e := m.runVisible[i]
-		b.WriteString(clampLine(m.renderRunRow(e, i == m.runCursor, m.runSelected(e.ID), w, now), w))
+		line := clampLine(m.renderRunRow(e, i == m.runCursor, m.runSelected(e.ID), w, now), w)
+		if i == m.runCursor {
+			line = m.theme.PaintSelect(line, w)
+		}
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	for i := 0; i < listH-(end-start); i++ {
@@ -851,57 +859,62 @@ func listWindow(n, cursor, listH int) (start, end int) {
 }
 
 func (m inspectModel) renderSummaryRow(s history.CommandSummary, selected, showCheck, checked bool, w int, now time.Time) string {
-	durStyle := m.theme.Duration
+	th := m.theme
+	if selected {
+		th = th.ForSelect()
+	}
+	durStyle := th.Duration
 	if s.LastExit != nil && *s.LastExit != 0 {
-		durStyle = m.theme.Failed
+		durStyle = th.Failed
 	}
 	marker := " "
 	if selected {
-		marker = m.theme.Accent.Render(m.theme.Cursor())
+		marker = th.Accent.Render(th.Cursor())
 	}
 	check := ""
 	if showCheck {
 		var box string
 		if checked {
-			box = m.theme.Accent.Render("[x]")
+			box = th.Accent.Render("[x]")
 		} else {
-			box = m.theme.Muted.Render("[ ]")
+			box = th.Muted.Render("[ ]")
 		}
 		check = box + " "
 	}
-	count := alignRight(m.theme.Muted.Render(formatCount(int(s.Runs))+"×"), inspectCountCol)
-	rate := alignRight(m.theme.Muted.Render(successRate(s)), inspectRateCol)
+	count := alignRight(th.Muted.Render(formatCount(int(s.Runs))+"×"), inspectCountCol)
+	rate := alignRight(th.Muted.Render(successRate(s)), inspectRateCol)
 	dur := alignRight(durStyle.Render(formatDuration(s.LastDurationMs)), durCol)
-	rel := alignRight(m.theme.Time.Render(formatRelative(s.LastTS, now)), relCol)
+	rel := alignRight(th.Time.Render(formatRelative(s.LastTS, now)), relCol)
 	prefix := alignRight(marker, markCol) + " " + check + count + "  " + rate + "  " + dur + "  " + rel + "  "
 	remain := w - lipgloss.Width(prefix)
 	if remain < 8 {
 		remain = 8
 	}
 	cmdText := strings.ReplaceAll(strings.ReplaceAll(s.Command, "\r", ""), "\n", " ")
-	cmd := ansi.Truncate(HighlightCommandTheme(m.theme, cmdText), remain, "...")
-	if selected {
-		cmd = lipgloss.NewStyle().Bold(true).Render(cmd)
-	}
+	cmd := ansi.Truncate(HighlightCommandTheme(th, cmdText), remain, "...")
 	return prefix + cmd
 }
 
 func (m inspectModel) renderRunRow(e history.Entry, selected, checked bool, w int, now time.Time) string {
-	durStyle := m.theme.Duration
+	th := m.theme
+	if selected {
+		th = th.ForSelect()
+	}
+	durStyle := th.Duration
 	if failed(e) {
-		durStyle = m.theme.Failed
+		durStyle = th.Failed
 	}
 	marker := " "
 	if selected {
-		marker = m.theme.Accent.Render(m.theme.Cursor())
+		marker = th.Accent.Render(th.Cursor())
 	}
-	box := m.theme.Muted.Render("[ ]")
+	box := th.Muted.Render("[ ]")
 	if checked {
-		box = m.theme.Accent.Render("[x]")
+		box = th.Accent.Render("[x]")
 	}
 	dur := alignRight(durStyle.Render(formatDuration(e.DurationMs)), durCol)
-	rel := alignRight(m.theme.Time.Render(formatRelative(e.StartTS, now)), relCol)
-	exit := alignRight(m.exitLabel(e), inspectExitCol)
+	rel := alignRight(th.Time.Render(formatRelative(e.StartTS, now)), relCol)
+	exit := alignRight(exitLabel(th, e), inspectExitCol)
 	prefix := alignRight(marker, markCol) + " " + box + " " + dur + "  " + rel + "  " + exit + "  "
 	remain := w - lipgloss.Width(prefix)
 	if remain < 8 {
@@ -915,10 +928,7 @@ func (m inspectModel) renderRunRow(e history.Entry, selected, checked bool, w in
 		meta += e.Hostname
 	}
 	meta = strings.ReplaceAll(strings.ReplaceAll(meta, "\r", ""), "\n", " ")
-	body := ansi.Truncate(m.theme.Muted.Render(meta), remain, "...")
-	if selected {
-		body = lipgloss.NewStyle().Bold(true).Render(body)
-	}
+	body := ansi.Truncate(th.Muted.Render(meta), remain, "...")
 	return prefix + body
 }
 
@@ -930,15 +940,15 @@ func successRate(s history.CommandSummary) string {
 	return fmt.Sprintf("%d%%", s.Success*100/n)
 }
 
-func (m inspectModel) exitLabel(e history.Entry) string {
+func exitLabel(th Theme, e history.Entry) string {
 	if e.ExitStatus == nil {
-		return m.theme.Muted.Render("...")
+		return th.Muted.Render("...")
 	}
 	s := fmt.Sprintf("e%d", *e.ExitStatus)
 	if *e.ExitStatus != 0 {
-		return m.theme.Failed.Render(s)
+		return th.Failed.Render(s)
 	}
-	return m.theme.Duration.Render(s)
+	return th.Duration.Render(s)
 }
 
 const (

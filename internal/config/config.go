@@ -35,6 +35,7 @@ type Colors struct {
 	Title    string       `yaml:"title,omitempty"`
 	Muted    string       `yaml:"muted,omitempty"`
 	Rule     string       `yaml:"rule,omitempty"`
+	Select   string       `yaml:"select,omitempty"`
 	Badge    string       `yaml:"badge,omitempty"`
 	Duration string       `yaml:"duration,omitempty"`
 	Failed   string       `yaml:"failed,omitempty"`
@@ -369,6 +370,7 @@ func (c Colors) AccentOrDefault() string   { return colorOr(c.Accent, "#F5C2E7")
 func (c Colors) TitleOrDefault() string    { return colorOr(c.Title, "#CBA6F7") }
 func (c Colors) MutedOrDefault() string    { return colorOr(c.Muted, "#585B70") }
 func (c Colors) RuleOrDefault() string     { return colorOr(c.Rule, "#313244") }
+func (c Colors) SelectOrDefault() string   { return colorOr(c.Select, "#313244") }
 func (c Colors) BadgeOrDefault() string    { return colorOr(c.Badge, "#89B4FA") }
 func (c Colors) DurationOrDefault() string { return colorOr(c.Duration, "#A6E3A1") }
 func (c Colors) FailedOrDefault() string   { return colorOr(c.Failed, "#F38BA8") }
@@ -512,6 +514,7 @@ func (c *Config) validate() error {
 		{"ui.colors.title", c.UI.Colors.Title},
 		{"ui.colors.muted", c.UI.Colors.Muted},
 		{"ui.colors.rule", c.UI.Colors.Rule},
+		{"ui.colors.select", c.UI.Colors.Select},
 		{"ui.colors.badge", c.UI.Colors.Badge},
 		{"ui.colors.duration", c.UI.Colors.Duration},
 		{"ui.colors.failed", c.UI.Colors.Failed},

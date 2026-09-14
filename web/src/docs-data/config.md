@@ -217,17 +217,18 @@ palettes are on [themes](/themes).
 
 ### `ui.colors`
 
-| Key        | Default   | Use             |
-| ---------- | --------- | --------------- |
-| `accent`   | `#F5C2E7` | Highlights      |
-| `title`    | `#CBA6F7` | Titles          |
-| `muted`    | `#585B70` | Secondary text  |
-| `rule`     | `#313244` | Rules / borders |
-| `badge`    | `#89B4FA` | Badges          |
-| `duration` | `#A6E3A1` | Durations       |
-| `failed`   | `#F38BA8` | Failed commands |
-| `time`     | `#7F849C` | Timestamps      |
-| `text`     | `#CDD6F4` | Body text       |
+| Key        | Default   | Use                      |
+| ---------- | --------- | ------------------------ |
+| `accent`   | `#F5C2E7` | Highlights               |
+| `title`    | `#CBA6F7` | Titles                   |
+| `muted`    | `#585B70` | Secondary text           |
+| `rule`     | `#313244` | Rules / borders          |
+| `select`   | `#313244` | Selected row background  |
+| `badge`    | `#89B4FA` | Badges                   |
+| `duration` | `#A6E3A1` | Durations                |
+| `failed`   | `#F38BA8` | Failed commands          |
+| `time`     | `#7F849C` | Timestamps               |
+| `text`     | `#CDD6F4` | Body text                |
 
 ### `ui.colors.syntax`
 

@@ -84,6 +84,7 @@ ui:
         title: "#CBA6F7"
         muted: "#585B70"
         rule: "#313244"
+        select: "#313244"
         badge: "#89B4FA"
         duration: "#A6E3A1"
         failed: "#F38BA8"
