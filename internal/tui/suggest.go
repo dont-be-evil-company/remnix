@@ -627,7 +627,7 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 		}
 		var cmdPart string
 		if i == 0 {
-			cmdPart = m.theme.Muted.Render(icon+" ")
+			cmdPart = m.theme.Muted.Render(icon + " ")
 			if i == m.cursor {
 				cmdPart = th.Accent.Render(icon + " ")
 			}
