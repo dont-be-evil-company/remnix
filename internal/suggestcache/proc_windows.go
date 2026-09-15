@@ -8,6 +8,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// stillActive is Win32 STILL_ACTIVE (259). Not exported by x/sys/windows.
+const stillActive = 259
+
 func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -21,7 +24,7 @@ func pidAlive(pid int) bool {
 	if err := windows.GetExitCodeProcess(h, &code); err != nil {
 		return false
 	}
-	return code == windows.STILL_ACTIVE
+	return code == stillActive
 }
 
 func detachCmd(cmd *exec.Cmd) {}
