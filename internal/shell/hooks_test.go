@@ -388,6 +388,7 @@ func TestZshSuggestCompletions(t *testing.T) {
 		"${(@P)avar}",
 		"${(@P)dvar}",
 		"builtin compadd -O matches",
+		"Register matches too",
 		"opt_p",
 		"opt_P",
 	} {
@@ -404,8 +405,20 @@ func TestZshSuggestCompletions(t *testing.T) {
 	if strings.Contains(on, `applied="${__remnix_comp_lbuffer%$__remnix_comp_prefix}${m}${__remnix_comp_rbuffer#$__remnix_comp_suffix}"`) {
 		t.Fatal("accept must insert -p/-P affixes, not the listed match alone")
 	}
-	if !strings.Contains(on, "k|o|J|V|X|x|W|F|M|E|r|R") {
+	if !strings.Contains(on, "k|o|J|V|X|x|W|F|M|r|R") {
 		t.Fatal("-k must consume the array name, not treat it as a match")
+	}
+	if strings.Contains(on, "k|o|J|V|X|x|W|F|M|E|r|R") {
+		t.Fatal("-E must be parsed as empty-match count for _describe descriptions, not a generic flag")
+	}
+	if !strings.Contains(on, "ecount") || !strings.Contains(on, "ecount > 0") {
+		t.Fatal("compadd must apply _describe -E description passes")
+	}
+	if !strings.Contains(on, `[[ $d == "$m" ]] && d=""`) {
+		t.Fatal("match-name placeholders must not be kept as descriptions")
+	}
+	if !strings.Contains(on, "setopt localoptions extendedglob") {
+		t.Fatal("compadd strip of name -- descr needs local extendedglob")
 	}
 	if !strings.Contains(on, `-|--) break`) {
 		t.Fatal("compadd must treat lone - as end of options (bashcompinit)")
@@ -419,6 +432,9 @@ func TestZshSuggestCompletions(t *testing.T) {
 	snapOff := strings.Index(listFn, `typeset -g __remnix_comp_prefix="$PREFIX"`)
 	if mainOff < 0 || snapOff < 0 || snapOff > mainOff {
 		t.Fatal("PREFIX must be snapshotted before _main_complete so _path_files cannot shrink it to the last component")
+	}
+	if !strings.Contains(listFn, `compstate[list]=''`) {
+		t.Fatal("list-choices capture must suppress listing or zsh prompts for all possibilities after suggest")
 	}
 	if !strings.Contains(on, "remnix-suggest-complete") {
 		t.Fatal("Tab must request compsys completions")

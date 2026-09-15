@@ -551,6 +551,7 @@ typeset -ga __remnix_comp_cache_descrs
 # PREFIX to the last component, and capturing that then prepending -p
 # duplicated ./ (cat ./T + Taskfile.yml → cat ././Taskfile.yml).
 __remnix_compadd() {
+  setopt localoptions extendedglob
   if ! (( ${+__remnix_comp_ctx} )); then
     typeset -g __remnix_comp_ctx=1
     typeset -g __remnix_comp_prefix="$PREFIX"
@@ -561,7 +562,7 @@ __remnix_compadd() {
   local -a matches descrs src
   local dvar="" avar="" m d insert flags c rest
   local opt_i="" opt_P="" opt_p="" opt_s="" opt_S="" opt_I=""
-  integer i probe=0 j fidx si
+  integer i probe=0 j fidx si ecount=-1
   i=1
   while (( i <= $# )); do
     case "${argv[i]}" in
@@ -579,6 +580,16 @@ __remnix_compadd() {
               probe=1
               if [[ -z $rest ]]; then
                 (( i++ ))
+              fi
+              fidx=$#flags
+              ;;
+            E)
+              # _describe list-grouped: compadd -E N -d descrs
+              if [[ -n $rest ]]; then
+                ecount=$rest
+              else
+                (( i++ ))
+                ecount="${argv[i]}"
               fi
               fidx=$#flags
               ;;
@@ -654,7 +665,7 @@ __remnix_compadd() {
               fi
               fidx=$#flags
               ;;
-            k|o|J|V|X|x|W|F|M|E|r|R)
+            k|o|J|V|X|x|W|F|M|r|R)
               if [[ -z $rest ]]; then
                 (( i++ ))
               fi
@@ -678,8 +689,48 @@ __remnix_compadd() {
     builtin compadd "$@"
     return
   fi
+  # List-grouped _describe delivers real descriptions via -E N -d, after
+  # earlier per-match calls that only had padded match names as -d.
+  if (( ecount > 0 )); then
+    if [[ -n $dvar ]]; then
+      descrs=("${(@P)dvar}")
+    fi
+    (( $#descrs == 0 )) && { builtin compadd "$@" 2>/dev/null; return }
+    # Spacer -E passes have empty/non-description arrays; ignore them.
+    d="${descrs[1]//$'\x7f'/}"
+    [[ $d == "-- "* || $d == *"-- "* ]] || { builtin compadd "$@" 2>/dev/null; return }
+    integer di napply
+    napply=$#descrs
+    if (( napply > $#__remnix_comp_values )); then
+      napply=$#__remnix_comp_values
+    fi
+    for (( di=1; di <= napply; di++ )); do
+      # Keep real descrs already captured (e.g. cobra name -- text).
+      # Overwrite empty slots and name-as-descr placeholders from earlier passes.
+      if [[ -n ${__remnix_comp_descrs[di]} && ${__remnix_comp_descrs[di]} != "${__remnix_comp_values[di]}" ]]; then
+        continue
+      fi
+      d="${descrs[di]//$'\x7f'/}"
+      if [[ $d == "-- "* ]]; then
+        d="${d#-- }"
+      elif [[ $d == *"-- "* ]]; then
+        d="${d#*-- }"
+      else
+        continue
+      fi
+      d="${d%%[[:space:]]##}"
+      d="${d##[[:space:]]##}"
+      [[ -n $d ]] || continue
+      __remnix_comp_descrs[di]="$d"
+    done
+    builtin compadd "$@" 2>/dev/null
+    return
+  fi
   (( $#__remnix_comp_values >= 512 )) && return
   builtin compadd -O matches "$@" 2>/dev/null
+  # Register matches too: _describe only emits the -E description pass after
+  # real matches are added (compadd -O alone stores without adding).
+  builtin compadd "$@" 2>/dev/null
   if [[ -n $dvar ]]; then
     descrs=("${(@P)dvar}")
   fi
@@ -704,11 +755,16 @@ __remnix_compadd() {
       d="${m#*:}"
       m="${m%%:*}"
     fi
+    d="${d//$'\x7f'/}"
     if [[ $d == "$m"[[:space:]]#--[[:space:]]* ]]; then
       d="${d#*"-- "}"
     elif [[ $d == [[:space:]]#--[[:space:]]* ]]; then
       d="${d##[[:space:]]#--[[:space:]]#}"
     fi
+    d="${d%%[[:space:]]##}"
+    d="${d##[[:space:]]##}"
+    # _describe often passes the match name (padded) as -d until the -E pass.
+    [[ $d == "$m" ]] && d=""
     (( $#__remnix_comp_values >= 512 )) && break
     j=0
     for (( j=1; j<=$#__remnix_comp_values; j++ )); do
@@ -752,6 +808,11 @@ __remnix_comp_list_fn() {
       functions -c __remnix_compadd_prev compadd
       unfunction __remnix_compadd_prev 2>/dev/null
     fi
+    # Matches are re-added (not only -O) so _describe emits -E descrs.
+    # This is a list-choices widget - clear listing or zsh prompts
+    # "do you wish to see all N possibilities?" after suggest capture.
+    compstate[list]=''
+    compstate[insert]=''
   }
 }
 
