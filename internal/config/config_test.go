@@ -27,6 +27,12 @@ func TestPathsHonorEnv(t *testing.T) {
 	if got := ControlSocketPath(); got != "/tmp/remnix-run/control.sock" {
 		t.Fatalf("ControlSocketPath = %q", got)
 	}
+	if got := SuggestCacheWarmupPIDPath(); got != "/tmp/remnix-run/suggest-cache-warmup.pid" {
+		t.Fatalf("SuggestCacheWarmupPIDPath = %q", got)
+	}
+	if got := SuggestCacheWarmupStatusPath(); got != filepath.Join("/tmp/remnix-data", "suggest-cache-warmup.json") {
+		t.Fatalf("SuggestCacheWarmupStatusPath = %q", got)
+	}
 	if got := PtyProxySocketPath(); !strings.HasPrefix(got, "/tmp/remnix-run/pty-proxy-") {
 		t.Fatalf("PtyProxySocketPath = %q", got)
 	}
@@ -41,6 +47,9 @@ func TestPathsHonorEnv(t *testing.T) {
 	}
 	if got := LocalPath(); got != filepath.Join("/tmp/remnix-data", "local.yaml") {
 		t.Fatalf("LocalPath = %q", got)
+	}
+	if got := SuggestCachePath(); got != filepath.Join("/tmp/remnix-data", "suggest-cache.db") {
+		t.Fatalf("SuggestCachePath = %q", got)
 	}
 }
 

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/dont-be-evil-company/remnix/internal/app"
 	"github.com/dont-be-evil-company/remnix/internal/client"
@@ -20,6 +22,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/search"
 	"github.com/dont-be-evil-company/remnix/internal/shell"
 	"github.com/dont-be-evil-company/remnix/internal/stats"
+	"github.com/dont-be-evil-company/remnix/internal/suggestcache"
 	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -369,24 +372,35 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 		}
 	}
 	ch := make(chan tui.SuggestItems, 16)
+	uiDone := make(chan struct{})
 	go func() {
 		defer close(ch)
-		ch <- tui.SuggestItems{Items: items, Descrs: descrs}
+		push := func(payload tui.SuggestItems) {
+			select {
+			case ch <- payload:
+			case <-uiDone:
+			}
+		}
+		push(tui.SuggestItems{Items: items, Descrs: descrs})
 		if !helpparse.NeedsEnrich(items, descrs) {
 			return
 		}
 		cache := helpparse.NewCache()
+		if store, err := suggestcache.Open(config.SuggestCachePath()); err == nil {
+			defer store.Close()
+			cache.SetDurable(store)
+		}
 		d := helpparse.FillEmpty(context.Background(), prefix, items, descrs, cache, nil)
-		ch <- tui.SuggestItems{Items: items, Descrs: d}
+		push(tui.SuggestItems{Items: items, Descrs: d})
 		if !helpparse.NeedsEnrich(items, d) {
 			return
 		}
-		helpparse.FillNodes(context.Background(), prefix, items, d, cache, nil, cfg.Suggest.MenuLimit(), func(next []string) {
-			ch <- tui.SuggestItems{Items: items, Descrs: next}
+		helpparse.FillNodes(context.Background(), prefix, items, d, cache, nil, 0, func(next []string) {
+			push(tui.SuggestItems{Items: items, Descrs: next})
 		})
 	}()
 	h := cfg.Suggest.MenuLimit() + 3
-	return tui.RunSuggestMenu(tui.SuggestMenuOptions{
+	err = tui.RunSuggestMenu(tui.SuggestMenuOptions{
 		Prefix:        prefix,
 		TypedIcon:     cfg.Suggest.IconTyped(),
 		HistoryIcon:   cfg.Suggest.IconHistory(),
@@ -397,6 +411,8 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 		ItemsCh:       ch,
 		Theme:         uiTheme(cfg),
 	}, cmd.OutOrStdout())
+	close(uiDone)
+	return err
 }
 
 func loadSuggestItemsFile(path string) (items, descrs []string, err error) {
@@ -581,4 +597,92 @@ func importEntries(cmd *cobra.Command, a *app.App, entries []history.Entry) erro
 		return nil
 	}
 	return kickSyncCheckpoint(cmd.Context(), a)
+}
+
+func runSuggestCachePurge(cmd *cobra.Command, tools []string, all bool) error {
+	if !all && len(tools) == 0 {
+		return fmt.Errorf("specify tools or --all")
+	}
+	store, err := suggestcache.Open(config.SuggestCachePath())
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if all {
+		if err := store.PurgeAll(); err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), "purged suggest cache")
+		return nil
+	}
+	if err := store.Purge(tools...); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "purged %s\n", strings.Join(tools, " "))
+	return nil
+}
+
+func runSuggestCacheWarmup(cmd *cobra.Command, tools []string, jobs, depth int, status, foreground, worker bool) error {
+	if jobs < 1 {
+		return fmt.Errorf("--jobs must be at least 1")
+	}
+	if depth < 0 {
+		return fmt.Errorf("--depth must be >= 0")
+	}
+	if worker {
+		if len(tools) == 0 {
+			return fmt.Errorf("specify tools to warm")
+		}
+		return suggestcache.RunWorker(cmd.Context(), tools, suggestcache.WarmupOptions{
+			Jobs:  jobs,
+			Depth: depth,
+			Out:   cmd.OutOrStdout(),
+		})
+	}
+	if status && len(tools) == 0 {
+		return followWarmup(cmd)
+	}
+	if len(tools) == 0 {
+		return fmt.Errorf("specify tools to warm, or --status to attach")
+	}
+	if foreground {
+		store, err := suggestcache.Open(config.SuggestCachePath())
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		return suggestcache.Warmup(cmd.Context(), store, tools, suggestcache.WarmupOptions{
+			Jobs:  jobs,
+			Depth: depth,
+			Out:   cmd.OutOrStdout(),
+		})
+	}
+	pid, queued, added, err := suggestcache.Start(tools, jobs, depth)
+	if err != nil {
+		return err
+	}
+	if queued {
+		if len(added) == 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "already queued or warming pid=%d tools=%s\n", pid, strings.Join(tools, " "))
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "queued %s onto pid=%d\n", strings.Join(added, " "), pid)
+		}
+		if !status {
+			fmt.Fprintln(cmd.OutOrStdout(), "attach: remnix suggest cache warmup --status")
+			return nil
+		}
+		return followWarmup(cmd)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "warmup started pid=%d tools=%s\n", pid, strings.Join(tools, " "))
+	if !status {
+		fmt.Fprintln(cmd.OutOrStdout(), "attach: remnix suggest cache warmup --status")
+		return nil
+	}
+	return followWarmup(cmd)
+}
+
+func followWarmup(cmd *cobra.Command) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return suggestcache.Follow(ctx, cmd.OutOrStdout())
 }

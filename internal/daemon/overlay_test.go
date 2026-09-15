@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dont-be-evil-company/remnix/internal/helpparse"
+	"github.com/dont-be-evil-company/remnix/internal/suggestcache"
 	"github.com/dont-be-evil-company/remnix/internal/terminal"
 	"github.com/dont-be-evil-company/remnix/internal/tui"
 )
@@ -192,5 +194,27 @@ func TestHelpNodesFilledFromChildProbe(t *testing.T) {
 	got = helpparse.FillNodes(context.Background(), "aws ", items, got, s.helpCacheFor("s1"), s.helpProbe, 8, nil)
 	if !strings.Contains(got[0], "manage Amazon S3") {
 		t.Fatalf("s3 descr %q", got[0])
+	}
+}
+
+func TestHelpDescrsFromDurableSkipProbe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "suggest-cache.db")
+	store, err := suggestcache.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ents := helpparse.Parse("Available Commands:\n  daemon      Run the remnix core daemon\n")
+	if err := store.Save([]string{"tool"}, ents, ""); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{suggestStore: store}
+	s.helpProbe = func(ctx context.Context, argv []string) (string, error) {
+		t.Fatal("warm L2 must not probe")
+		return "", nil
+	}
+	got := s.enrichSuggestDescrs("s1", "tool ", []string{"tool daemon"}, []string{""})
+	if got[0] != "Run the remnix core daemon" {
+		t.Fatalf("got %q", got[0])
 	}
 }

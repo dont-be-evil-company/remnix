@@ -223,6 +223,9 @@ remnix search --explain git
 remnix suggest --prefix 'git st' --cwd "$PWD"
 remnix suggest --prefix 'git st' --cwd "$PWD" --list
 remnix suggest --interactive --prefix 'git st' --cwd "$PWD"
+remnix suggest cache warmup aws gcloud
+remnix suggest cache warmup --status
+remnix suggest cache purge aws gcloud
 remnix stats
 remnix inspect                    # history stats TUI (`explore` alias)
 remnix inspect --advanced         # regex criteria sidebar, multi-select delete
@@ -286,6 +289,7 @@ Files:
 | `~/.local/share/remnix/rclone.conf` | rclone credentials (not for git) |
 | `~/.local/share/remnix/local.yaml` | This machine’s device id and name |
 | `~/.local/share/remnix/history.db` | Local history and key metadata |
+| `~/.local/share/remnix/suggest-cache.db` | Persistent CLI `--help` cache for overlay descriptions |
 | `~/.local/share/remnix/daemon-status.json` | Last daemon sync result |
 | `$XDG_RUNTIME_DIR/remnix/control.sock` | Unified daemon control RPC (suggest / history / overlay / stats) |
 | `$XDG_RUNTIME_DIR/remnix/terminal.sock` | Daemon terminal attach socket |
@@ -405,6 +409,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `remnix agent` | Local SQLite RPC for suggest / history |
 | `remnix key ...` | Slots, rotation, recover |
 | `remnix search` / `suggest` / `stats` / `inspect` / `import` | Local history |
+| `remnix suggest cache warmup` / `purge` | Pre-populate or drop the CLI help suggest cache (`warmup --status` follows a background run) |
 | `remnix gc` | Compact remote objects |
 | `remnix daemon compact` | Prune the RAM history cache and return unused memory to the OS (also every 5m) |
 | `remnix database compact` | Checkpoint WAL and vacuum local SQLite |
@@ -412,7 +417,7 @@ Protocol, threat model, wizard keys, and rclone internals:
 | `remnix init zsh\|bash\|fish\|nu` | Shell integration |
 | `remnix version` | Version (`-v` includes rclone) |
 | `remnix update` | Download and install the latest release |
-| `remnix changelog` | Show baked-in release notes (`latest` or a version) |
+| `remnix changelog {latest|all}` | Show baked-in release notes (newest section or full history) |
 
 `REMNIX_RECOVERY_KEY` is accepted by sync, unlock, device add, and key
 commands that need to unwrap the SMK.

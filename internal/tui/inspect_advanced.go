@@ -80,6 +80,7 @@ func (m *inspectModel) enterAdvanced() {
 	m.fieldIdx = 0
 	m.status = ""
 	m.selectedCmds = map[string]struct{}{}
+	m.clearVisualMode()
 	m.lastFilter = history.AdvancedFilter{Sort: m.sort, Limit: 5000}
 	m.blurAdvancedFields()
 	m.resizeAdvancedFields()
@@ -92,6 +93,7 @@ func (m *inspectModel) leaveAdvanced() {
 	m.returnView = inspectOverview
 	m.pane = paneResults
 	m.selectedCmds = map[string]struct{}{}
+	m.clearVisualMode()
 	m.input.SetValue(m.overviewQuery)
 	m.input.Placeholder = "type to search"
 	_ = m.input.Focus()
@@ -117,6 +119,7 @@ func (m *inspectModel) focusSidebarField() {
 func (m *inspectModel) setPane(p inspectPane) {
 	m.pane = p
 	if p == paneSidebar {
+		m.clearVisualMode()
 		m.input.Blur()
 		m.focusSidebarField()
 		return

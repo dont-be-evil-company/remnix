@@ -61,6 +61,7 @@ filenames inside them are fixed.
 | `$XDG_DATA_HOME/remnix/local.yaml`              | This machine’s `device_id` and `device_name`                           |
 | `$XDG_DATA_HOME/remnix/rclone.conf`             | rclone credentials (mode 0600)                                         |
 | `$XDG_DATA_HOME/remnix/history.db`              | Local history and key metadata                                         |
+| `$XDG_DATA_HOME/remnix/suggest-cache.db`        | Persistent CLI `--help` cache for overlay suggestion descriptions      |
 | `$XDG_DATA_HOME/remnix/daemon-status.json`      | Last daemon sync result                                                |
 | `$XDG_DATA_HOME/remnix/setup-state.json`        | Crash-safe setup marker                                                |
 | `$XDG_RUNTIME_DIR/remnix/control.sock`          | Daemon RPC (suggest, history, overlays)                                |
@@ -69,7 +70,7 @@ filenames inside them are fixed.
 | Variable             | Overrides                                                          |
 | -------------------- | ------------------------------------------------------------------ |
 | `REMNIX_CONFIG_DIR`  | Directory that holds `config.yaml` and the ignore files            |
-| `REMNIX_DATA_DIR`    | Directory that holds `local.yaml`, `rclone.conf`, and `history.db` |
+| `REMNIX_DATA_DIR`    | Directory that holds `local.yaml`, `rclone.conf`, `history.db`, and `suggest-cache.db` |
 | `REMNIX_RUNTIME_DIR` | Directory that holds the control and terminal sockets              |
 
 A leftover `rclone.conf` under the config directory is moved into the data
@@ -191,6 +192,13 @@ matches so a huge path completion cannot freeze the prompt.
 | bash  | ble.sh, if loaded | yes    | history overlay when `suggest.menu` is on                       |
 | fish  | not supported     | yes    | `complete -C` overlay when `suggest.menu` is on                 |
 | nu    | not supported     | yes    | `--ide-complete` overlay when `suggest.menu` is on              |
+
+Overlay descriptions are filled from `suggest-cache.db` (parsed `--help`).
+A new session does not re-run `--help` when the page is already cached.
+`remnix suggest cache warmup aws gcloud` starts a background walk into that
+file (a second warmup while one is running is queued onto the same worker).
+`remnix suggest cache warmup --status` attaches to live per-page progress.
+`remnix suggest cache purge aws gcloud` drops stale tools after a CLI upgrade.
 
 ## `pty_proxy`
 

@@ -71,6 +71,7 @@ On the device, under `$XDG_DATA_HOME/remnix` (default
 `~/.local/share/remnix`):
 
 - `history.db` - local shell history (plus SQLite `-wal`/`-shm`)
+- `suggest-cache.db` - persistent CLI `--help` cache for overlay descriptions
 - `local.yaml` - device id and local state
 - `rclone.conf` - provider credentials
 - `remnix.lock`, `daemon-status.json` - daemon lock and status

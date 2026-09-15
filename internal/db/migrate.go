@@ -28,7 +28,11 @@ type Status struct {
 }
 
 func LoadMigrations() ([]Migration, error) {
-	entries, err := fs.ReadDir(migrations.FS, ".")
+	return LoadMigrationsFS(migrations.FS)
+}
+
+func LoadMigrationsFS(fsys fs.FS) ([]Migration, error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
@@ -42,7 +46,7 @@ func LoadMigrations() ([]Migration, error) {
 	sort.Strings(names)
 	out := make([]Migration, 0, len(names))
 	for _, name := range names {
-		body, err := fs.ReadFile(migrations.FS, name)
+		body, err := fs.ReadFile(fsys, name)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
@@ -58,10 +62,18 @@ func LoadMigrations() ([]Migration, error) {
 }
 
 func Migrate(sqlDB *sql.DB) error {
+	return migrateFS(sqlDB, migrations.FS, postHooks)
+}
+
+func MigrateFS(sqlDB *sql.DB, fsys fs.FS) error {
+	return migrateFS(sqlDB, fsys, nil)
+}
+
+func migrateFS(sqlDB *sql.DB, fsys fs.FS, hooks map[string]func(*sql.Tx) error) error {
 	if err := ensureMigrationsTable(sqlDB); err != nil {
 		return err
 	}
-	migs, err := LoadMigrations()
+	migs, err := LoadMigrationsFS(fsys)
 	if err != nil {
 		return err
 	}
@@ -86,7 +98,7 @@ func Migrate(sqlDB *sql.DB) error {
 				return fmt.Errorf("apply migration %s: %w", m.ID, err)
 			}
 		}
-		if hook := postHooks[m.ID]; hook != nil {
+		if hook := hooks[m.ID]; hook != nil {
 			if err := hook(tx); err != nil {
 				_ = tx.Rollback()
 				return fmt.Errorf("apply migration %s: %w", m.ID, err)

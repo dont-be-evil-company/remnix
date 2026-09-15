@@ -50,6 +50,9 @@ func (s *Server) helpCacheFor(sessionID string) *helpparse.Cache {
 	c := s.helpCaches[sessionID]
 	if c == nil {
 		c = helpparse.NewCache()
+		if s.suggestStore != nil {
+			c.SetDurable(s.suggestStore)
+		}
 		s.helpCaches[sessionID] = c
 	}
 	return c
@@ -229,25 +232,14 @@ func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID, path string,
 		if !helpparse.NeedsEnrich(items, descrs) {
 			return
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go func() {
-			select {
-			case <-overlayDone:
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
 		cache := s.helpCacheFor(sessionID)
 		probe := s.probeFn(path)
-		d := helpparse.FillEmpty(ctx, prefix, items, descrs, cache, probe)
-		if !send(tui.SuggestItems{Items: items, Descrs: d}) {
-			return
-		}
+		d := helpparse.FillEmpty(context.Background(), prefix, items, descrs, cache, probe)
+		_ = send(tui.SuggestItems{Items: items, Descrs: d})
 		if !helpparse.NeedsEnrich(items, d) {
 			return
 		}
-		helpparse.FillNodes(ctx, prefix, items, d, cache, probe, limit, func(next []string) {
+		helpparse.FillNodes(context.Background(), prefix, items, d, cache, probe, 0, func(next []string) {
 			send(tui.SuggestItems{Items: items, Descrs: next})
 		})
 	}()

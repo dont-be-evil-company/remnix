@@ -6,10 +6,19 @@ import (
 	"unicode"
 )
 
+// Kind is whether a parsed entity is a subcommand or a flag.
+type Kind string
+
+const (
+	KindCommand Kind = "command"
+	KindFlag    Kind = "flag"
+)
+
 // Entity is one command or flag recovered from help text.
 type Entity struct {
 	Name  string
 	Descr string
+	Kind  Kind
 }
 
 type sectionKind int
@@ -159,7 +168,11 @@ func addEntity(ents *[]Entity, seen map[string]int, name, descr string) {
 		return
 	}
 	seen[name] = len(*ents)
-	*ents = append(*ents, Entity{Name: name, Descr: descr})
+	kind := KindCommand
+	if strings.HasPrefix(name, "-") {
+		kind = KindFlag
+	}
+	*ents = append(*ents, Entity{Name: name, Descr: descr, Kind: kind})
 }
 
 func cleanDescr(d string) string {

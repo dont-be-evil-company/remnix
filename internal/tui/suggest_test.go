@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSuggestMenuEnterInserts(t *testing.T) {
@@ -60,8 +61,8 @@ func TestSuggestMenuTypingNarrowsItems(t *testing.T) {
 	m = got.(suggestModel)
 	got, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	m = got.(suggestModel)
-	if m.prefix != "gcloud s" {
-		t.Fatalf("prefix %q", m.prefix)
+	if m.prefix() != "gcloud s" {
+		t.Fatalf("prefix %q", m.prefix())
 	}
 	if len(m.items) != 1 || m.items[0].cmd != "gcloud storage" {
 		t.Fatalf("items %+v", m.items)
@@ -73,8 +74,8 @@ func TestSuggestMenuTypingNarrowsItems(t *testing.T) {
 	m = got.(suggestModel)
 	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = got.(suggestModel)
-	if m.prefix != "gcloud" || len(m.items) != 3 {
-		t.Fatalf("after backspace prefix=%q items=%+v", m.prefix, m.items)
+	if m.prefix() != "gcloud" || len(m.items) != 3 {
+		t.Fatalf("after backspace prefix=%q items=%+v", m.prefix(), m.items)
 	}
 	if m.cursor != 0 {
 		t.Fatalf("backspace should keep the typed row selected, cursor=%d", m.cursor)
@@ -105,8 +106,8 @@ func TestSuggestMenuTypingNoMatchKeepsTypedRow(t *testing.T) {
 	m := newSuggestModel(SuggestMenuOptions{Prefix: "git", Items: []string{"git status"}})
 	got, _ := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 	m = got.(suggestModel)
-	if m.prefix != "gitz" || len(m.items) != 0 || m.cursor != 0 {
-		t.Fatalf("prefix=%q items=%+v cursor=%d", m.prefix, m.items, m.cursor)
+	if m.prefix() != "gitz" || len(m.items) != 0 || m.cursor != 0 {
+		t.Fatalf("prefix=%q items=%+v cursor=%d", m.prefix(), m.items, m.cursor)
 	}
 	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	gm := got.(suggestModel)
@@ -282,15 +283,15 @@ func TestSuggestMenuBackspaceRestoresCachedParent(t *testing.T) {
 	}
 	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = got.(suggestModel)
-	if m.prefix != "remnix daemon" || m.cursor != 0 {
-		t.Fatalf("after space drop prefix=%q cursor=%d", m.prefix, m.cursor)
+	if m.prefix() != "remnix daemon" || m.cursor != 0 {
+		t.Fatalf("after space drop prefix=%q cursor=%d", m.prefix(), m.cursor)
 	}
 	for i := 0; i < len("daemon"); i++ {
 		got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		m = got.(suggestModel)
 	}
-	if m.prefix != "remnix " {
-		t.Fatalf("prefix %q", m.prefix)
+	if m.prefix() != "remnix " {
+		t.Fatalf("prefix %q", m.prefix())
 	}
 	if m.cursor != 0 {
 		t.Fatalf("cursor %d want typed row", m.cursor)
@@ -317,8 +318,8 @@ func TestSuggestMenuCtrlSpaceCachedChildDrillsInPlace(t *testing.T) {
 	if m.quitting || m.ContinueSelected() {
 		t.Fatal("cached child should drill in-place")
 	}
-	if m.prefix != "remnix daemon " {
-		t.Fatalf("prefix %q", m.prefix)
+	if m.prefix() != "remnix daemon " {
+		t.Fatalf("prefix %q", m.prefix())
 	}
 	if m.cursor != 1 || len(m.items) != 2 || m.items[0].cmd != "remnix daemon compact" {
 		t.Fatalf("cursor=%d items=%+v", m.cursor, m.items)
@@ -337,8 +338,8 @@ func TestSuggestMenuCtrlSpaceTypedRowCachedStays(t *testing.T) {
 	if m.quitting || m.ContinueSelected() {
 		t.Fatal("typed row with cached prefix should stay")
 	}
-	if m.prefix != "remnix" || m.cursor != 0 {
-		t.Fatalf("prefix=%q cursor=%d", m.prefix, m.cursor)
+	if m.prefix() != "remnix" || m.cursor != 0 {
+		t.Fatalf("prefix=%q cursor=%d", m.prefix(), m.cursor)
 	}
 }
 
@@ -365,13 +366,128 @@ func TestSuggestMenuBackspaceCtrlSpaceUsesTypedPrefix(t *testing.T) {
 	})
 	got, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = got.(suggestModel)
-	if m.cursor != 0 || m.prefix != "gcloud storag" {
-		t.Fatalf("prefix=%q cursor=%d", m.prefix, m.cursor)
+	if m.cursor != 0 || m.prefix() != "gcloud storag" {
+		t.Fatalf("prefix=%q cursor=%d", m.prefix(), m.cursor)
 	}
 	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	gm := got.(suggestModel)
 	cmd, ok := gm.SelectedCommand()
 	if !ok || cmd != "gcloud storag" || gm.ContinueSelected() {
 		t.Fatalf("typed after backspace: %q ok=%v cont=%v", cmd, ok, gm.ContinueSelected())
+	}
+}
+
+func TestSuggestMenuCtrlWDeletesWord(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "gcloud storage buckets",
+		Items:  []string{"gcloud storage buckets create"},
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.prefix() != "gcloud storage " {
+		t.Fatalf("ctrl+w prefix %q", m.prefix())
+	}
+	if m.cursor != 0 {
+		t.Fatalf("ctrl+w should keep the typed row selected, cursor=%d", m.cursor)
+	}
+	got, _ = m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.prefix() != "gcloud " {
+		t.Fatalf("second ctrl+w prefix %q", m.prefix())
+	}
+}
+
+func TestContinueBuffer(t *testing.T) {
+	if got := ContinueBuffer("gcloud auth"); got != "gcloud auth " {
+		t.Fatalf("command %q", got)
+	}
+	if got := ContinueBuffer("gcloud auth "); got != "gcloud auth " {
+		t.Fatalf("already spaced %q", got)
+	}
+	if got := ContinueBuffer("gcloud auth --"); got != "gcloud auth --" {
+		t.Fatalf("partial flag %q", got)
+	}
+	if got := ContinueBuffer("gcloud auth --acc"); got != "gcloud auth --acc" {
+		t.Fatalf("partial long flag %q", got)
+	}
+	if got := ContinueBuffer("gcloud auth --account"); got != "gcloud auth --account" {
+		t.Fatalf("flag token %q", got)
+	}
+}
+
+func TestSuggestViewShowsTextCursor(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{Prefix: "gcloud", Items: []string{"gcloud compute"}})
+	v := m.View()
+	if !strings.Contains(v.Content, "gcloud") {
+		t.Fatalf("missing prefix: %q", v.Content)
+	}
+	if !strings.Contains(v.Content, "\x1b[7") {
+		t.Fatalf("typed row should show the textinput caret: %q", v.Content)
+	}
+	if !strings.Contains(v.Content, "ctrl+w") {
+		t.Fatalf("help should mention ctrl+w: %q", v.Content)
+	}
+	if !strings.Contains(v.Content, "ctrl+d") {
+		t.Fatalf("help should mention ctrl+d: %q", v.Content)
+	}
+}
+
+func TestSuggestDetailFloat(t *testing.T) {
+	long := "This is a very long description that should be truncated on the list row but fully visible in the detail float pane when opened with ctrl+d"
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "tool",
+		Items:  []string{"tool daemon"},
+		Descrs: []string{long},
+	})
+	m.width = 40
+	list := m.View()
+	if strings.Contains(list.Content, long) {
+		t.Fatal("list view should truncate long descriptions")
+	}
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if !m.detail {
+		t.Fatal("ctrl+d should open detail float")
+	}
+	v := m.View()
+	if !strings.Contains(v.Content, "tool daemon") {
+		t.Fatalf("detail missing command: %q", v.Content)
+	}
+	if !strings.Contains(ansi.Strip(v.Content), "fully visible in the detail float") {
+		t.Fatalf("detail missing full description: %q", v.Content)
+	}
+	if !strings.Contains(v.Content, "detail") || !strings.Contains(v.Content, "close") {
+		t.Fatalf("detail chrome: %q", v.Content)
+	}
+	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = got.(suggestModel)
+	if m.detail || m.quitting {
+		t.Fatal("esc in detail should close float, not quit overlay")
+	}
+	got, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	got, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.detail {
+		t.Fatal("ctrl+d should toggle detail closed")
+	}
+}
+
+func TestSuggestDetailFloatNoopWithoutDescr(t *testing.T) {
+	m := newSuggestModel(SuggestMenuOptions{
+		Prefix: "tool",
+		Items:  []string{"tool daemon"},
+	})
+	got, _ := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.detail {
+		t.Fatal("ctrl+d without description should be a no-op")
+	}
+	got, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = got.(suggestModel)
+	got, _ = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = got.(suggestModel)
+	if m.detail {
+		t.Fatal("ctrl+d on typed row should be a no-op")
 	}
 }

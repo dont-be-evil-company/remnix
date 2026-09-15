@@ -71,6 +71,11 @@ func argvEqual(a, b []string) bool {
 	return true
 }
 
+// SafeArg reports whether w is safe to pass to a help probe.
+func SafeArg(w string) bool {
+	return safeArg(w)
+}
+
 func safeArg(w string) bool {
 	if w == "" || w == "-" || w == "--" {
 		return false

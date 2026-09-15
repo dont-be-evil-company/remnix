@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -311,9 +313,12 @@ func TestItemArgv(t *testing.T) {
 }
 
 func TestFillNodesFillsFromChildHelp(t *testing.T) {
+	var mu sync.Mutex
 	probes := []string{}
 	probe := func(ctx context.Context, argv []string) (string, error) {
+		mu.Lock()
 		probes = append(probes, strings.Join(argv, " "))
+		mu.Unlock()
 		switch strings.Join(argv, " ") {
 		case "aws":
 			return readFixture(t, "aws_star.txt"), nil
@@ -329,18 +334,19 @@ func TestFillNodesFillsFromChildHelp(t *testing.T) {
 	if got[0] != "" || got[1] != "" {
 		t.Fatalf("star list must not invent descrs: %v", got)
 	}
-	updates := 0
-	got = FillNodes(context.Background(), "aws ", items, got, cache, probe, 8, func([]string) { updates++ })
+	var updates atomic.Int32
+	got = FillNodes(context.Background(), "aws ", items, got, cache, probe, 8, func([]string) { updates.Add(1) })
 	if !strings.Contains(got[0], "manage Amazon S3") {
 		t.Fatalf("s3 descr %q", got[0])
 	}
 	if got[1] != "" {
 		t.Fatalf("failed child must stay empty, got %q", got[1])
 	}
-	if updates != 1 {
-		t.Fatalf("updates %d", updates)
+	if updates.Load() != 1 {
+		t.Fatalf("updates %d", updates.Load())
 	}
 	nAWS, nS3 := 0, 0
+	mu.Lock()
 	for _, p := range probes {
 		switch p {
 		case "aws":
@@ -352,15 +358,32 @@ func TestFillNodesFillsFromChildHelp(t *testing.T) {
 	if nAWS != 1 || nS3 != 1 {
 		t.Fatalf("probes %v", probes)
 	}
+	mu.Unlock()
 	_ = FillNodes(context.Background(), "aws ", items, []string{"", ""}, cache, probe, 8, nil)
 	nS3 = 0
+	mu.Lock()
 	for _, p := range probes {
 		if p == "aws s3" {
 			nS3++
 		}
 	}
+	mu.Unlock()
 	if nS3 != 1 {
 		t.Fatalf("child help must be cached, probes %v", probes)
+	}
+}
+
+func TestParseSetsKind(t *testing.T) {
+	ents := Parse(readFixture(t, "cobra.txt"))
+	byName := map[string]Entity{}
+	for _, e := range ents {
+		byName[e.Name] = e
+	}
+	if byName["daemon"].Kind != KindCommand {
+		t.Fatalf("daemon kind %q", byName["daemon"].Kind)
+	}
+	if byName["--help"].Kind != KindFlag {
+		t.Fatalf("--help kind %q", byName["--help"].Kind)
 	}
 }
 
@@ -376,21 +399,58 @@ func TestFillNodesDoesNotOverwrite(t *testing.T) {
 }
 
 func TestFillNodesRespectsLimit(t *testing.T) {
-	probes := 0
+	var probes atomic.Int32
 	probe := func(ctx context.Context, argv []string) (string, error) {
-		probes++
+		probes.Add(1)
 		return readFixture(t, "aws_described.txt"), nil
 	}
 	items := []string{"aws s3", "aws ec2", "aws iam"}
 	got := FillNodes(context.Background(), "aws ", items, []string{"", "", ""}, NewCache(), probe, 1, nil)
-	if probes != 1 {
-		t.Fatalf("probes %d, want 1", probes)
+	if probes.Load() != 1 {
+		t.Fatalf("probes %d, want 1", probes.Load())
 	}
 	if !strings.Contains(got[0], "manage Amazon S3") {
 		t.Fatalf("first row %q", got[0])
 	}
 	if got[1] != "" || got[2] != "" {
 		t.Fatalf("later rows %v", got)
+	}
+}
+
+func TestFillNodesUnlimitedWhenLimitZero(t *testing.T) {
+	var probes atomic.Int32
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		probes.Add(1)
+		return readFixture(t, "aws_described.txt"), nil
+	}
+	items := []string{"aws s3", "aws ec2", "aws iam"}
+	got := FillNodes(context.Background(), "aws ", items, []string{"", "", ""}, NewCache(), probe, 0, nil)
+	if probes.Load() != 3 {
+		t.Fatalf("probes %d, want 3", probes.Load())
+	}
+	for i, d := range got {
+		if !strings.Contains(d, "manage Amazon S3") {
+			t.Fatalf("row %d %q", i, d)
+		}
+	}
+}
+
+func TestFillNodesDoesNotPersistCanceledProbe(t *testing.T) {
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	go func() {
+		<-started
+		cancel()
+	}()
+	cache := NewCache()
+	_ = FillNodes(ctx, "aws ", []string{"aws s3"}, []string{""}, cache, probe, 0, nil)
+	if _, ok := cache.GetSummary([]string{"aws", "s3"}); ok {
+		t.Fatal("canceled probe must not persist an empty page")
 	}
 }
 

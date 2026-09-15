@@ -105,6 +105,57 @@ func newSuggestCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open the suggestion overlay TUI")
 	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
 	cmd.Flags().StringVar(&itemsFile, "items-file", "", "newline-separated completion lines for the overlay (instead of history)")
+	cmd.AddCommand(newSuggestCacheCmd())
+	return cmd
+}
+
+func newSuggestCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Manage the persistent CLI help cache for suggestions",
+	}
+	cmd.AddCommand(newSuggestCachePurgeCmd(), newSuggestCacheWarmupCmd())
+	return cmd
+}
+
+func newSuggestCachePurgeCmd() *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "purge [tool...]",
+		Short: "Drop cached --help data for the given CLI tools",
+		Long:  "Remove parsed help pages for tools such as aws or gcloud. Overlay will probe again on the next use unless you run warmup.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSuggestCachePurge(cmd, args, all)
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "wipe the entire suggest cache")
+	return cmd
+}
+
+func newSuggestCacheWarmupCmd() *cobra.Command {
+	var jobs, depth int
+	var status, foreground, worker bool
+	cmd := &cobra.Command{
+		Use:   "warmup [tool...]",
+		Short: "Pre-populate the suggest cache from CLI --help output",
+		Long: `Walk CLI --help trees into suggest-cache.db.
+
+Warmup starts in the background by default. Attach to live progress with:
+
+  remnix suggest cache warmup --status
+
+Use --foreground to run in this terminal. A second warmup while one is
+running enqueues those tools onto the same worker.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSuggestCacheWarmup(cmd, args, jobs, depth, status, foreground, worker)
+		},
+	}
+	cmd.Flags().IntVar(&jobs, "jobs", 4, "concurrent help probes")
+	cmd.Flags().IntVar(&depth, "depth", 0, "max command depth to walk (0 = unlimited)")
+	cmd.Flags().BoolVar(&status, "status", false, "attach to live warmup progress")
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "run in this terminal instead of the background")
+	cmd.Flags().BoolVar(&worker, "worker", false, "run as the detached warmup worker")
+	_ = cmd.Flags().MarkHidden("worker")
 	return cmd
 }
 

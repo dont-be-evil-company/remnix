@@ -407,6 +407,9 @@ func TestZshSuggestCompletions(t *testing.T) {
 	if !strings.Contains(on, "k|o|J|V|X|x|W|F|M|E|r|R") {
 		t.Fatal("-k must consume the array name, not treat it as a match")
 	}
+	if !strings.Contains(on, `-|--) break`) {
+		t.Fatal("compadd must treat lone - as end of options (bashcompinit)")
+	}
 	listAt := strings.Index(on, "__remnix_comp_list_fn()")
 	if listAt < 0 {
 		t.Fatal("missing __remnix_comp_list_fn")
@@ -588,8 +591,8 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if !strings.Contains(over, `"$PATH"`) {
 		t.Fatal("overlay RPC must send the caller's PATH so help probes find user-installed tools")
 	}
-	if !strings.Contains(over, `[[ $LBUFFER == *[[:space:]] ]] || LBUFFER="$LBUFFER "`) {
-		t.Fatal("ctrl+space continue must add a trailing space so the next completer runs")
+	if !strings.Contains(over, `[[ $last != -* ]]`) {
+		t.Fatal("ctrl+space continue must not add a space after a partial flag")
 	}
 	if !strings.Contains(over, "suggest-interactive") {
 		t.Fatal("proxy-on Ctrl+Space must try daemon overlay RPC")

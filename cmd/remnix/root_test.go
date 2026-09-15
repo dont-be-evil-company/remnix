@@ -30,6 +30,9 @@ func TestUnlockAndDaemonHelp(t *testing.T) {
 		{"daemon", "reload", "--help"},
 		{"daemon", "compact", "--help"},
 		{"daemon", "restart", "--help"},
+		{"suggest", "cache", "--help"},
+		{"suggest", "cache", "purge", "--help"},
+		{"suggest", "cache", "warmup", "--help"},
 	} {
 		cmd := newRootCmd()
 		cmd.SetArgs(args)

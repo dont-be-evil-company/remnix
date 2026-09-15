@@ -338,3 +338,66 @@ func TestInspectAdvancedSearchAfterDeleteDoesNotRelistAll(t *testing.T) {
 		t.Fatalf("search after delete listed %d commands; should use AdvancedLoad only", lists)
 	}
 }
+
+func TestInspectAdvancedVisualSelection(t *testing.T) {
+	m := NewInspect(inspectFixture())
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if len(m.visible) < 3 {
+		t.Fatalf("need several rows, got %d", len(m.visible))
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModShift})
+	if !m.visualMode || m.visualAnchor != 0 {
+		t.Fatalf("visualMode=%v anchor=%d", m.visualMode, m.visualAnchor)
+	}
+	if got := m.selectedCommands(); len(got) != 1 || got[0] != m.visible[0].Command {
+		t.Fatalf("anchor selection %+v", got)
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'j'})
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'j'})
+	if !m.visualMode || m.cursor != 2 {
+		t.Fatalf("cursor=%d visual=%v", m.cursor, m.visualMode)
+	}
+	got := m.selectedCommands()
+	if len(got) != 3 {
+		t.Fatalf("range size %d: %+v", len(got), got)
+	}
+	for i, cmd := range got {
+		if cmd != m.visible[i].Command {
+			t.Fatalf("range[%d]=%q want %q", i, cmd, m.visible[i].Command)
+		}
+	}
+
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.visualMode || m.view != inspectAdvanced {
+		t.Fatalf("esc should exit visual only: visual=%v view=%v", m.visualMode, m.view)
+	}
+	if len(m.selectedCommands()) != 3 {
+		t.Fatalf("selection should remain after leaving visual: %+v", m.selectedCommands())
+	}
+
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.view != inspectOverview {
+		t.Fatalf("second esc should leave advanced, view=%v", m.view)
+	}
+}
+
+func TestInspectAdvancedVisualToggleAndIdleMove(t *testing.T) {
+	m := NewInspect(inspectFixture())
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModShift})
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'j'})
+	if !m.visualMode || len(m.selectedCommands()) != 2 {
+		t.Fatalf("visual=%v sel=%+v", m.visualMode, m.selectedCommands())
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModShift})
+	if m.visualMode {
+		t.Fatal("shift+v should toggle visual off")
+	}
+	if len(m.selectedCommands()) != 2 {
+		t.Fatalf("toggle off should keep selection: %+v", m.selectedCommands())
+	}
+	m = inspectUpdate(t, m, tea.KeyPressMsg{Code: 'j'})
+	if len(m.selectedCommands()) != 2 {
+		t.Fatalf("move outside visual must not change selection: %+v", m.selectedCommands())
+	}
+}

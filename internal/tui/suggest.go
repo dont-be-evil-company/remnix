@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -63,7 +64,7 @@ type suggestItem struct {
 }
 
 type suggestModel struct {
-	prefix           string
+	input            textinput.Model
 	items            []suggestItem
 	allItems         []suggestItem
 	cursor           int
@@ -87,6 +88,7 @@ type suggestModel struct {
 	cache            *SuggestCache
 	loadedPrefix     string
 	theme            Theme
+	detail           bool
 }
 
 func newSuggestModel(opts SuggestMenuOptions) suggestModel {
@@ -107,8 +109,16 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 	if cache == nil {
 		cache = NewSuggestCache()
 	}
+	th := opts.Theme.OrDefault()
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = ""
+	ti.SetValue(opts.Prefix)
+	ti.CursorEnd()
+	ti.Focus()
+	applyThemeInput(&ti, th)
 	m := suggestModel{
-		prefix:   opts.Prefix,
+		input:    ti,
 		allItems: all,
 		width:    80,
 		height:   10,
@@ -117,8 +127,9 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 		loading:  opts.ItemsCh != nil,
 		itemsCh:  opts.ItemsCh,
 		cache:    cache,
-		theme:    opts.Theme.OrDefault(),
+		theme:    th,
 	}
+	m.syncInputWidth()
 	if m.loading {
 		m.cursor = 0
 	} else {
@@ -126,6 +137,22 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 		m.applyFilter(filterCursorFirst)
 	}
 	return m
+}
+
+func (m *suggestModel) syncInputWidth() {
+	inner := max(1, m.width-1)
+	ico := lipgloss.Width(m.typedIco + " ")
+	// Leave one cell for the virtual caret so clampLine does not ellipsize the row.
+	m.input.SetWidth(max(8, inner-ico-1))
+}
+
+func (m suggestModel) prefix() string {
+	return m.input.Value()
+}
+
+func (m *suggestModel) setPrefix(s string) {
+	m.input.SetValue(s)
+	m.input.CursorEnd()
 }
 
 func suggestSpinTick() tea.Cmd {
@@ -152,12 +179,13 @@ func waitSuggestItems(ch <-chan SuggestItems) tea.Cmd {
 
 func (m *suggestModel) applyFilter(cur filterCursor) {
 	source := m.allItems
-	if _, items, ok := m.cache.best(m.prefix); ok {
+	p := m.prefix()
+	if _, items, ok := m.cache.best(p); ok {
 		source = items
 	}
 	filtered := make([]suggestItem, 0, len(source))
 	for _, it := range source {
-		if strings.HasPrefix(it.cmd, m.prefix) && it.cmd != m.prefix {
+		if strings.HasPrefix(it.cmd, p) && it.cmd != p {
 			filtered = append(filtered, it)
 		}
 	}
@@ -198,15 +226,16 @@ func (m *suggestModel) EnableOverlay(st OverlayState) {
 	if m.overlayY < 0 || m.overlayY+m.overlayH > m.height {
 		m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
 	}
+	m.syncInputWidth()
 }
 
 func (m suggestModel) Init() tea.Cmd {
-	if !m.loading {
-		return nil
-	}
-	cmds := []tea.Cmd{suggestSpinTick()}
-	if m.itemsCh != nil {
-		cmds = append(cmds, waitSuggestItems(m.itemsCh))
+	cmds := []tea.Cmd{m.input.Focus()}
+	if m.loading {
+		cmds = append(cmds, suggestSpinTick())
+		if m.itemsCh != nil {
+			cmds = append(cmds, waitSuggestItems(m.itemsCh))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -220,12 +249,19 @@ func (m suggestModel) rowCount() int {
 
 func (m suggestModel) commandAt(i int) string {
 	if i <= 0 {
-		return m.prefix
+		return m.prefix()
 	}
 	if i-1 < len(m.items) {
 		return m.items[i-1].cmd
 	}
-	return m.prefix
+	return m.prefix()
+}
+
+func (m suggestModel) selectedItem() (suggestItem, bool) {
+	if m.cursor <= 0 || m.cursor-1 >= len(m.items) {
+		return suggestItem{}, false
+	}
+	return m.items[m.cursor-1], true
 }
 
 func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -241,6 +277,7 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
 		}
+		m.syncInputWidth()
 		return m, nil
 	case tea.FocusMsg, tea.BlurMsg:
 		return m, nil
@@ -266,7 +303,7 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		first := m.loading
 		m.loading = false
 		if m.loadedPrefix == "" {
-			m.loadedPrefix = m.prefix
+			m.loadedPrefix = m.prefix()
 		}
 		prev := ""
 		if !first {
@@ -289,6 +326,21 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitSuggestItems(m.itemsCh)
 	case tea.KeyPressMsg:
+		if m.detail {
+			switch msg.String() {
+			case "esc", "ctrl+d":
+				m.detail = false
+				return m, nil
+			case "ctrl+c":
+				m.detail = false
+				m.quitting = true
+				m.print = false
+				m.selected = ""
+				return m, tea.Quit
+			default:
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.quitting = true
@@ -308,11 +360,11 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			sel := m.commandAt(m.cursor)
 			if m.cursor <= 0 {
-				if m.cache.Has(m.prefix) {
+				if m.cache.Has(m.prefix()) {
 					return m, nil
 				}
 			} else if m.cache.Has(sel) {
-				m.prefix = drillPrefix(sel)
+				m.setPrefix(drillPrefix(sel))
 				m.applyFilter(filterCursorFirst)
 				return m, nil
 			}
@@ -322,6 +374,11 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cont = m.print
 			m.quitting = true
 			return m, tea.Quit
+		case "ctrl+d":
+			if it, ok := m.selectedItem(); ok && strings.TrimSpace(it.descr) != "" {
+				m.detail = true
+			}
+			return m, nil
 		case "up", "ctrl+p":
 			if m.cursor > 0 {
 				m.cursor--
@@ -332,27 +389,22 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 			return m, nil
-		case "backspace", "ctrl+h":
-			if m.prefix == "" {
-				return m, nil
-			}
-			r := []rune(m.prefix)
-			m.prefix = string(r[:len(r)-1])
-			if !m.loading {
-				m.applyFilter(filterCursorTyped)
-			}
-			return m, nil
-		default:
-			if msg.Text != "" && msg.Mod&^(tea.ModShift|tea.ModCapsLock|tea.ModNumLock) == 0 {
-				m.prefix += msg.Text
-				if !m.loading {
-					m.applyFilter(filterCursorFirst)
-				}
-			}
-			return m, nil
 		}
+		prev := m.prefix()
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		if m.prefix() != prev && !m.loading {
+			if len(m.prefix()) < len(prev) {
+				m.applyFilter(filterCursorTyped)
+			} else {
+				m.applyFilter(filterCursorFirst)
+			}
+		}
+		return m, cmd
 	}
-	return m, nil
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 func (m suggestModel) SelectedCommand() (string, bool) {
@@ -382,13 +434,23 @@ func (m suggestModel) View() tea.View {
 	}
 
 	header := m.theme.Title.Render("remnix") + "  " + m.theme.Muted.Render("suggestions")
-	if m.loading {
+	if m.detail {
+		header = m.theme.Title.Render("remnix") + "  " + m.theme.Muted.Render("detail")
+	} else if m.loading {
 		frame := suggestSpinFrames[m.spinFrame%len(suggestSpinFrames)]
 		header = m.theme.Title.Render("remnix") + "  " + m.theme.Muted.Render("suggestions") + "  " + m.theme.Accent.Render(frame)
 	}
-	help := m.theme.HelpKey.Render("enter") + m.theme.Help.Render(" insert  ") +
-		m.theme.HelpKey.Render("ctrl+space") + m.theme.Help.Render(" complete  ") +
-		m.theme.HelpKey.Render("esc") + m.theme.Help.Render(" cancel")
+	var help string
+	if m.detail {
+		help = m.theme.HelpKey.Render("ctrl+d") + m.theme.Help.Render(" close  ") +
+			m.theme.HelpKey.Render("esc") + m.theme.Help.Render(" close")
+	} else {
+		help = m.theme.HelpKey.Render("enter") + m.theme.Help.Render(" insert  ") +
+			m.theme.HelpKey.Render("ctrl+space") + m.theme.Help.Render(" complete  ") +
+			m.theme.HelpKey.Render("ctrl+d") + m.theme.Help.Render(" detail  ") +
+			m.theme.HelpKey.Render("ctrl+w") + m.theme.Help.Render(" word  ") +
+			m.theme.HelpKey.Render("esc") + m.theme.Help.Render(" cancel")
+	}
 
 	chrome := 3
 	listH := h - chrome
@@ -399,7 +461,11 @@ func (m suggestModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(clampLine(header, inner))
 	b.WriteByte('\n')
-	b.WriteString(m.renderSuggestRows(inner, listH))
+	if m.detail {
+		b.WriteString(m.renderDetailRows(inner, listH))
+	} else {
+		b.WriteString(m.renderSuggestRows(inner, listH))
+	}
 	b.WriteString(clampLine(help, inner))
 
 	v := tea.NewView(b.String())
@@ -410,9 +476,75 @@ func (m suggestModel) View() tea.View {
 	return v
 }
 
+func (m suggestModel) typedInputView(selected bool) string {
+	th := m.theme
+	if selected {
+		th = th.ForSelect()
+	}
+	st := m.input.Styles()
+	st.Focused.Prompt = lipgloss.NewStyle()
+	st.Focused.Placeholder = th.Muted.Italic(true)
+	if selected {
+		st.Focused.Text = th.Accent
+	} else {
+		st.Focused.Text = th.Muted
+	}
+	m.input.SetStyles(st)
+	return m.input.View()
+}
+
+func (m suggestModel) renderDetailRows(inner, listH int) string {
+	it, ok := m.selectedItem()
+	if !ok {
+		var b strings.Builder
+		for i := 0; i < listH; i++ {
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+	type detailLine struct {
+		text   string
+		accent bool
+	}
+	var lines []detailLine
+	for _, part := range strings.Split(ansi.Wrap(it.cmd, inner, ""), "\n") {
+		lines = append(lines, detailLine{text: part, accent: true})
+	}
+	if d := strings.TrimSpace(it.descr); d != "" {
+		if len(lines) > 0 {
+			lines = append(lines, detailLine{})
+		}
+		for _, part := range strings.Split(ansi.Wrap(d, inner, ""), "\n") {
+			lines = append(lines, detailLine{text: part})
+		}
+	}
+	if len(lines) > listH {
+		lines = lines[:listH]
+		if listH > 0 {
+			lines[listH-1].text = ansi.Truncate(lines[listH-1].text, max(1, inner), "...")
+			lines[listH-1].accent = false
+		}
+	}
+	var b strings.Builder
+	for _, line := range lines {
+		text := clampLine(line.text, inner)
+		if line.accent {
+			text = m.theme.Accent.Render(text)
+		} else if text != "" {
+			text = m.theme.Muted.Render(text)
+		}
+		b.WriteString(text)
+		b.WriteByte('\n')
+	}
+	for i := len(lines); i < listH; i++ {
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func (m suggestModel) renderLoadingRows(inner, listH int) string {
 	frame := suggestSpinFrames[m.spinFrame%len(suggestSpinFrames)]
-	typed := m.theme.Accent.Render(m.typedIco + " " + m.prefix)
+	typed := m.theme.Accent.Render(m.typedIco+" ") + m.typedInputView(true)
 	spin := m.theme.Accent.Render(frame) + " " + m.theme.Muted.Render("loading completions")
 	var b strings.Builder
 	b.WriteString(clampLine(typed, inner))
@@ -448,13 +580,17 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 	if end > n {
 		end = n
 	}
+	prefix := m.prefix()
 	labelw := 4
 	for i := start; i < end; i++ {
-		label := m.prefix
+		label := prefix
 		if i > 0 {
 			label = m.items[i-1].cmd
 		}
 		w := lipgloss.Width(label)
+		if i == 0 {
+			w = lipgloss.Width(prefix) + 1
+		}
 		if w > labelw {
 			labelw = w
 		}
@@ -474,27 +610,33 @@ func (m suggestModel) renderSuggestRows(inner, listH int) string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		icon := m.typedIco
-		label := m.prefix
+		label := prefix
 		descr := ""
 		if i > 0 {
 			icon = m.histIco
 			label = m.items[i-1].cmd
 			descr = m.items[i-1].descr
 		}
-		if lipgloss.Width(label) > labelw {
+		if i != 0 && lipgloss.Width(label) > labelw {
 			label = ansi.Truncate(label, labelw, "...")
 		}
 		label = label + strings.Repeat(" ", max(0, labelw-lipgloss.Width(label)))
-		cmdPart := icon + " " + label
 		th := m.theme
 		if i == m.cursor {
 			th = th.ForSelect()
 		}
-		switch i {
-		case m.cursor:
-			cmdPart = th.Accent.Render(cmdPart)
-		case 0:
-			cmdPart = m.theme.Muted.Render(cmdPart)
+		var cmdPart string
+		if i == 0 {
+			cmdPart = m.theme.Muted.Render(icon+" ")
+			if i == m.cursor {
+				cmdPart = th.Accent.Render(icon + " ")
+			}
+			cmdPart += m.typedInputView(i == m.cursor)
+		} else {
+			cmdPart = icon + " " + label
+			if i == m.cursor {
+				cmdPart = th.Accent.Render(cmdPart)
+			}
 		}
 		line := cmdPart
 		if descr != "" && descBudget > 0 {
@@ -553,14 +695,14 @@ func RunSuggestMenu(opts SuggestMenuOptions, out io.Writer) error {
 	case suggestModel:
 		if cmd, ok := got.SelectedCommand(); ok {
 			if got.ContinueSelected() {
-				cmd = ContinuePrefix + cmd
+				cmd = ContinuePrefix + ContinueBuffer(cmd)
 			}
 			return writeWidgetSelection(out, Options{Widget: opts.Widget, ResultFile: opts.ResultFile}, cmd, got.RunSelected())
 		}
 	case *suggestModel:
 		if cmd, ok := got.SelectedCommand(); ok {
 			if got.ContinueSelected() {
-				cmd = ContinuePrefix + cmd
+				cmd = ContinuePrefix + ContinueBuffer(cmd)
 			}
 			return writeWidgetSelection(out, Options{Widget: opts.Widget, ResultFile: opts.ResultFile}, cmd, got.RunSelected())
 		}

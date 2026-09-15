@@ -53,6 +53,8 @@ type inspectModel struct {
 	fieldErrs        []string
 	selectedCmds     map[string]struct{}
 	selectedRuns     map[string]struct{}
+	visualMode       bool
+	visualAnchor     int
 	deletedIDs       map[string]struct{}
 	confirmN         int
 	confirmKind      string
@@ -162,6 +164,10 @@ func (m *inspectModel) handleInspectKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case "esc":
+		if m.visualMode {
+			m.clearVisualMode()
+			return true, nil
+		}
 		if m.view == inspectRuns {
 			m.backToOverview()
 			return true, nil
@@ -182,6 +188,12 @@ func (m *inspectModel) handleInspectKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		return true, nil
+	case "shift+v", "V":
+		if m.view == inspectAdvanced && m.pane == paneResults {
+			m.toggleVisualMode()
+			return true, nil
+		}
+		return false, nil
 	case "up", "ctrl+p":
 		if m.view == inspectAdvanced && m.pane == paneSidebar {
 			m.moveField(-1)
@@ -239,6 +251,9 @@ func (m *inspectModel) handleInspectKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			if m.view == inspectAdvanced && m.pane == paneSidebar {
 				return false, nil
 			}
+			if m.visualMode {
+				return true, nil
+			}
 			m.toggleSelected()
 			return true, nil
 		}
@@ -247,6 +262,9 @@ func (m *inspectModel) handleInspectKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		if m.view == inspectAdvanced || m.view == inspectRuns {
 			if m.view == inspectAdvanced && m.pane == paneSidebar {
 				return false, nil
+			}
+			if m.visualMode {
+				return true, nil
 			}
 			m.toggleSelectAll()
 			return true, nil
@@ -379,6 +397,41 @@ func (m *inspectModel) moveCursor(delta int) {
 		return
 	}
 	m.cursor = min(n-1, max(0, m.cursor+delta))
+	if m.visualMode && m.view == inspectAdvanced {
+		m.syncVisualSelection()
+	}
+}
+
+func (m *inspectModel) clearVisualMode() {
+	m.visualMode = false
+}
+
+func (m *inspectModel) toggleVisualMode() {
+	if m.visualMode {
+		m.clearVisualMode()
+		return
+	}
+	if len(m.visible) == 0 {
+		return
+	}
+	m.visualMode = true
+	m.visualAnchor = m.cursor
+	m.syncVisualSelection()
+}
+
+func (m *inspectModel) syncVisualSelection() {
+	m.selectedCmds = map[string]struct{}{}
+	n := len(m.visible)
+	if n == 0 {
+		return
+	}
+	lo := min(m.visualAnchor, m.cursor)
+	hi := max(m.visualAnchor, m.cursor)
+	lo = max(0, lo)
+	hi = min(n-1, hi)
+	for i := lo; i <= hi; i++ {
+		m.selectedCmds[m.visible[i].Command] = struct{}{}
+	}
 }
 
 func (m inspectModel) pageDelta() int {
@@ -422,6 +475,7 @@ func (m *inspectModel) openRuns() {
 		return
 	}
 	s := m.visible[m.cursor]
+	m.clearVisualMode()
 	m.returnView = m.view
 	runs, err := m.loadCurrentRuns(s.Command)
 	if err != nil {
@@ -714,8 +768,16 @@ func (m inspectModel) renderInspectHelp() string {
 			key("ctrl+c", "quit")
 	}
 	if m.view == inspectAdvanced {
+		if m.visualMode {
+			return key("V", "visual") + m.theme.Help.Render("  ·  ") +
+				key("esc", "exit visual") + m.theme.Help.Render("  ·  ") +
+				key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
+				key(m.theme.Move(), "extend") + m.theme.Help.Render("  ·  ") +
+				key("ctrl+c", "quit")
+		}
 		return key("ctrl+w", "criteria") + m.theme.Help.Render("  ·  ") +
 			key("space", "select") + m.theme.Help.Render("  ·  ") +
+			key("V", "visual") + m.theme.Help.Render("  ·  ") +
 			key("ctrl+a", "all") + m.theme.Help.Render("  ·  ") +
 			key("ctrl+x", "delete") + m.theme.Help.Render("  ·  ") +
 			key("enter", "open") + m.theme.Help.Render("  ·  ") +
@@ -743,8 +805,10 @@ func (m inspectModel) renderInspectInput() string {
 		badge = "[ FAIL ]"
 	}
 	if m.view == inspectAdvanced {
-		hint := m.theme.Muted.Render("ctrl+w criteria · space select")
-		if m.pane == paneSidebar {
+		hint := m.theme.Muted.Render("ctrl+w criteria · space/V select")
+		if m.visualMode {
+			hint = m.theme.Muted.Render("visual · move extends · esc exits")
+		} else if m.pane == paneSidebar {
 			hint = m.theme.Muted.Render("tab fields · ctrl+w results")
 		}
 		return m.theme.Badge.Render(badge) + " " + hint

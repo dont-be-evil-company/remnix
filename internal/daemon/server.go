@@ -16,6 +16,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/history"
 	"github.com/dont-be-evil-company/remnix/internal/protocol"
 	"github.com/dont-be-evil-company/remnix/internal/search"
+	"github.com/dont-be-evil-company/remnix/internal/suggestcache"
 	"github.com/dont-be-evil-company/remnix/internal/terminal"
 	"github.com/dont-be-evil-company/remnix/internal/tui"
 	"github.com/dont-be-evil-company/remnix/internal/version"
@@ -37,6 +38,7 @@ type Server struct {
 	suggestCaches map[string]*tui.SuggestCache
 	helpCaches    map[string]*helpparse.Cache
 	helpProbe     helpparse.ProbeFunc
+	suggestStore  *suggestcache.Store
 }
 
 func NewServer() *Server {
@@ -58,7 +60,13 @@ func (s *Server) Open() error {
 		func(e history.Entry) error { return a.EnqueueHistoryCreated(e) },
 		func(e history.Entry) error { return a.TombstoneEntries([]history.Entry{e}) },
 	)
+	sc, err := suggestcache.Open(config.SuggestCachePath())
+	if err != nil {
+		_ = a.Close()
+		return err
+	}
 	s.app = a
+	s.suggestStore = sc
 	s.history = svc
 	s.sessions = terminal.NewManagerRPC(terminal.RPC{
 		Start: svc.StartCommand,
@@ -108,10 +116,17 @@ func (s *Server) Close() error {
 	if s.sessions != nil {
 		s.sessions.CloseAll()
 	}
-	if s.app != nil {
-		return s.app.Close()
+	var err error
+	if s.suggestStore != nil {
+		err = s.suggestStore.Close()
+		s.suggestStore = nil
 	}
-	return nil
+	if s.app != nil {
+		if e := s.app.Close(); e != nil && err == nil {
+			err = e
+		}
+	}
+	return err
 }
 
 func (s *Server) App() *app.App { return s.app }

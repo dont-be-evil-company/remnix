@@ -502,13 +502,16 @@ function __remnix_suggest_completions --argument-names buf
     __remnix_comp_fill "$buf"
     set -l need_space 0
     if test -n "$buf"; and not string match -qr '\s$' -- $buf
-        set need_space 1
-        for s in $__remnix_comp_lines
-            set -l rest (string replace -r -- '^'(string escape --style=regex -- $buf) '' $s)
-            set -l stripped (string replace -ra '\s' '' -- $rest)
-            if test -n "$stripped"
-                set need_space 0
-                break
+        set -l last (string split -r -m1 -- ' ' $buf)[-1]
+        if not string match -q -- '-*' $last
+            set need_space 1
+            for s in $__remnix_comp_lines
+                set -l rest (string replace -r -- '^'(string escape --style=regex -- $buf) '' $s)
+                set -l stripped (string replace -ra '\s' '' -- $rest)
+                if test -n "$stripped"
+                    set need_space 0
+                    break
+                end
             end
         end
     end
@@ -594,7 +597,10 @@ function remnix-suggest-menu
         if string match -q '__remnix_continue__:*' -- $selected
             set query (string replace -r '^__remnix_continue__:' '' -- $selected)
             if not string match -qr '\s$' -- $query
-                set query "$query "
+                set -l last (string split -r -m1 -- ' ' $query)[-1]
+                if not string match -q -- '-*' $last
+                    set query "$query "
+                end
             end
             commandline --current-buffer --replace -- ''
             commandline --current-buffer --replace -- "$query"
@@ -742,7 +748,10 @@ def --env remnix-suggest-menu [] {
     if ($selected | str starts-with "__remnix_continue__:") {
       $query = ($selected | str replace -r '^__remnix_continue__:' '')
       if not ($query | str ends-with " ") {
-        $query = $"($query) "
+        let last = ($query | split row " " | last)
+        if not ($last | str starts-with "-") {
+          $query = $"($query) "
+        }
       }
       commandline edit --replace $query
       $drilled = true

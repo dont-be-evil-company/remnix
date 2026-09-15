@@ -122,6 +122,10 @@ func DatabasePath() string {
 	return filepath.Join(DataDir(), "history.db")
 }
 
+func SuggestCachePath() string {
+	return filepath.Join(DataDir(), "suggest-cache.db")
+}
+
 func LockPath() string {
 	return filepath.Join(DataDir(), "remnix.lock")
 }
@@ -156,6 +160,22 @@ func TerminalSocketPath() string {
 
 func PIDFilePath() string {
 	return filepath.Join(RuntimeDir(), "daemon.pid")
+}
+
+func SuggestCacheWarmupPIDPath() string {
+	return filepath.Join(RuntimeDir(), "suggest-cache-warmup.pid")
+}
+
+func SuggestCacheWarmupLogPath() string {
+	return filepath.Join(RuntimeDir(), "suggest-cache-warmup.log")
+}
+
+func SuggestCacheWarmupStatusPath() string {
+	return filepath.Join(DataDir(), "suggest-cache-warmup.json")
+}
+
+func SuggestCacheWarmupLockPath() string {
+	return filepath.Join(DataDir(), "suggest-cache-warmup.lock")
 }
 
 // PtyProxySocketPath is the per-process screen-snapshot socket for pty-proxy.

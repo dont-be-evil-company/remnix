@@ -495,6 +495,23 @@ const AcceptPrefix = "__remnix_accept__:"
 // this when the prefix is already cached.
 const ContinuePrefix = "__remnix_continue__:"
 
+// ContinueBuffer is the line Ctrl+Space reopens the overlay with. Command
+// tokens get a trailing space so the next completer runs; a partial flag
+// (`--`, `--acc`) must not, or `--` becomes end-of-options and hides flags.
+func ContinueBuffer(s string) string {
+	if s == "" || strings.HasSuffix(s, " ") {
+		return s
+	}
+	last := s
+	if i := strings.LastIndexAny(s, " \t"); i >= 0 {
+		last = s[i+1:]
+	}
+	if strings.HasPrefix(last, "-") {
+		return s
+	}
+	return s + " "
+}
+
 // FormatSelection is the widget RPC payload: accept-prefix when Enter should
 // run the command. No trailing newline (NUL fields keep it).
 func FormatSelection(cmd string, run bool) string {

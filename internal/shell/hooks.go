@@ -565,7 +565,9 @@ __remnix_compadd() {
   i=1
   while (( i <= $# )); do
     case "${argv[i]}" in
-      --) break ;;
+      # bashcompinit ends options with a lone "-"; without that, flag
+      # matches like --project= are parsed as -p/-S/... and corrupt insert.
+      -|--) break ;;
       -*)
         flags="${argv[i]#-}"
         fidx=1
@@ -774,7 +776,8 @@ __remnix_suggest_completions() {
       __remnix_comp_applied_lines "$BUFFER"
     fi
     local -i need_space=0
-    if [[ -n $BUFFER && $BUFFER != *[[:space:]] ]]; then
+    local last="${BUFFER##* }"
+    if [[ -n $BUFFER && $BUFFER != *[[:space:]] && $last != -* ]]; then
       need_space=1
       local s rest
       for s in "${__remnix_comp_lines[@]}"; do
@@ -1427,7 +1430,14 @@ remnix-suggest-menu() {
       selected="${selected#__remnix_continue__:}"
       [[ -n $selected ]] || break
       LBUFFER="$selected"
-      [[ $LBUFFER == *[[:space:]] ]] || LBUFFER="$LBUFFER "
+      # A trailing dash token is a partial flag. A space turns -- into
+      # end-of-options and hides flag completions.
+      if [[ $LBUFFER != *[[:space:]] ]]; then
+        local last="${LBUFFER##* }"
+        if [[ $last != -* ]]; then
+          LBUFFER="$LBUFFER "
+        fi
+      fi
       RBUFFER=""
       zle redisplay
       drilled=1
