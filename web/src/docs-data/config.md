@@ -61,7 +61,7 @@ filenames inside them are fixed.
 | `$XDG_DATA_HOME/remnix/local.yaml`              | This machine’s `device_id` and `device_name`                           |
 | `$XDG_DATA_HOME/remnix/rclone.conf`             | rclone credentials (mode 0600)                                         |
 | `$XDG_DATA_HOME/remnix/history.db`              | Local history and key metadata                                         |
-| `$XDG_DATA_HOME/remnix/suggest-cache.db`        | Persistent CLI `--help` cache for overlay suggestion descriptions      |
+| `$XDG_DATA_HOME/remnix/suggest-cache.db`        | Persistent CLI `--help` cache for overlay suggestion names and descriptions |
 | `$XDG_DATA_HOME/remnix/daemon-status.json`      | Last daemon sync result                                                |
 | `$XDG_DATA_HOME/remnix/setup-state.json`        | Crash-safe setup marker                                                |
 | `$XDG_RUNTIME_DIR/remnix/control.sock`          | Daemon RPC (suggest, history, overlays)                                |
@@ -188,13 +188,14 @@ matches so a huge path completion cannot freeze the prompt.
 
 | Shell | Ghost text        | Ctrl+R | Suggest overlay (Ctrl+Space)                                    |
 | ----- | ----------------- | ------ | --------------------------------------------------------------- |
-| zsh   | `POSTDISPLAY`     | yes    | compsys overlay when `pty_proxy` is on; else `POSTDISPLAY` menu |
-| bash  | ble.sh, if loaded | yes    | history overlay when `suggest.menu` is on                       |
-| fish  | not supported     | yes    | `complete -C` overlay when `suggest.menu` is on                 |
-| nu    | not supported     | yes    | `--ide-complete` overlay when `suggest.menu` is on              |
+| zsh   | `POSTDISPLAY`     | yes    | compsys overlay when `pty_proxy` is on; else `POSTDISPLAY` menu. No completer uses parsed `--help` |
+| bash  | ble.sh, if loaded | yes    | `--help` then history overlay when `suggest.menu` is on                 |
+| fish  | not supported     | yes    | `complete -C` overlay when `suggest.menu` is on; no completer uses parsed `--help` |
+| nu    | not supported     | yes    | `--ide-complete` overlay when `suggest.menu` is on; empty results use parsed `--help` |
 
-Overlay descriptions are filled from `suggest-cache.db` (parsed `--help`).
-A new session does not re-run `--help` when the page is already cached.
+When a CLI has no dedicated completer, overlay **names** (subcommands and flags)
+and descriptions come from parsed `--help` via `suggest-cache.db`. A new session
+does not re-run `--help` when the page is already cached.
 `remnix suggest cache warmup aws gcloud` starts a background walk into that
 file (a second warmup while one is running is queued onto the same worker).
 `remnix suggest cache warmup --status` attaches to live per-page progress.

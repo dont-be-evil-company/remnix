@@ -17,10 +17,15 @@ func bash(bin string, opts Options) string {
 		extra += `
 __remnix_suggest_menu() {
   local selected
-  if ! __remnix_overlay suggest-interactive "$READLINE_LINE"; then
-    __remnix_widget_run suggest --interactive --prefix "$READLINE_LINE" --cwd "$PWD" || return
+  if ! __remnix_overlay_complete "$READLINE_LINE" 0; then
+    if ! __remnix_overlay suggest-interactive "$READLINE_LINE"; then
+      __remnix_widget_run suggest --interactive --prefix "$READLINE_LINE" --cwd "$PWD" || return
+    fi
   fi
   selected=$REPLY
+  if [[ "$selected" == __remnix_continue__:* ]]; then
+    selected="${selected#__remnix_continue__:}"
+  fi
   if [[ "$selected" == __remnix_accept__:* ]]; then
     READLINE_LINE="${selected#__remnix_accept__:}"
     READLINE_POINT=${#READLINE_LINE}
@@ -85,6 +90,21 @@ __remnix_overlay() {
   fi
   if [[ -n ${__remnix_attach:-} ]]; then
     REPLY=$("$__remnix_attach" --rpc "$op" "$query" "$PWD" "$REMNIX_SESSION_ID" 2>/dev/null) || return 1
+    return 0
+  fi
+  return 1
+}
+
+__remnix_overlay_complete() {
+  local prefix=$1 n=$2
+  shift 2
+  [[ -n ${REMNIX_SESSION_ID:-} ]] || return 1
+  __remnix_proxy_tty_here || return 1
+  if __remnix_rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$PATH" "$n" "$@"; then
+    return 0
+  fi
+  if [[ -n ${__remnix_attach:-} ]]; then
+    REPLY=$("$__remnix_attach" --rpc suggest-complete-interactive "$prefix" "$PWD" "$REMNIX_SESSION_ID" "$PATH" "$n" "$@" 2>/dev/null) || return 1
     return 0
   fi
   return 1
@@ -520,6 +540,24 @@ function __remnix_suggest_completions --argument-names buf
     end
 end
 
+function __remnix_suggest_no_completer --argument-names buf
+    set -l words (string split -n ' ' -- $buf)
+    test (count $words) -gt 0; or return 1
+    set -l cmd $words[1]
+    if test (count (complete -c $cmd 2>/dev/null)) -gt 0
+        return 1
+    end
+    set -l base (string replace -r '.*/' '' -- $cmd)
+    if test $base != $cmd; and test (count (complete -c $base 2>/dev/null)) -gt 0
+        return 1
+    end
+    if not string match -qr '[[:space:]]' -- $buf
+        command -q $cmd
+        or return 1
+    end
+    return 0
+end
+
 function __remnix_overlay_complete_begin --argument-names prefix
     if not set -q REMNIX_SESSION_ID
         return 1
@@ -565,7 +603,6 @@ end
 
 function remnix-suggest-menu
     set -l query (commandline --current-buffer)
-    set -l drilled 0
     set -l selected ''
     while true
         set -l started 0
@@ -573,18 +610,15 @@ function remnix-suggest-menu
             set started 1
         end
         __remnix_suggest_completions "$query"
+        if __remnix_suggest_no_completer "$query"
+            set -g __remnix_comp_lines
+            set -g __remnix_comp_descrs
+        end
         set -l n (count $__remnix_comp_lines)
         if test $started -eq 1
-            if test $n -eq 0 -a $drilled -eq 1
-                __remnix_overlay_complete_finish -1
-                break
-            end
             __remnix_overlay_complete_finish $n
             or break
         else if test $n -eq 0
-            if test $drilled -eq 1
-                break
-            end
             if not __remnix_overlay_rpc suggest-interactive "$query" "$PWD"
                 __remnix_widget_run suggest --interactive --prefix "$query" --cwd "$PWD"
                 or break
@@ -604,7 +638,6 @@ function remnix-suggest-menu
             end
             commandline --current-buffer --replace -- ''
             commandline --current-buffer --replace -- "$query"
-            set drilled 1
             continue
         end
         break
@@ -707,6 +740,16 @@ def __remnix_complete_overlay [query: string, comps: record] {
       return ($rpc.stdout | str trim)
     }
   }
+  if $n == 0 {
+    let outf = (^mktemp | str trim)
+    let ran = (do { ^$"($__remnix_bin)" suggest --interactive --prefix $query --cwd $env.PWD --result-file $outf o> /dev/tty e> /dev/tty } | complete)
+    let selected = (try { open --raw $outf } catch { "" } | str trim)
+    try { rm $outf }
+    if $ran.exit_code != 0 {
+      return "__remnix_err__"
+    }
+    return $selected
+  }
   let itemsf = (^mktemp | str trim)
   let outf = (^mktemp | str trim)
   mut i = 0
@@ -730,17 +773,10 @@ def __remnix_complete_overlay [query: string, comps: record] {
 
 def --env remnix-suggest-menu [] {
   mut query = (commandline)
-  mut drilled = false
   mut selected = ""
   loop {
     let comps = (__remnix_nu_completions $query)
-    let n = ($comps.items | length)
-    if $n == 0 {
-      if $drilled { break }
-      $selected = (__remnix_overlay_or_tui "suggest-interactive" $query)
-    } else {
-      $selected = (__remnix_complete_overlay $query $comps)
-    }
+    $selected = (__remnix_complete_overlay $query $comps)
     if ($selected | str starts-with "__remnix_err__") {
       commandline edit --replace $query
       return
@@ -754,7 +790,6 @@ def --env remnix-suggest-menu [] {
         }
       }
       commandline edit --replace $query
-      $drilled = true
       continue
     }
     break

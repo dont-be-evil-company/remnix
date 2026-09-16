@@ -116,29 +116,9 @@ func (s *Server) searchInteractive(query, cwd, sessionID string) (string, error)
 }
 
 func (s *Server) suggestInteractive(prefix, cwd, sessionID string) (string, error) {
-	if s.sessions == nil {
-		return "", terminal.ErrNoSession
-	}
-	if s.sessions.Get(sessionID) == nil {
-		return "", fmt.Errorf("%w %q", terminal.ErrNoSession, sessionID)
-	}
-	limit := 8
-	typed, hist := "›", "*"
-	if s.app != nil && s.app.Config != nil {
-		limit = s.app.Config.Suggest.MenuLimit()
-		typed = s.app.Config.IconTyped()
-		hist = s.app.Config.IconHistory()
-	}
-	var items []string
-	if s.history != nil {
-		cands, err := s.history.SuggestCandidates(prefix, cwd)
-		if err != nil {
-			return "", err
-		}
-		items = s.suggestList(prefix, cwd, cands, limit)
-	}
-	sel, err := s.runSuggestOverlay(prefix, sessionID, items, nil, typed, hist, limit, nil)
-	return s.finishSuggestOverlay(sessionID, sel, err)
+	return s.suggestCompleteInteractive(prefix, cwd, sessionID, "", func() ([]string, []string, bool, error) {
+		return nil, nil, false, nil
+	})
 }
 
 func (s *Server) probeFn(path string) helpparse.ProbeFunc {
@@ -216,13 +196,7 @@ func (s *Server) suggestCompleteInteractive(prefix, cwd, sessionID, path string,
 		res := <-done
 		return s.finishSuggestOverlay(sessionID, res.sel, res.err)
 	}
-	if len(items) == 0 && s.history != nil {
-		cands, histErr := s.history.SuggestCandidates(prefix, cwd)
-		if histErr == nil {
-			items = s.suggestList(prefix, cwd, cands, limit)
-			descrs = nil
-		}
-	}
+	items, descrs = s.fillSuggestItems(sessionID, prefix, cwd, path, items, descrs, limit)
 	if !send(tui.SuggestItems{Items: items, Descrs: descrs}) {
 		res := <-done
 		return s.finishSuggestOverlay(sessionID, res.sel, res.err)
@@ -315,4 +289,17 @@ func tuiRemote(keys io.Reader, paint io.Writer, snap ptyproxy.Snapshot, place pt
 
 func (s *Server) enrichSuggestDescrs(sessionID, prefix string, items, descrs []string) []string {
 	return helpparse.FillEmpty(context.Background(), prefix, items, descrs, s.helpCacheFor(sessionID), s.probeFn(""))
+}
+
+func (s *Server) fillSuggestItems(sessionID, prefix, cwd, path string, items, descrs []string, limit int) ([]string, []string) {
+	return helpparse.CompleteOrHistory(context.Background(), prefix, items, descrs, s.helpCacheFor(sessionID), s.probeFn(path), func() []string {
+		if s.history == nil {
+			return nil
+		}
+		cands, err := s.history.SuggestCandidates(prefix, cwd)
+		if err != nil {
+			return nil
+		}
+		return s.suggestList(prefix, cwd, cands, limit)
+	})
 }

@@ -2,6 +2,7 @@ package helpparse
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -220,6 +221,115 @@ func TestFillEmptySkipsWhenDescribed(t *testing.T) {
 	got := FillEmpty(context.Background(), "tool ", []string{"tool daemon"}, []string{"already"}, NewCache(), probe)
 	if probes != 0 || got[0] != "already" {
 		t.Fatalf("probes=%d got=%v", probes, got)
+	}
+}
+
+func TestItemsFromCobraHelp(t *testing.T) {
+	cache := NewCache()
+	probes := 0
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		probes++
+		if strings.Join(argv, " ") != "tool" {
+			t.Fatalf("argv %v", argv)
+		}
+		return readFixture(t, "cobra.txt"), nil
+	}
+	items, descrs := Items(context.Background(), "tool ", cache, probe)
+	byItem := map[string]string{}
+	for i, item := range items {
+		byItem[item] = descrs[i]
+	}
+	if byItem["tool daemon"] != "Run the remnix core daemon" {
+		t.Fatalf("daemon: %q items=%v", byItem["tool daemon"], items)
+	}
+	if byItem["tool --verbose"] != "more output" {
+		t.Fatalf("--verbose: %q", byItem["tool --verbose"])
+	}
+	if _, ok := byItem["tool help"]; !ok {
+		t.Fatalf("missing help: %v", items)
+	}
+	partial, _ := Items(context.Background(), "tool da", cache, probe)
+	if probes != 1 {
+		t.Fatalf("probes %d, want 1 (cache; partial still uses parent page)", probes)
+	}
+	if len(partial) != len(items) {
+		t.Fatalf("partial prefix must return full sibling list: %d vs %d", len(partial), len(items))
+	}
+}
+
+func TestItemsFromArgparseHelp(t *testing.T) {
+	items, descrs := Items(context.Background(), "tool ", NewCache(), func(ctx context.Context, argv []string) (string, error) {
+		return readFixture(t, "argparse.txt"), nil
+	})
+	byItem := map[string]string{}
+	for i, item := range items {
+		byItem[item] = descrs[i]
+	}
+	if byItem["tool auth"] != "Manage credentials" || byItem["tool --project"] != "Google Cloud project ID" {
+		t.Fatalf("got %v", byItem)
+	}
+}
+
+func TestItemsEmptyPrefix(t *testing.T) {
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		t.Fatal("empty prefix must not probe")
+		return "", nil
+	}
+	items, descrs := Items(context.Background(), "", NewCache(), probe)
+	if items != nil || descrs != nil {
+		t.Fatalf("got %v %v", items, descrs)
+	}
+	if items, _ = Items(context.Background(), "echo hi; rm", NewCache(), probe); items != nil {
+		t.Fatal("unsafe argv")
+	}
+}
+
+func TestCompleteOrHistoryPrefersCompsys(t *testing.T) {
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		t.Fatal("compsys items must not probe")
+		return "", nil
+	}
+	items, descrs := CompleteOrHistory(context.Background(), "tool ", []string{"tool daemon"}, []string{"from compsys"}, NewCache(), probe, func() []string {
+		t.Fatal("compsys items must not use history")
+		return []string{"tool from-history"}
+	})
+	if len(items) != 1 || items[0] != "tool daemon" || descrs[0] != "from compsys" {
+		t.Fatalf("got %v %v", items, descrs)
+	}
+}
+
+func TestCompleteOrHistoryPrefersHelpOverHistory(t *testing.T) {
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		return readFixture(t, "cobra.txt"), nil
+	}
+	items, descrs := CompleteOrHistory(context.Background(), "tool ", nil, nil, NewCache(), probe, func() []string {
+		t.Fatal("help items must not fall through to history")
+		return []string{"tool from-history"}
+	})
+	if len(items) == 0 {
+		t.Fatal("want help items")
+	}
+	found := false
+	for i, item := range items {
+		if item == "tool daemon" && descrs[i] == "Run the remnix core daemon" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing daemon: %v %v", items, descrs)
+	}
+}
+
+func TestCompleteOrHistoryFallsBackToHistory(t *testing.T) {
+	probe := func(ctx context.Context, argv []string) (string, error) {
+		return "", fmt.Errorf("no help")
+	}
+	items, descrs := CompleteOrHistory(context.Background(), "tool ", nil, nil, NewCache(), probe, func() []string {
+		return []string{"tool from-history"}
+	})
+	if len(items) != 1 || items[0] != "tool from-history" || descrs != nil {
+		t.Fatalf("got %v %v", items, descrs)
 	}
 }
 

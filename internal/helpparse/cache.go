@@ -247,6 +247,55 @@ func FillEmpty(ctx context.Context, prefix string, items, descrs []string, cache
 	return Enrich(prefix, items, descrs, ents)
 }
 
+// Items probes parent --help and returns overlay rows (full command lines
+// plus descriptions). The overlay filters by prefix, so a partial last
+// token still gets the full sibling list.
+func Items(ctx context.Context, prefix string, cache *Cache, probe ProbeFunc) (items, descrs []string) {
+	argv := HelpArgv(prefix)
+	if len(argv) == 0 {
+		return nil, nil
+	}
+	ents, _, ok := lookupPage(cache, argv)
+	if !ok {
+		ents = probeAndPersist(ctx, cache, argv, probe).ents
+	}
+	return entitiesToItems(argv, ents)
+}
+
+func entitiesToItems(argv []string, ents []Entity) (items, descrs []string) {
+	if len(argv) == 0 || len(ents) == 0 {
+		return nil, nil
+	}
+	head := strings.Join(argv, " ")
+	for _, e := range ents {
+		if e.Name == "" || !SafeArg(e.Name) {
+			continue
+		}
+		items = append(items, head+" "+e.Name)
+		descrs = append(descrs, e.Descr)
+	}
+	return items, descrs
+}
+
+// HistoryFunc returns history overlay rows when --help yielded nothing.
+type HistoryFunc func() []string
+
+// CompleteOrHistory returns compsys items unchanged, else Items from --help,
+// else history. History is only called when both compsys and help are empty.
+func CompleteOrHistory(ctx context.Context, prefix string, items, descrs []string, cache *Cache, probe ProbeFunc, history HistoryFunc) ([]string, []string) {
+	if len(items) > 0 {
+		return items, descrs
+	}
+	items, descrs = Items(ctx, prefix, cache, probe)
+	if len(items) > 0 {
+		return items, descrs
+	}
+	if history != nil {
+		return history(), nil
+	}
+	return nil, nil
+}
+
 // FillNodes probes each still-empty overlay row's own help (not the parent
 // page) and fills a NAME/DESCRIPTION one-liner. Lookups from L1/L2 do not
 // count toward limit. limit < 1 probes every missing row; otherwise at most

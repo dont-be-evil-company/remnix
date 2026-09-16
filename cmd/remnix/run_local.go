@@ -365,11 +365,8 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 			return err
 		}
 		itemIco = cfg.Suggest.IconCompletion()
-	} else {
-		items, err = loadSuggestList(prefix, cwd)
-		if err != nil {
-			return err
-		}
+	} else if len(helpparse.HelpArgv(prefix)) > 0 {
+		itemIco = cfg.Suggest.IconCompletion()
 	}
 	ch := make(chan tui.SuggestItems, 16)
 	uiDone := make(chan struct{})
@@ -381,14 +378,25 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 			case <-uiDone:
 			}
 		}
+		cache := helpparse.NewCache()
+		if len(items) == 0 || helpparse.NeedsEnrich(items, descrs) {
+			if store, err := suggestcache.Open(config.SuggestCachePath()); err == nil {
+				defer store.Close()
+				cache.SetDurable(store)
+			}
+		}
+		if len(items) == 0 {
+			items, descrs = helpparse.CompleteOrHistory(context.Background(), prefix, items, descrs, cache, nil, func() []string {
+				hist, err := loadSuggestList(prefix, cwd)
+				if err != nil {
+					return nil
+				}
+				return hist
+			})
+		}
 		push(tui.SuggestItems{Items: items, Descrs: descrs})
 		if !helpparse.NeedsEnrich(items, descrs) {
 			return
-		}
-		cache := helpparse.NewCache()
-		if store, err := suggestcache.Open(config.SuggestCachePath()); err == nil {
-			defer store.Close()
-			cache.SetDurable(store)
 		}
 		d := helpparse.FillEmpty(context.Background(), prefix, items, descrs, cache, nil)
 		push(tui.SuggestItems{Items: items, Descrs: d})

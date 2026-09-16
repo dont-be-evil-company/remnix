@@ -166,7 +166,8 @@ history match from the local database; accept keys (Right, Tab, ...) insert only
 that ghost suffix. History stays ghost text: it is not listed in the dropdown.
 Set `completions: true` to list the shell’s own completers (carapace, git, and
 anything else registered with compsys), with descriptions when the completer
-provides them. The first row is always the text you typed (no item is selected
+provides them. CLIs with no registered completer still list subcommands and
+flags parsed from `--help` (cached in `suggest-cache.db`). The first row is always the text you typed (no item is selected
 until you navigate). Completions sit directly under that typed row. Press Tab to
 load them into the float (Tab again cycles; results are cached until the line
 changes). Up/Down (and Ctrl-P/N) start at the first completion and rewrite the
@@ -201,10 +202,10 @@ Ghost text stays in each shell’s line editor:
 
 | Shell | Ghost text | Ctrl+R | Suggest overlay (Ctrl+Space) |
 | --- | --- | --- | --- |
-| zsh | `POSTDISPLAY` | yes | compsys overlay when `pty_proxy` is on; else POSTDISPLAY menu |
-| bash | ble.sh, if loaded | yes | history overlay when `suggest.menu` is on |
-| fish | not supported (no `POSTDISPLAY`) | yes | `complete -C` overlay when `suggest.menu` is on |
-| nu | not supported | yes | `--ide-complete` overlay when `suggest.menu` is on |
+| zsh | `POSTDISPLAY` | yes | compsys overlay when `pty_proxy` is on; else POSTDISPLAY menu. CLIs with no completer use parsed `--help` |
+| bash | ble.sh, if loaded | yes | `--help` then history overlay when `suggest.menu` is on |
+| fish | not supported (no `POSTDISPLAY`) | yes | `complete -C` overlay when `suggest.menu` is on; no completer uses parsed `--help` |
+| nu | not supported | yes | `--ide-complete` overlay when `suggest.menu` is on; empty results use parsed `--help` |
 
 Windows has no pty-proxy; widgets use the alt-screen. Put `eval "$(remnix init ...)"`
 near the top of the rc file so only the proxy re-execs, not the rest of your
@@ -289,7 +290,7 @@ Files:
 | `~/.local/share/remnix/rclone.conf` | rclone credentials (not for git) |
 | `~/.local/share/remnix/local.yaml` | This machine’s device id and name |
 | `~/.local/share/remnix/history.db` | Local history and key metadata |
-| `~/.local/share/remnix/suggest-cache.db` | Persistent CLI `--help` cache for overlay descriptions |
+| `~/.local/share/remnix/suggest-cache.db` | Persistent CLI `--help` cache for overlay names and descriptions |
 | `~/.local/share/remnix/daemon-status.json` | Last daemon sync result |
 | `$XDG_RUNTIME_DIR/remnix/control.sock` | Unified daemon control RPC (suggest / history / overlay / stats) |
 | `$XDG_RUNTIME_DIR/remnix/terminal.sock` | Daemon terminal attach socket |

@@ -616,6 +616,12 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if !strings.Contains(over, "POSTDISPLAY") {
 		t.Fatal("ghost text must remain with the overlay menu")
 	}
+	if !strings.Contains(over, "__remnix_suggest_no_completer") || !strings.Contains(over, `${+_comps[$cmd]}`) {
+		t.Fatal("proxy-on must detect CLIs with no dedicated completer")
+	}
+	if strings.Contains(menu, "complete_finish -1") || strings.Contains(menu, "$#items == 0 && drilled") {
+		t.Fatal("empty compsys must send n=0 so --help can fill, not abort drill")
+	}
 }
 
 func TestBashBleGhostAndOverlayMenu(t *testing.T) {
@@ -631,6 +637,9 @@ func TestBashBleGhostAndOverlayMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "suggest --interactive") || !strings.Contains(out, `\C-@`) {
 		t.Fatal("bash should bind Ctrl+Space overlay menu")
+	}
+	if !strings.Contains(out, "suggest-complete-interactive") {
+		t.Fatal("bash Ctrl+Space must use empty complete-interactive so --help can fill")
 	}
 	off, _ := Integration("bash", "remnix", Options{SuggestEnabled: false})
 	if strings.Contains(off, "source:remnix") {
@@ -654,6 +663,12 @@ func TestFishOverlayMenuNoGhost(t *testing.T) {
 	}
 	if !strings.Contains(out, "__remnix_overlay_complete_begin") {
 		t.Fatal("fish must open the overlay before capturing completions")
+	}
+	if !strings.Contains(out, "__remnix_suggest_no_completer") || !strings.Contains(out, "complete -c") {
+		t.Fatal("fish must detect CLIs with no dedicated completer")
+	}
+	if strings.Contains(out, "complete_finish -1") || strings.Contains(out, "drilled -eq 1") {
+		t.Fatal("fish empty complete -C must send n=0 so --help can fill, not abort drill")
 	}
 	if !strings.Contains(out, "string join : $PATH") {
 		t.Fatal("fish overlay RPC must send the caller's PATH")
@@ -688,6 +703,9 @@ func TestNuOverlayMenu(t *testing.T) {
 	}
 	if !strings.Contains(out, "suggest-complete-interactive") {
 		t.Fatal("nu must pass completion items to the overlay")
+	}
+	if strings.Contains(out, "$drilled") {
+		t.Fatal("nu empty --ide-complete must still run complete-interactive so --help can fill")
 	}
 	if !strings.Contains(out, "str join (char esep)") {
 		t.Fatal("nu overlay RPC must send the caller's PATH")

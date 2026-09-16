@@ -218,3 +218,63 @@ func TestHelpDescrsFromDurableSkipProbe(t *testing.T) {
 		t.Fatalf("got %q", got[0])
 	}
 }
+
+func TestFillSuggestItemsFromHelpWhenEmpty(t *testing.T) {
+	s := &Server{
+		helpProbe: func(ctx context.Context, argv []string) (string, error) {
+			return `Usage:
+  tool [command]
+
+Available Commands:
+  daemon      Run the remnix core daemon
+  help        Help about any command
+`, nil
+		},
+	}
+	items, descrs := s.fillSuggestItems("s1", "tool ", "/tmp", "", nil, nil, 8)
+	found := false
+	for i, item := range items {
+		if item == "tool daemon" && descrs[i] == "Run the remnix core daemon" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("want help items, got %v %v", items, descrs)
+	}
+}
+
+func TestFillSuggestItemsKeepsCompsys(t *testing.T) {
+	s := &Server{
+		helpProbe: func(ctx context.Context, argv []string) (string, error) {
+			t.Fatal("non-empty compsys must not probe for names")
+			return "", nil
+		},
+	}
+	items, descrs := s.fillSuggestItems("s1", "tool ", "/tmp", "", []string{"tool status"}, []string{"from compsys"}, 8)
+	if len(items) != 1 || items[0] != "tool status" || descrs[0] != "from compsys" {
+		t.Fatalf("got %v %v", items, descrs)
+	}
+}
+
+func TestFillSuggestItemsUsesDurableWithoutProbe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "suggest-cache.db")
+	store, err := suggestcache.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ents := helpparse.Parse("Available Commands:\n  daemon      Run the remnix core daemon\n")
+	if err := store.Save([]string{"tool"}, ents, ""); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{suggestStore: store}
+	s.helpProbe = func(ctx context.Context, argv []string) (string, error) {
+		t.Fatal("warm L2 must not probe")
+		return "", nil
+	}
+	items, descrs := s.fillSuggestItems("s1", "tool ", "/tmp", "", nil, nil, 8)
+	if len(items) != 1 || items[0] != "tool daemon" || descrs[0] != "Run the remnix core daemon" {
+		t.Fatalf("got %v %v", items, descrs)
+	}
+}

@@ -899,6 +899,22 @@ __remnix_comp_applied_lines() {
   done
 }
 
+# True when BUFFER's command has no dedicated completer and we are not
+# completing a partial command name (keep _command_names for "gc" → gcloud).
+__remnix_suggest_no_completer() {
+  emulate -L zsh
+  local -a words
+  words=(${(z)BUFFER})
+  local cmd=${words[1]}
+  [[ -n $cmd ]] || return 1
+  (( ${+_comps[$cmd]} )) && return 1
+  (( ${+_comps[${cmd:t}]} )) && return 1
+  if [[ $BUFFER != *[[:space:]]* ]]; then
+    whence -p -- "$cmd" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
 `
 	if !bindTab {
 		return out
@@ -1424,7 +1440,7 @@ __remnix_overlay_complete() {
 }
 
 remnix-suggest-menu() {
-  local selected run=0 tmp drilled=0 again=1 started=0
+  local selected run=0 tmp again=1 started=0
   local -a items
   __remnix_suggest_suppress=1
   if (( ${+functions[__remnix_suggest_clear]} )); then
@@ -1444,11 +1460,12 @@ remnix-suggest-menu() {
       __remnix_comp_applied_lines "$BUFFER"
       items=("${__remnix_comp_lines[@]}")
     fi
+    if (( ${+functions[__remnix_suggest_no_completer]} )) && __remnix_suggest_no_completer; then
+      items=()
+      __remnix_comp_lines=()
+      __remnix_comp_line_descrs=()
+    fi
     if (( started )); then
-      if (( $#items == 0 && drilled )); then
-        __remnix_overlay_complete_finish -1 || true
-        break
-      fi
       local -a payload descrs
       local -i i
       descrs=("${__remnix_comp_line_descrs[@]}")
@@ -1458,7 +1475,6 @@ remnix-suggest-menu() {
       done
       __remnix_overlay_complete_finish "$#items" "${payload[@]}" || break
     elif (( $#items == 0 )); then
-      (( drilled )) && break
       if ! __remnix_overlay suggest-interactive "$BUFFER"; then
         __remnix_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || break
       fi
@@ -1501,7 +1517,6 @@ remnix-suggest-menu() {
       fi
       RBUFFER=""
       zle redisplay
-      drilled=1
       again=1
       continue
     fi
