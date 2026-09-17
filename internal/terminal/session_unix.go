@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -58,6 +61,11 @@ type Session struct {
 
 	parseQ    *parseQueue
 	parseDone sync.WaitGroup
+
+	ptyInQ       *ptyInputQueue
+	ptyWriteDone sync.WaitGroup
+	ptyWriteMu   sync.Mutex
+	fgSkip       atomic.Bool
 }
 
 func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Session, error) {
@@ -126,12 +134,16 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		closed:  make(chan struct{}),
 		parseQ:  newParseQueue(parseQueueBudget),
 		sizeQ:   newSizeCoalescer(),
+		ptyInQ:  newPTYInputQueue(maxPTYInputBytes),
 	}
+	s.fgSkip.Store(true)
 	s.parseDone.Add(1)
 	s.resizeDone.Add(1)
+	s.ptyWriteDone.Add(1)
 	go s.parseLoop()
 	go s.resizeLoop()
 	go s.pumpOutput()
+	go s.ptyWriteLoop()
 	go s.pump(conn)
 	go s.watchForeground()
 	return s, nil
@@ -159,14 +171,19 @@ func (s *Session) Close() {
 		if s.parseQ != nil {
 			s.parseQ.stop()
 		}
+		if s.ptyInQ != nil {
+			s.ptyInQ.stop()
+		}
 		if s.closed != nil {
 			close(s.closed)
 		}
 		s.parseDone.Wait()
 		s.resizeDone.Wait()
+		s.ptyWriteDone.Wait()
 		if s.screen != nil {
 			s.screen.Close()
 		}
+		s.dumpPTYDiag()
 	})
 }
 
@@ -203,12 +220,15 @@ func (s *Session) pumpOutput() {
 			if len(got.replies) > 0 && !s.overlayActive.Load() {
 				// Overlay hides PTY output; queued replies would be typed
 				// onto the prompt after Ctrl+R (?0u / [?1;2c).
-				_, _ = s.ptmxW.Write(got.replies)
+				_ = s.writeFullPTY(got.replies)
 			}
 			s.enqueueParse(chunk, got.cprEnds)
 			stripped := kbStrip.feed(chunk)
 			if !s.overlayActive.Load() {
 				_ = s.sendFrame(FrameData, stripped)
+			}
+			if ptyDiagEnabled() && s.parseQ != nil {
+				ptyDiag.parseSaturations.Store(s.parseQ.stats().saturations)
 			}
 		}
 		if err != nil {
@@ -253,11 +273,12 @@ func (s *Session) parseLoop() {
 		if item.cpr && !s.overlayActive.Load() && s.ptmxW != nil {
 			cx, cy := s.screen.Cursor()
 			cols, rows := s.size()
-			_, _ = s.ptmxW.Write(formatCPR(rows, cols, cy, cx))
+			_ = s.writeFullPTY(formatCPR(rows, cols, cy, cx))
 		}
 		if hasAltScreenLeft(events) {
 			s.resetKeys.Store(true)
 			s.afterAlt.Store(true)
+			s.invalidateForeground()
 			if !s.overlayActive.Load() {
 				go func() {
 					s.sendIdleReset(idleResetOpts{})
@@ -338,14 +359,26 @@ func (s *Session) pump(conn net.Conn) {
 			}
 			switch kind {
 			case FrameData:
+				if ptyDiagEnabled() {
+					ptyDiag.framesRecv.Add(1)
+				}
 				if s.resetKeys.Swap(false) {
 					s.keyDec.hold = s.keyDec.hold[:0]
 				}
 				if s.overlayActive.Load() {
 					s.sendOverlayKey(payload)
 				} else {
-					s.ensureForeground()
-					_, _ = s.ptmxW.Write(s.keyDec.feed(payload))
+					decoded := s.keyDec.feed(payload)
+					if ptyDiagEnabled() {
+						ptyDiag.decoderRelease.Add(uint64(len(decoded)))
+					}
+					if err := s.ptyInQ.push(decoded); err != nil {
+						if ptyDiagTrace() {
+							slog.Warn("pty input queue", "err", err)
+						}
+						go s.Close()
+						return
+					}
 				}
 			case FrameWinch:
 				if len(payload) >= 4 {
@@ -415,6 +448,157 @@ func (s *Session) sendFrame(kind byte, payload []byte) error {
 	return WriteFrame(s.conn, kind, payload)
 }
 
+func (s *Session) ptyWriteLoop() {
+	defer s.ptyWriteDone.Done()
+	if s == nil || s.ptyInQ == nil {
+		return
+	}
+	for {
+		data, ok := s.ptyInQ.popWait()
+		if !ok {
+			return
+		}
+		if len(data) == 0 {
+			continue
+		}
+		s.ensureForeground()
+		if err := s.writeFullPTY(data); err != nil {
+			if ptyDiagEnabled() {
+				ptyDiag.ptyWriteErrors.Add(1)
+			}
+			go s.Close()
+			return
+		}
+	}
+}
+
+func (s *Session) writeFullPTY(p []byte) error {
+	if s == nil || len(p) == 0 {
+		return nil
+	}
+	s.ptyMu.Lock()
+	fd := s.ioctlFD
+	s.ptyMu.Unlock()
+	if fd < 0 {
+		return io.ErrClosedPipe
+	}
+	s.ptyWriteMu.Lock()
+	defer s.ptyWriteMu.Unlock()
+	start := time.Now()
+	if ptyDiagEnabled() {
+		ptyDiag.ptyWriteStarts.Add(1)
+	}
+	// unix.Write on the ioctl dup avoids os.File's netpoller. Polling the
+	// write side of a PTY master that is also being Read via os.File deadlocks
+	// once the kernel input buffer fills (~4095 bytes).
+	err := writeFullFD(fd, p, s.closed)
+	diagObserveWrite(time.Since(start))
+	if err != nil {
+		return err
+	}
+	if ptyDiagEnabled() {
+		ptyDiag.ptyWriteComplete.Add(1)
+	}
+	return nil
+}
+
+func writeFullFD(fd int, p []byte, closed <-chan struct{}) error {
+	for len(p) > 0 {
+		select {
+		case <-closed:
+			return net.ErrClosed
+		default:
+		}
+		chunk := p
+		if len(chunk) > 256 {
+			chunk = p[:256]
+		}
+		n, err := unix.Write(fd, chunk)
+		if n > 0 {
+			if n < len(chunk) && ptyDiagEnabled() {
+				ptyDiag.ptyShortWrites.Add(1)
+			}
+			p = p[n:]
+		}
+		if err == nil {
+			if n == 0 {
+				return io.ErrShortWrite
+			}
+			continue
+		}
+		if err == unix.EINTR {
+			if ptyDiagEnabled() {
+				ptyDiag.ptyEINTR.Add(1)
+			}
+			continue
+		}
+		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
+			if ptyDiagEnabled() {
+				ptyDiag.ptyEAGAIN.Add(1)
+			}
+			if werr := waitFDWritable(fd, closed); werr != nil {
+				return werr
+			}
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+func waitFDWritable(fd int, closed <-chan struct{}) error {
+	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
+	for {
+		select {
+		case <-closed:
+			return net.ErrClosed
+		default:
+		}
+		n, err := unix.Poll(pfd, 50)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+	}
+}
+
+func (s *Session) dumpPTYDiag() {
+	if s == nil || !ptyDiagEnabled() {
+		return
+	}
+	parseSat := uint64(0)
+	if s.parseQ != nil {
+		parseSat = s.parseQ.stats().saturations
+	}
+	n := ptyDiag.writeNsCount.Load()
+	avg := uint64(0)
+	if n > 0 {
+		avg = ptyDiag.writeNsSum.Load() / n
+	}
+	slog.Info("pty diag",
+		"session", s.ID,
+		"frames_recv", ptyDiag.framesRecv.Load(),
+		"decoder_release_bytes", ptyDiag.decoderRelease.Load(),
+		"pty_write_starts", ptyDiag.ptyWriteStarts.Load(),
+		"pty_write_complete", ptyDiag.ptyWriteComplete.Load(),
+		"pty_short_writes", ptyDiag.ptyShortWrites.Load(),
+		"pty_eagain", ptyDiag.ptyEAGAIN.Load(),
+		"pty_eintr", ptyDiag.ptyEINTR.Load(),
+		"pty_write_errors", ptyDiag.ptyWriteErrors.Load(),
+		"input_queued_bytes", ptyDiag.inputQueued.Load(),
+		"input_max_depth", ptyDiag.inputMaxDepth.Load(),
+		"input_saturated", ptyDiag.inputSaturated.Load(),
+		"parse_saturations", parseSat,
+		"pty_write_ns_avg", avg,
+		"pty_write_ns_max", ptyDiag.writeNsMax.Load(),
+	)
+}
+
 func (s *Session) sendIdleReset(opts idleResetOpts) {
 	if s == nil {
 		return
@@ -474,6 +658,7 @@ func (s *Session) restoreForeground() {
 	}
 	s.ptyMu.Unlock()
 	_ = s.cmd.Process.Signal(syscall.SIGCONT)
+	s.fgSkip.Store(true)
 }
 
 func (s *Session) restoreForegroundLater() {
@@ -513,6 +698,7 @@ func (s *Session) watchForeground() {
 			return
 		case <-tick.C:
 		}
+		s.refreshForegroundCache()
 		if s.overlayActive.Load() || !s.screen.IsAltScreen() || !s.foregroundIdle() {
 			continue
 		}
@@ -565,13 +751,34 @@ func (s *Session) foregroundIdle() bool {
 
 // ensureForeground gives the shell the PTY if the previous foreground process
 // group is gone. Otherwise keys and Ctrl+C land on a dead pgid and the shell
-// sits stopped on SIGTTIN.
+// sits stopped on SIGTTIN. The hot path uses a cache refreshed by
+// watchForeground; recovery syscalls run only when that cache is invalid.
+// TIOCSPGRP from the daemon is best-effort (the kernel may require a
+// controlling tty); SIGCONT still unsticks a stopped shell.
 func (s *Session) ensureForeground() {
-	fg, shell, ok := s.foregroundPgid()
-	if !ok || fg <= 1 || fg == shell || !pgidDead(fg) {
+	if s.fgSkip.Load() {
+		return
+	}
+	s.refreshForegroundCache()
+	if s.fgSkip.Load() {
 		return
 	}
 	s.restoreForeground()
+}
+
+func (s *Session) refreshForegroundCache() {
+	fg, shell, ok := s.foregroundPgid()
+	if !ok || fg <= 1 || fg == shell || !pgidDead(fg) {
+		s.fgSkip.Store(true)
+		return
+	}
+	s.fgSkip.Store(false)
+}
+
+func (s *Session) invalidateForeground() {
+	if s != nil {
+		s.fgSkip.Store(false)
+	}
 }
 
 func envValue(env []string, key string) string {

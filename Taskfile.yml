@@ -56,6 +56,11 @@ tasks:
     cmds:
       - go test -race ./... -count=1 -timeout 180s
     silent: true
+  test:attach:
+    desc: Runs remnix-attach Odin parser tests
+    cmds:
+      - odin test cmd/remnix-attach
+    silent: true
   ci:
     desc: Runs golangci-lint
     cmds:

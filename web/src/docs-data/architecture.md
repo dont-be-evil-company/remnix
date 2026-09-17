@@ -79,6 +79,38 @@ Default size is 1 000 000 unique commands; override with `REMNIX_SCALE_N`.
 REMNIX_SCALE=1 go test ./internal/history/ -run TestScaleMillionUniqueCommands -timeout 45m -v
 ```
 
+## PTY forwarding
+
+When `pty_proxy` is enabled, `remnix-attach` is a byte pump between `/dev/tty`
+and the daemon's inner PTY over `terminal.sock`. Keyboard input is
+authoritative. Shadow VT parsing is best-effort and must never stall real I/O.
+
+```text
+/dev/tty keys
+    -> remnix-attach streaming classifier
+         consume only explicit emulator replies (focus, CPR, OSC/DCS, query)
+         unknown/incomplete sequences are forwarded unchanged
+    -> lossless input FIFO (never drop-oldest/drop-newest)
+    -> single socket writer
+    -> daemon ReadFrame
+    -> lossless PTY input FIFO
+    -> full PTY write -> child
+
+child PTY output
+    -> terminal forwarding (must stay fast)
+    -> bounded shadow parse queue (may drop stale backlog; never backpressures)
+```
+
+Invariants:
+
+- Read and socket-frame boundaries have no semantic meaning.
+- A timeout may flush an incomplete escape sequence; it must not discard it.
+- `Write` is never assumed to accept the full buffer; attach and daemon retry
+  short writes, `EINTR`, and `EAGAIN`.
+- Keyboard queues that exhaust their byte budget fail the session instead of
+  dropping keys.
+- `REMNIX_PTY_DIAG=1` prints attach/daemon counters; it does not log keys.
+
 Further reading: [sync protocol](/docs/sync-protocol),
 [cryptography](/docs/cryptography), [rclone](/docs/rclone),
 [threat model](/docs/threat-model), [configuration](/docs/config).

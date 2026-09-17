@@ -246,6 +246,7 @@ func (s *Session) cancelOverlay() {
 	s.overlayCancel = nil
 	s.overlayActive.Store(false)
 	s.overlayMu.Unlock()
+	s.invalidateForeground()
 	if cancel != nil {
 		cancel()
 	}

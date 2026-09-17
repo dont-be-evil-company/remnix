@@ -6,12 +6,19 @@ import (
 	"unicode/utf8"
 )
 
-// kittyKeyDecoder turns CSI-u key reports into legacy bytes before they hit
-// the inner PTY. After a full-screen TUI the outer emulator can stay in
-// kitty keyboard mode; the shell then sees \x1b[97u instead of 'a' and looks dead.
+// kittyKeyDecoder is child-PTY compatibility, not a second attach classifier.
+//
+// remnix-attach owns separating terminal-emulator replies from real user
+// input. Once a FRAME_DATA payload is marked as user bytes it is treated as
+// opaque here except for this translation: after a full-screen TUI the outer
+// emulator can stay in kitty keyboard mode, and the inner shell would then
+// see \x1b[97u instead of 'a'. Incomplete CSI is held across arbitrary frame
+// boundaries. Unknown and overflow sequences are forwarded unchanged.
 type kittyKeyDecoder struct {
 	hold []byte
 }
+
+const kittyHoldMax = 256
 
 func (d *kittyKeyDecoder) feed(p []byte) []byte {
 	if d == nil {
@@ -31,9 +38,9 @@ func (d *kittyKeyDecoder) feed(p []byte) []byte {
 			continue
 		}
 		if i+1 >= len(buf) {
-			// Never hold a lone ESC across packets. Attach coalesces a
-			// split CSI I/O with a short timeout; holding here would
-			// delay Escape until the next key.
+			// Never hold a lone ESC across packets. Attach flushes a timed-out
+			// Escape as user input; holding here would delay it until the next
+			// key. Incomplete CSI (ESC [ ...) is held below.
 			out = append(out, 0x1b)
 			break
 		}
@@ -46,6 +53,7 @@ func (d *kittyKeyDecoder) feed(p []byte) []byte {
 		cancelled := false
 		for j < len(buf) && !csiFinal(buf[j]) {
 			if buf[j] < 0x20 {
+				out = append(out, buf[i:j]...)
 				i = j
 				cancelled = true
 				break
@@ -56,10 +64,9 @@ func (d *kittyKeyDecoder) feed(p []byte) []byte {
 			continue
 		}
 		if j >= len(buf) {
-			if len(buf)-i > 64 {
-				out = append(out, buf[i])
-				i++
-				continue
+			if len(buf)-i > kittyHoldMax {
+				out = append(out, buf[i:]...)
+				break
 			}
 			d.hold = append(d.hold[:0], buf[i:]...)
 			break

@@ -49,12 +49,13 @@ raw_set:   bool
 sock_io:   posix.FD = -1
 wake_rd:   posix.FD = -1
 wake_wr:   posix.FD = -1
+out_wake_rd: posix.FD = -1
+out_wake_wr: posix.FD = -1
 io_mu:     sync.Mutex
-g_sock_out: [dynamic]u8
+g_sock_out: Byte_Buf
 out_hold:  [128]u8
 out_hold_n: int
-in_hold:   [128]u8
-in_hold_n: int
+in_parser: Input_Parser
 
 on_winch :: proc "c" (_: posix.Signal) {
 	got_winch = true
@@ -103,69 +104,6 @@ set_nonblock :: proc(fd: posix.FD) -> bool {
 	return posix.fcntl(fd, .SETFL, flags) >= 0
 }
 
-buf_add :: proc(b: ^[dynamic]u8, src: []u8) -> bool {
-	if len(src) == 0 {
-		return true
-	}
-	if len(b) + len(src) > BUF_MAX {
-		return false
-	}
-	n := append(b, ..src)
-	return n == len(src)
-}
-
-buf_drain :: proc(b: ^[dynamic]u8, n: int) {
-	if n >= len(b) {
-		clear(b)
-		return
-	}
-	copy(b[:], b[n:])
-	resize(b, len(b) - n)
-}
-
-buf_flush :: proc(fd: posix.FD, b: ^[dynamic]u8) -> bool {
-	for len(b) > 0 {
-		w := posix.write(fd, raw_data(b^), c.size_t(len(b)))
-		if w < 0 {
-			err := posix.errno()
-			if err == .EINTR {
-				continue
-			}
-			if err == .EAGAIN || err == .EWOULDBLOCK {
-				return true
-			}
-			return false
-		}
-		if w == 0 {
-			return true
-		}
-		buf_drain(b, int(w))
-	}
-	return true
-}
-
-// Unfocused panes can return EIO/EAGAIN; keep the bytes and retry.
-buf_flush_tty :: proc(fd: posix.FD, b: ^[dynamic]u8) -> bool {
-	for len(b) > 0 {
-		w := posix.write(fd, raw_data(b^), c.size_t(len(b)))
-		if w < 0 {
-			err := posix.errno()
-			if err == .EINTR {
-				continue
-			}
-			if err == .EAGAIN || err == .EWOULDBLOCK || err == .EIO {
-				return true
-			}
-			return false
-		}
-		if w == 0 {
-			return true
-		}
-		buf_drain(b, int(w))
-	}
-	return true
-}
-
 wake_reader :: proc() {
 	io_stop = true
 	if wake_wr >= 0 {
@@ -174,7 +112,14 @@ wake_reader :: proc() {
 	}
 }
 
-queue_frame :: proc(b: ^[dynamic]u8, kind: u8, payload: []u8) -> bool {
+wake_writer :: proc() {
+	if out_wake_wr >= 0 {
+		c1: u8 = 1
+		posix.write(out_wake_wr, &c1, 1)
+	}
+}
+
+queue_frame :: proc(b: ^Byte_Buf, kind: u8, payload: []u8) -> bool {
 	n := u32(len(payload))
 	hdr := [5]u8{kind, u8(n >> 24), u8(n >> 16), u8(n >> 8), u8(n)}
 	if !buf_add(b, hdr[:]) {
@@ -186,45 +131,94 @@ queue_frame :: proc(b: ^[dynamic]u8, kind: u8, payload: []u8) -> bool {
 	return true
 }
 
+// Enqueue a frame for the single socket-writer thread. Never waits for
+// writability and never drops keyboard bytes: exhaustion stops the session.
 queue_input :: proc(kind: u8, payload: []u8) -> bool {
+	sync.mutex_lock(&io_mu)
+	ok := queue_frame(&g_sock_out, kind, payload)
+	qlen := buf_len(&g_sock_out)
+	sync.mutex_unlock(&io_mu)
+	if !ok {
+		diag_add(&diag_queue_sat, 1)
+		io_stop = true
+		wake_writer()
+		wake_reader()
+		return false
+	}
+	diag_add(&diag_enqueue, u64(len(payload)))
+	diag_max(&diag_queue_max, u64(qlen))
+	wake_writer()
+	return true
+}
+
+drain_pipe :: proc(fd: posix.FD) {
+	tmp: [64]u8
 	for {
+		r := posix.read(fd, &tmp[0], c.size_t(len(tmp)))
+		if r <= 0 {
+			break
+		}
+	}
+}
+
+// Sole writer of framed bytes to the daemon socket. Polls for writability
+// without holding io_mu.
+sock_to_daemon :: proc() {
+	for !io_stop {
 		sync.mutex_lock(&io_mu)
-		if queue_frame(&g_sock_out, kind, payload) {
-			ok := true
-			if sock_io >= 0 {
-				ok = buf_flush(sock_io, &g_sock_out)
-			}
-			sync.mutex_unlock(&io_mu)
-			return ok
-		}
-		if sock_io >= 0 {
-			buf_flush(sock_io, &g_sock_out)
-		}
+		pending := buf_len(&g_sock_out) > 0
 		sync.mutex_unlock(&io_mu)
-		if io_stop || sock_io < 0 {
-			return false
+		if !pending {
+			pfd := posix.pollfd {
+				fd     = out_wake_rd,
+				events = {.IN},
+			}
+			n: posix.nfds_t = out_wake_rd >= 0 ? 1 : 0
+			if n == 0 {
+				break
+			}
+			pr := posix.poll(&pfd, n, -1)
+			if pr < 0 && posix.errno() != .EINTR {
+				break
+			}
+			if out_wake_rd >= 0 {
+				drain_pipe(out_wake_rd)
+			}
+			continue
 		}
-		pfd := posix.pollfd {
-			fd     = sock_io,
-			events = {.OUT},
+		sync.mutex_lock(&io_mu)
+		ok := true
+		if sock_io >= 0 {
+			ok = buf_flush(sock_io, &g_sock_out)
 		}
-		if posix.poll(&pfd, 1, 150) < 0 && posix.errno() != .EINTR {
-			return false
+		still := buf_len(&g_sock_out) > 0
+		sync.mutex_unlock(&io_mu)
+		if !ok {
+			io_stop = true
+			break
+		}
+		if still && sock_io >= 0 {
+			pfd := posix.pollfd {
+				fd     = sock_io,
+				events = {.OUT},
+			}
+			if posix.poll(&pfd, 1, 150) < 0 && posix.errno() != .EINTR {
+				break
+			}
 		}
 	}
 }
 
 tty_to_sock :: proc() {
 	buf: [4096]u8
+	filtered: [4096 + INPUT_HOLD_MAX]u8
 	for !io_stop {
 		pfd: [2]posix.pollfd
 		pfd[0] = {fd = tty_in, events = {.IN}}
 		pfd[1] = {fd = wake_rd, events = {.IN}}
 		n: posix.nfds_t = wake_rd >= 0 ? 2 : 1
-		// Hold a trailing ESC or incomplete CSI for a beat. Drop a stuck
-		// `\x1b[` so it cannot eat the next keys after vim/overlay.
 		timeout: i32 = -1
-		if in_hold_n > 0 {
+		if parser_has_hold(&in_parser) {
 			timeout = 16
 		}
 		pr := posix.poll(&pfd[0], n, timeout)
@@ -238,11 +232,12 @@ tty_to_sock :: proc() {
 			continue
 		}
 		if pr == 0 {
-			if in_hold_n == 1 && in_hold[0] == 0x1b {
-				esc := [1]u8{0x1b}
-				queue_input(FRAME_DATA, esc[:])
+			fn := parser_flush(&in_parser, filtered[:])
+			diag_add(&diag_timeout_flush, 1)
+			if fn > 0 {
+				diag_add(&diag_parser_release, u64(fn))
+				queue_input(FRAME_DATA, filtered[:fn])
 			}
-			in_hold_n = 0
 			continue
 		}
 		if n > 1 && pfd[1].revents & {.IN, .HUP, .ERR, .NVAL} != {} {
@@ -251,13 +246,19 @@ tty_to_sock :: proc() {
 		if .IN in pfd[0].revents {
 			r := posix.read(tty_in, &buf[0], c.size_t(len(buf)))
 			if r > 0 {
-				filtered: [4224]u8
-				fn := filter_keys(filtered[:], buf[:r])
+				diag_add(&diag_tty_read, u64(r))
+				fn := parser_feed(&in_parser, buf[:r], filtered[:])
+				if in_parser.focus_off {
+					need_focus_off = true
+					in_parser.focus_off = false
+				}
+				diag_add(&diag_protocol_consumed, in_parser.consumed_n)
+				in_parser.consumed_n = 0
 				if fn > 0 {
+					diag_add(&diag_parser_release, u64(fn))
 					queue_input(FRAME_DATA, filtered[:fn])
 				}
 			}
-			// r==0 / EIO / EAGAIN: split and unfocus. Do not reopen /dev/tty.
 		}
 	}
 }
@@ -449,7 +450,7 @@ rewrite_focus_tracking :: proc(s, dst: []u8) -> (n: int, drop, focus_off, change
 	return pos + 1, false, focus_off, true
 }
 
-out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
+out_byte :: proc(tty_out: ^Byte_Buf, ch: u8) -> bool {
 	if out_hold_n == 0 {
 		if ch != 0x1b {
 			b := ch
@@ -504,7 +505,7 @@ out_byte :: proc(tty_out: ^[dynamic]u8, ch: u8) -> bool {
 	return true
 }
 
-feed_output :: proc(tty_out: ^[dynamic]u8, p: []u8) -> bool {
+feed_output :: proc(tty_out: ^Byte_Buf, p: []u8) -> bool {
 	for ch in p {
 		if !out_byte(tty_out, ch) {
 			return false
@@ -534,110 +535,21 @@ drop_input_seq :: proc(s: []u8) -> bool {
 	return false
 }
 
-// Drop complete emulator replies in this read only. Hold an incomplete CSI
-// that already has '[' (so split CSI I/O from a kitty pane focus cannot
-// leak ESC into zsh). Hold a lone trailing ESC for the next read/timeout
-// so `\x1b` + `[I` is not flushed as Escape plus typing.
-filter_keys :: proc(dst, src: []u8) -> int {
-	tmp: [4224]u8
-	combined := src
-	if in_hold_n > 0 {
-		if in_hold_n+len(src) > len(tmp) {
-			in_hold_n = 0
-		} else {
-			copy(tmp[:], in_hold[:in_hold_n])
-			copy(tmp[in_hold_n:], src)
-			combined = tmp[:in_hold_n+len(src)]
-			in_hold_n = 0
-		}
-	}
-	o := 0
-	i := 0
-	n := len(combined)
-	for i < n {
-		if combined[i] != 0x1b {
-			dst[o] = combined[i]
-			o += 1
-			i += 1
-			continue
-		}
-		if i + 1 >= n {
-			in_hold[0] = 0x1b
-			in_hold_n = 1
-			break
-		}
-		kind := combined[i + 1]
-		if kind == '[' {
-			j := i + 2
-			cancelled := false
-			for j < n && !csi_final(combined[j]) {
-				// C0 (Ctrl+C, nested ESC) cannot be a CSI param. Abort
-				// so a held `\x1b[` after a split cannot eat all keys.
-				if combined[j] < 0x20 {
-					i = j
-					cancelled = true
-					break
-				}
-				j += 1
-			}
-			if cancelled {
-				continue
-			}
-			if j >= n {
-				hold := n - i
-				if hold > len(in_hold) {
-					copy(dst[o:], combined[i:])
-					o += hold
-					break
-				}
-				copy(in_hold[:], combined[i:])
-				in_hold_n = hold
-				break
-			}
-			seql := j - i + 1
-			if drop_input_seq(combined[i:][:seql]) {
-				if combined[j] == 'I' || combined[j] == 'O' {
-					need_focus_off = true
-				}
-			} else {
-				copy(dst[o:], combined[i:][:seql])
-				o += seql
-			}
-			i = j + 1
-			continue
-		}
-		if kind == ']' || kind == 'P' {
-			j := i + 2
-			for j < n && !osc_end(combined[i:][:j - i + 1]) {
-				j += 1
-			}
-			if j >= n {
-				break
-			}
-			i = j + 1
-			continue
-		}
-		dst[o] = combined[i]
-		o += 1
-		i += 1
-		dst[o] = combined[i]
-		o += 1
-		i += 1
-	}
-	return o
-}
+// Drop complete emulator replies. Incomplete sequences are held by Input_Parser
+// and flushed unchanged on timeout or limit - never discarded.
 
-take_frames :: proc(in_buf, tty_out: ^[dynamic]u8, exit_code: ^int, done: ^bool) -> bool {
-	for len(in_buf) >= 5 {
-		n := u32(in_buf[1]) << 24 | u32(in_buf[2]) << 16 | u32(in_buf[3]) << 8 | u32(in_buf[4])
+take_frames :: proc(in_buf, tty_out: ^Byte_Buf, exit_code: ^int, done: ^bool) -> bool {
+	for buf_len(in_buf) >= 5 {
+		s := buf_slice(in_buf)
+		n := u32(s[1]) << 24 | u32(s[2]) << 16 | u32(s[3]) << 8 | u32(s[4])
 		if n > 4 * 1024 * 1024 {
 			return false
 		}
-		if len(in_buf) < 5 + int(n) {
+		if buf_len(in_buf) < 5 + int(n) {
 			break
 		}
-		kind := in_buf[0]
-		payload := in_buf[5:][:n]
+		kind := s[0]
+		payload := s[5:][:n]
 		if kind == FRAME_EXIT {
 			if n > 0 {
 				exit_code^ = int(payload[0])
@@ -656,12 +568,13 @@ take_frames :: proc(in_buf, tty_out: ^[dynamic]u8, exit_code: ^int, done: ^bool)
 		if kind == FRAME_DATA && n > 0 {
 			if !feed_output(tty_out, payload) {
 				off := 5 + int(n)
-				for off + 5 <= len(in_buf) {
-					n2, ok := frame_len(in_buf[:], off)
+				p := buf_slice(in_buf)
+				for off + 5 <= len(p) {
+					n2, ok := frame_len(p, off)
 					if !ok {
 						break
 					}
-					if frame_exit_at(in_buf[:], off, exit_code) {
+					if frame_exit_at(p, off, exit_code) {
 						done^ = true
 						return true
 					}
@@ -745,6 +658,14 @@ exec_fallback :: proc(shell, remnix: cstring) -> ! {
 	if wake_wr >= 0 {
 		posix.close(wake_wr)
 		wake_wr = -1
+	}
+	if out_wake_rd >= 0 {
+		posix.close(out_wake_rd)
+		out_wake_rd = -1
+	}
+	if out_wake_wr >= 0 {
+		posix.close(out_wake_wr)
+		out_wake_wr = -1
 	}
 	if tty_in >= 0 && tty_in != tty_fd {
 		posix.close(tty_in)
@@ -944,6 +865,7 @@ main :: proc() {
 
 	shell_c := cstr(shell)
 	remnix_c := cstr(remnix)
+	diag_init()
 
 	tty_fd = posix.open("/dev/tty", {.RDWR})
 	if tty_fd < 0 {
@@ -961,6 +883,13 @@ main :: proc() {
 		wake_rd = wake[0]
 		wake_wr = wake[1]
 		set_nonblock(wake_wr)
+	}
+	out_wake: [2]posix.FD
+	if posix.pipe(&out_wake) == .OK {
+		out_wake_rd = out_wake[0]
+		out_wake_wr = out_wake[1]
+		set_nonblock(out_wake_rd)
+		set_nonblock(out_wake_wr)
 	}
 	posix.atexit(restore_tty)
 
@@ -1022,9 +951,17 @@ main :: proc() {
 		posix.close(sock)
 		exec_fallback(shell_c, remnix_c)
 	}
+	writer := thread.create_and_start(sock_to_daemon)
+	if writer == nil {
+		fmt.eprintf("remnix-attach: writer thread: %s\n", errstr())
+		io_stop = true
+		wake_reader()
+		posix.close(sock)
+		exec_fallback(shell_c, remnix_c)
+	}
 
-	sock_in: [dynamic]u8
-	tty_out: [dynamic]u8
+	sock_in: Byte_Buf
+	tty_out: Byte_Buf
 	cols := u32(ws.ws_col)
 	rows := u32(ws.ws_row)
 	exit_code := 0
@@ -1044,13 +981,6 @@ main :: proc() {
 				break
 			}
 		}
-		sync.mutex_lock(&io_mu)
-		sock_flush := buf_flush(sock, &g_sock_out)
-		pending_out := len(g_sock_out) > 0
-		sync.mutex_unlock(&io_mu)
-		if !sock_flush {
-			break
-		}
 		if !buf_flush_tty(tty_fd, &tty_out) {
 			break
 		}
@@ -1066,11 +996,8 @@ main :: proc() {
 		np: posix.nfds_t = 1
 		pfd[0].fd = sock
 		pfd[0].events = {.IN}
-		if pending_out {
-			pfd[0].events += {.OUT}
-		}
 		pfd[1].fd = -1
-		if len(tty_out) > 0 {
+		if buf_len(&tty_out) > 0 {
 			pfd[1].fd = tty_fd
 			pfd[1].events = {.OUT}
 			np = 2
@@ -1123,9 +1050,12 @@ main :: proc() {
 			break
 		}
 	}
+	io_stop = true
+	wake_writer()
 	wake_reader()
 	posix.shutdown(sock, .RDWR)
 	thread.destroy(reader)
+	thread.destroy(writer)
 	restore_tty()
 	posix.close(sock)
 	if wake_rd >= 0 {
@@ -1136,14 +1066,23 @@ main :: proc() {
 		posix.close(wake_wr)
 		wake_wr = -1
 	}
+	if out_wake_rd >= 0 {
+		posix.close(out_wake_rd)
+		out_wake_rd = -1
+	}
+	if out_wake_wr >= 0 {
+		posix.close(out_wake_wr)
+		out_wake_wr = -1
+	}
 	if tty_in >= 0 && tty_in != tty_fd {
 		posix.close(tty_in)
 	}
 	posix.close(tty_fd)
 	tty_fd = -1
 	tty_in = -1
-	delete(sock_in)
-	delete(g_sock_out)
-	delete(tty_out)
+	buf_destroy(&sock_in)
+	buf_destroy(&g_sock_out)
+	buf_destroy(&tty_out)
+	diag_dump()
 	os.exit(exit_code)
 }

@@ -4,6 +4,7 @@ import "sync"
 
 // parseQueue is a bounded, non-blocking backlog for shadow VT parsing.
 //
+// Keyboard input is authoritative and must never use this drop policy.
 // The real PTY path never waits on this queue. When enqueue would exceed the
 // byte budget, the unparsed backlog is discarded, the newest chunk is kept if
 // it fits, and dirty is set. remnix cannot reconstruct dropped bytes from the
@@ -26,6 +27,7 @@ type parseQueue struct {
 	mu          sync.Mutex
 	cond        *sync.Cond
 	items       []parseItem
+	head        int
 	queuedBytes int
 	enqueuedSeq uint64
 	parsedSeq   uint64
@@ -69,6 +71,7 @@ func (q *parseQueue) enqueue(data []byte, cpr bool) (seq uint64, ok bool) {
 		q.saturations++
 		q.dirty = true
 		q.items = q.items[:0]
+		q.head = 0
 		q.queuedBytes = 0
 		q.parsedSeq = q.enqueuedSeq
 		q.cond.Broadcast()
@@ -103,22 +106,26 @@ func (q *parseQueue) popWait() (parseItem, bool) {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for len(q.items) == 0 && !q.stopped {
+	for q.head >= len(q.items) && !q.stopped {
 		q.cond.Wait()
 	}
 	return q.popLocked()
 }
 
 func (q *parseQueue) popLocked() (parseItem, bool) {
-	if len(q.items) == 0 {
+	if q.head >= len(q.items) {
 		return parseItem{}, false
 	}
-	item := q.items[0]
-	n := copy(q.items, q.items[1:])
-	q.items = q.items[:n]
+	item := q.items[q.head]
+	q.items[q.head] = parseItem{}
+	q.head++
 	q.queuedBytes -= len(item.data)
 	if q.queuedBytes < 0 {
 		q.queuedBytes = 0
+	}
+	if q.head > 32 && q.head*2 >= len(q.items) {
+		q.items = append([]parseItem(nil), q.items[q.head:]...)
+		q.head = 0
 	}
 	return item, true
 }
@@ -163,6 +170,7 @@ func (q *parseQueue) stop() {
 	q.mu.Lock()
 	q.stopped = true
 	q.items = nil
+	q.head = 0
 	q.queuedBytes = 0
 	q.parsedSeq = q.enqueuedSeq
 	q.cond.Broadcast()

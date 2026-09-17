@@ -125,17 +125,11 @@ func (l *lineReader) ReadLine() (string, error) {
 }
 
 func WriteFrame(w io.Writer, kind byte, payload []byte) error {
-	var hdr [5]byte
-	hdr[0] = kind
-	binary.BigEndian.PutUint32(hdr[1:], uint32(len(payload)))
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	if len(payload) == 0 {
-		return nil
-	}
-	_, err := w.Write(payload)
-	return err
+	buf := make([]byte, 5+len(payload))
+	buf[0] = kind
+	binary.BigEndian.PutUint32(buf[1:], uint32(len(payload)))
+	copy(buf[5:], payload)
+	return writeFull(w, buf, nil)
 }
 
 func ReadFrame(r io.Reader) (byte, []byte, error) {

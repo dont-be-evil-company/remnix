@@ -177,3 +177,20 @@ func BenchmarkParseQueueEnqueue(b *testing.B) {
 		q.markParsed(item.seq)
 	}
 }
+
+func BenchmarkParseQueueTinyChunks(b *testing.B) {
+	q := newParseQueue(maxParseQueuedBytes)
+	chunk := []byte{'x'}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, ok := q.enqueue(chunk, false); !ok {
+			b.Fatal("enqueue rejected")
+		}
+		item, ok := q.pop()
+		if !ok {
+			b.Fatal("pop")
+		}
+		q.markParsed(item.seq)
+	}
+}

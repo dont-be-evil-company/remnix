@@ -5,6 +5,7 @@ package terminal
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -109,12 +110,24 @@ func (s *Screen) shutdownEmulator(emu *vt.Emulator) {
 	if emu == nil {
 		return
 	}
-	// Unblock the drain Read with a DA reply, then Close once drain has
-	// stopped so vt's unsynchronized e.closed flag is not racy.
+	// Unblock drain with a DA reply, then Close. emu.Write can block if the
+	// reply pipe is full, so bound the wait; Close then unblocks Read.
 	s.stopping.Store(true)
-	_, _ = emu.Write([]byte("\x1b[c"))
-	s.drainDone.Wait()
+	done := make(chan struct{})
+	go func() {
+		_, _ = emu.Write([]byte("\x1b[c"))
+		s.drainDone.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+	}
 	_ = emu.Close()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 func (s *Screen) recordMode(kind TerminalEventKind, m ansi.Mode) {

@@ -46,16 +46,16 @@ func TestKittyKeyDecoderC0CancelsIncompleteCSI(t *testing.T) {
 		t.Fatalf("partial %q", got)
 	}
 	got := d.feed([]byte{3})
-	if !bytes.Equal(got, []byte{3}) {
-		t.Fatalf("Ctrl+C must cancel held CSI, got %q", got)
+	if !bytes.Equal(got, []byte{0x1b, '[', 3}) {
+		t.Fatalf("Ctrl+C must flush held CSI then the C0, got %q", got)
 	}
 }
 
 func TestKittyKeyDecoderNestedEscCancelsCSI(t *testing.T) {
 	var d kittyKeyDecoder
 	got := d.feed([]byte("\x1b[\x1b[Ia"))
-	if string(got) != "a" {
-		t.Fatalf("nested ESC must abort CSI then drop focus, got %q", got)
+	if string(got) != "\x1b[a" {
+		t.Fatalf("nested ESC must flush held CSI then drop focus, got %q", got)
 	}
 }
 
@@ -162,5 +162,46 @@ func TestKeyboardModeStripperAbortsCSIOnEsc(t *testing.T) {
 	}
 	if !bytes.Contains(got, []byte("\x1b[?25h")) {
 		t.Fatalf("must keep next CSI, got %q", got)
+	}
+}
+
+func TestKittyKeyDecoderOverflowFlushesAll(t *testing.T) {
+	var d kittyKeyDecoder
+	held := append([]byte{0x1b, '['}, bytes.Repeat([]byte("1"), kittyHoldMax)...)
+	got := d.feed(held)
+	if !bytes.Equal(got, held) {
+		t.Fatalf("overflow must flush all held bytes, got %d want %d", len(got), len(held))
+	}
+	if len(d.hold) != 0 {
+		t.Fatalf("hold after overflow: %q", d.hold)
+	}
+}
+
+func TestKittyKeyDecoderUnknownCSIForwarded(t *testing.T) {
+	var d kittyKeyDecoder
+	seq := []byte("\x1b[999;999~")
+	got := d.feed(seq)
+	if !bytes.Equal(got, seq) {
+		t.Fatalf("unknown CSI must pass through, got %q", got)
+	}
+}
+
+func TestKittyKeyDecoderCSIUSplitEveryOffset(t *testing.T) {
+	seq := []byte("\x1b[97;5uX")
+	var whole kittyKeyDecoder
+	want := whole.feed(seq)
+	if string(want) != "aX" && string(want) != "\x01X" {
+		// 97;5u is 'a' with ctrl? 97 is 'a', mods 5 = ctrl → \x01
+		if string(want) != "\x01X" {
+			t.Fatalf("unexpected decode %q", want)
+		}
+	}
+	for split := 2; split < len(seq); split++ {
+		var d kittyKeyDecoder
+		got := append([]byte(nil), d.feed(seq[:split])...)
+		got = append(got, d.feed(seq[split:])...)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("split %d: got %q want %q", split, got, want)
+		}
 	}
 }
