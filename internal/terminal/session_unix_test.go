@@ -805,10 +805,10 @@ func TestPtyWinsizeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Close(fd)
-	ptySetsize(fd, 100, 30)
-	c, r, ok := ptyWinsize(fd)
-	if !ok || c != 100 || r != 30 {
-		t.Fatalf("winsize %dx%d ok=%v", c, r, ok)
+	ptySetsize(fd, 100, 30, 1920, 1080)
+	c, r, x, y, ok := ptyWinsize(fd)
+	if !ok || c != 100 || r != 30 || x != 1920 || y != 1080 {
+		t.Fatalf("winsize %dx%d %dx%dpx ok=%v", c, r, x, y, ok)
 	}
 }
 

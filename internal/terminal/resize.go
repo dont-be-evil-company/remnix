@@ -3,8 +3,10 @@ package terminal
 import "sync"
 
 type terminalSize struct {
-	cols int
-	rows int
+	cols   int
+	rows   int
+	xpixel int
+	ypixel int
 }
 
 // sizeCoalescer keeps one pending resize. A newer size replaces an older one
@@ -19,12 +21,12 @@ func newSizeCoalescer() *sizeCoalescer {
 	return &sizeCoalescer{sig: make(chan struct{}, 1)}
 }
 
-func (c *sizeCoalescer) note(cols, rows int) {
+func (c *sizeCoalescer) note(cols, rows, xpixel, ypixel int) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	c.pending = &terminalSize{cols: cols, rows: rows}
+	c.pending = &terminalSize{cols: cols, rows: rows, xpixel: xpixel, ypixel: ypixel}
 	c.mu.Unlock()
 	select {
 	case c.sig <- struct{}{}:

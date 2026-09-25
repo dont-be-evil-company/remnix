@@ -104,20 +104,24 @@ func Run(shellPath string) error {
 	defer signal.Stop(winch)
 	var sizeMu sync.Mutex
 	lastCols, lastRows := cols, rows
+	lastX, lastY := 0, 0
+	if ws != nil {
+		lastX, lastY = int(ws.X), int(ws.Y)
+	}
 	applySize := func(force bool) {
-		c, r := outerWinsize(in, out)
+		c, r, x, y := outerWinsize(in, out)
 		if c < 1 || r < 1 {
 			return
 		}
 		sizeMu.Lock()
-		same := c == lastCols && r == lastRows
+		same := c == lastCols && r == lastRows && x == lastX && y == lastY
 		if !force && same {
 			sizeMu.Unlock()
 			return
 		}
-		lastCols, lastRows = c, r
+		lastCols, lastRows, lastX, lastY = c, r, x, y
 		sizeMu.Unlock()
-		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(r), Cols: uint16(c)})
+		_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(r), Cols: uint16(c), X: uint16(x), Y: uint16(y)})
 		scr.Resize(c, r)
 	}
 	go func() {
@@ -208,17 +212,17 @@ func openOuterTTY() (in, out *os.File, err error) {
 	return in, os.NewFile(uintptr(fd), "/dev/tty"), nil
 }
 
-func outerWinsize(in, out *os.File) (cols, rows int) {
+func outerWinsize(in, out *os.File) (cols, rows, xpixel, ypixel int) {
 	for _, f := range []*os.File{out, in} {
 		if f == nil {
 			continue
 		}
-		c, r, err := term.GetSize(int(f.Fd()))
-		if err == nil && c >= 1 && r >= 1 {
-			return c, r
+		ws, err := pty.GetsizeFull(f)
+		if err == nil && ws.Cols >= 1 && ws.Rows >= 1 {
+			return int(ws.Cols), int(ws.Rows), int(ws.X), int(ws.Y)
 		}
 	}
-	return 0, 0
+	return 0, 0, 0, 0
 }
 
 func childEnv(shellPath string) []string {

@@ -16,11 +16,13 @@ const (
 )
 
 type CreateRequest struct {
-	Shell string
-	Cwd   string
-	Cols  int
-	Rows  int
-	Env   []string
+	Shell  string
+	Cwd    string
+	Cols   int
+	Rows   int
+	Xpixel int
+	Ypixel int
+	Env    []string
 }
 
 func WriteCreate(w io.Writer, req CreateRequest) error {
@@ -30,6 +32,8 @@ func WriteCreate(w io.Writer, req CreateRequest) error {
 	fmt.Fprintf(&b, "cwd=%s\n", req.Cwd)
 	fmt.Fprintf(&b, "cols=%d\n", req.Cols)
 	fmt.Fprintf(&b, "rows=%d\n", req.Rows)
+	fmt.Fprintf(&b, "xpixel=%d\n", req.Xpixel)
+	fmt.Fprintf(&b, "ypixel=%d\n", req.Ypixel)
 	fmt.Fprintf(&b, "env_count=%d\n", len(req.Env))
 	for _, e := range req.Env {
 		b.WriteString(e)
@@ -75,6 +79,14 @@ func ReadCreate(r io.Reader) (CreateRequest, error) {
 		case "rows":
 			if _, err := fmt.Sscanf(v, "%d", &req.Rows); err != nil {
 				return CreateRequest{}, fmt.Errorf("terminal: rows: %w", err)
+			}
+		case "xpixel":
+			if _, err := fmt.Sscanf(v, "%d", &req.Xpixel); err != nil {
+				return CreateRequest{}, fmt.Errorf("terminal: xpixel: %w", err)
+			}
+		case "ypixel":
+			if _, err := fmt.Sscanf(v, "%d", &req.Ypixel); err != nil {
+				return CreateRequest{}, fmt.Errorf("terminal: ypixel: %w", err)
 			}
 		case "env_count":
 			if _, err := fmt.Sscanf(v, "%d", &envN); err != nil {

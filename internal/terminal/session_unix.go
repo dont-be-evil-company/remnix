@@ -33,6 +33,8 @@ type Session struct {
 	ID      string
 	Cols    int
 	Rows    int
+	Xpixel  int
+	Ypixel  int
 	screen  *Screen
 	cmd     *exec.Cmd
 	ptmx    *os.File
@@ -99,7 +101,12 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		Setctty: true,
 		Ctty:    0,
 	}
-	ws := &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
+	ws := &pty.Winsize{
+		Rows: uint16(rows),
+		Cols: uint16(cols),
+		X:    winsizeU16(req.Xpixel),
+		Y:    winsizeU16(req.Ypixel),
+	}
 	ptmx, err := pty.StartWithSize(cmd, ws)
 	if err != nil {
 		return nil, err
@@ -124,6 +131,8 @@ func startSession(id string, req CreateRequest, conn net.Conn, rpc RPC) (*Sessio
 		ID:      id,
 		Cols:    cols,
 		Rows:    rows,
+		Xpixel:  int(winsizeU16(req.Xpixel)),
+		Ypixel:  int(winsizeU16(req.Ypixel)),
 		screen:  scr,
 		cmd:     cmd,
 		ptmx:    ptmx,
@@ -308,12 +317,23 @@ func (s *Session) size() (cols, rows int) {
 	return cols, rows
 }
 
-func (s *Session) setSize(cols, rows int) {
+func (s *Session) pixelSize() (xpixel, ypixel int) {
+	if s == nil {
+		return 0, 0
+	}
+	s.sizeMu.Lock()
+	xpixel, ypixel = s.Xpixel, s.Ypixel
+	s.sizeMu.Unlock()
+	return xpixel, ypixel
+}
+
+func (s *Session) setSize(cols, rows, xpixel, ypixel int) {
 	if s == nil {
 		return
 	}
 	s.sizeMu.Lock()
 	s.Cols, s.Rows = cols, rows
+	s.Xpixel, s.Ypixel = xpixel, ypixel
 	s.sizeMu.Unlock()
 }
 
@@ -339,13 +359,13 @@ func (s *Session) applyPendingSize() {
 	}
 	s.ptyMu.Lock()
 	if s.ioctlFD >= 0 {
-		ptySetsize(s.ioctlFD, sz.cols, sz.rows)
+		ptySetsize(s.ioctlFD, sz.cols, sz.rows, sz.xpixel, sz.ypixel)
 	}
 	s.ptyMu.Unlock()
 	if s.screen != nil {
 		s.screen.Resize(sz.cols, sz.rows)
 	}
-	s.setSize(sz.cols, sz.rows)
+	s.setSize(sz.cols, sz.rows, sz.xpixel, sz.ypixel)
 	s.sendOverlayWinch(sz.cols, sz.rows)
 }
 
@@ -384,7 +404,12 @@ func (s *Session) pump(conn net.Conn) {
 				if len(payload) >= 4 {
 					cols := int(binary.BigEndian.Uint16(payload[0:2]))
 					rows := int(binary.BigEndian.Uint16(payload[2:4]))
-					s.sizeQ.note(cols, rows)
+					xpixel, ypixel := s.pixelSize()
+					if len(payload) >= 8 {
+						xpixel = int(binary.BigEndian.Uint16(payload[4:6]))
+						ypixel = int(binary.BigEndian.Uint16(payload[6:8]))
+					}
+					s.sizeQ.note(cols, rows, xpixel, ypixel)
 				}
 			case FrameExit:
 				s.Close()
@@ -628,24 +653,39 @@ func setForegroundFD(fd, pid int) {
 	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSPGRP, uintptr(unsafe.Pointer(&pgid)))
 }
 
-func ptySetsize(fd, cols, rows int) {
+func winsizeU16(n int) uint16 {
+	if n < 0 {
+		return 0
+	}
+	if n > 65535 {
+		return 65535
+	}
+	return uint16(n)
+}
+
+func ptySetsize(fd, cols, rows, xpixel, ypixel int) {
 	if fd < 0 {
 		return
 	}
-	ws := pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
+	ws := pty.Winsize{
+		Rows: winsizeU16(rows),
+		Cols: winsizeU16(cols),
+		X:    winsizeU16(xpixel),
+		Y:    winsizeU16(ypixel),
+	}
 	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
 }
 
-func ptyWinsize(fd int) (cols, rows int, ok bool) {
+func ptyWinsize(fd int) (cols, rows, xpixel, ypixel int, ok bool) {
 	if fd < 0 {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	var ws pty.Winsize
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
 	if errno != 0 {
-		return 0, 0, false
+		return 0, 0, 0, 0, false
 	}
-	return int(ws.Cols), int(ws.Rows), true
+	return int(ws.Cols), int(ws.Rows), int(ws.X), int(ws.Y), true
 }
 
 func (s *Session) restoreForeground() {
@@ -674,11 +714,12 @@ func (s *Session) restoreForegroundLater() {
 		s.restoreForeground()
 	}
 	cols, rows := s.size()
+	xpixel, ypixel := s.pixelSize()
 	s.ptyMu.Lock()
-	c, r, ok := ptyWinsize(s.ioctlFD)
-	if ok && (r != rows || c != cols) {
-		ptySetsize(s.ioctlFD, cols, rows)
-		if s.screen != nil {
+	c, r, x, y, ok := ptyWinsize(s.ioctlFD)
+	if ok && (r != rows || c != cols || x != xpixel || y != ypixel) {
+		ptySetsize(s.ioctlFD, cols, rows, xpixel, ypixel)
+		if s.screen != nil && (r != rows || c != cols) {
 			s.screen.Resize(cols, rows)
 		}
 	}

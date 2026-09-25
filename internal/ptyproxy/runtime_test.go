@@ -78,9 +78,9 @@ func TestStreamSnapshotWritesHeaderFirst(t *testing.T) {
 }
 
 func TestOuterWinsizeNil(t *testing.T) {
-	c, r := outerWinsize(nil, nil)
-	if c != 0 || r != 0 {
-		t.Fatalf("cols=%d rows=%d", c, r)
+	c, r, x, y := outerWinsize(nil, nil)
+	if c != 0 || r != 0 || x != 0 || y != 0 {
+		t.Fatalf("cols=%d rows=%d x=%d y=%d", c, r, x, y)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestOpenOuterTTY(t *testing.T) {
 	if in.Fd() == out.Fd() {
 		t.Fatal("read and write sides must be distinct fds")
 	}
-	c, r := outerWinsize(in, out)
+	c, r, _, _ := outerWinsize(in, out)
 	if c < 1 || r < 1 {
 		t.Fatalf("winsize cols=%d rows=%d", c, r)
 	}

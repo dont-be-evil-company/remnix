@@ -588,26 +588,33 @@ take_frames :: proc(in_buf, tty_out: ^Byte_Buf, exit_code: ^int, done: ^bool) ->
 	return true
 }
 
-maybe_winch :: proc(cols, rows: ^u32, force: bool) {
+maybe_winch :: proc(cols, rows, xpixel, ypixel: ^u32, force: bool) {
 	ws: Winsize
 	if ioctl(tty_fd, TIOCGWINSZ, &ws) < 0 || ws.ws_col < 1 || ws.ws_row < 1 {
 		got_winch = false
 		return
 	}
-	if !force && !got_winch && u32(ws.ws_col) == cols^ && u32(ws.ws_row) == rows^ {
+	same := u32(ws.ws_col) == cols^ && u32(ws.ws_row) == rows^ && u32(ws.ws_xpixel) == xpixel^ && u32(ws.ws_ypixel) == ypixel^
+	if !force && !got_winch && same {
 		return
 	}
 	got_winch = false
-	if u32(ws.ws_col) == cols^ && u32(ws.ws_row) == rows^ {
+	if same {
 		return
 	}
 	cols^ = u32(ws.ws_col)
 	rows^ = u32(ws.ws_row)
-	payload := [4]u8 {
+	xpixel^ = u32(ws.ws_xpixel)
+	ypixel^ = u32(ws.ws_ypixel)
+	payload := [8]u8 {
 		u8((cols^ >> 8) & 0xff),
 		u8(cols^ & 0xff),
 		u8((rows^ >> 8) & 0xff),
 		u8(rows^ & 0xff),
+		u8((xpixel^ >> 8) & 0xff),
+		u8(xpixel^ & 0xff),
+		u8((ypixel^ >> 8) & 0xff),
+		u8(ypixel^ & 0xff),
 	}
 	queue_input(FRAME_WINCH, payload[:])
 }
@@ -683,7 +690,7 @@ exec_fallback :: proc(shell, remnix: cstring) -> ! {
 	posix._exit(127)
 }
 
-write_create :: proc(sock: posix.FD, shell: string, cols, rows: u32) -> bool {
+write_create :: proc(sock: posix.FD, shell: string, cols, rows, xpixel, ypixel: u32) -> bool {
 	cwd_buf: [4096]u8
 	cwd_cs := posix.getcwd(raw_data(cwd_buf[:]), len(cwd_buf))
 	cwd := cwd_cs != nil ? string(cwd_cs) : ""
@@ -698,11 +705,13 @@ write_create :: proc(sock: posix.FD, shell: string, cols, rows: u32) -> bool {
 	header_buf: [8192]u8
 	header := fmt.bprintf(
 		header_buf[:],
-		"CREATE\nshell=%s\ncwd=%s\ncols=%d\nrows=%d\nenv_count=%d\n",
+		"CREATE\nshell=%s\ncwd=%s\ncols=%d\nrows=%d\nxpixel=%d\nypixel=%d\nenv_count=%d\n",
 		shell,
 		cwd,
 		cols,
 		rows,
+		xpixel,
+		ypixel,
 		env_count,
 	)
 	if len(header) >= len(header_buf) || !write_all(sock, transmute([]u8)header) {
@@ -916,7 +925,7 @@ main :: proc() {
 		exec_fallback(shell_c, remnix_c)
 	}
 
-	if !write_create(sock, shell, u32(ws.ws_col), u32(ws.ws_row)) {
+	if !write_create(sock, shell, u32(ws.ws_col), u32(ws.ws_row), u32(ws.ws_xpixel), u32(ws.ws_ypixel)) {
 		fmt.eprintf("remnix-attach: create session failed\n")
 		posix.close(sock)
 		exec_fallback(shell_c, remnix_c)
@@ -964,6 +973,8 @@ main :: proc() {
 	tty_out: Byte_Buf
 	cols := u32(ws.ws_col)
 	rows := u32(ws.ws_row)
+	xpixel := u32(ws.ws_xpixel)
+	ypixel := u32(ws.ws_ypixel)
 	exit_code := 0
 	done := false
 	tmp: [4096]u8
@@ -973,7 +984,7 @@ main :: proc() {
 			break
 		}
 		if got_winch {
-			maybe_winch(&cols, &rows, true)
+			maybe_winch(&cols, &rows, &xpixel, &ypixel, true)
 		}
 		if need_focus_off {
 			need_focus_off = false
@@ -1010,7 +1021,7 @@ main :: proc() {
 			break
 		}
 		if pr == 0 {
-			maybe_winch(&cols, &rows, false)
+			maybe_winch(&cols, &rows, &xpixel, &ypixel, false)
 			continue
 		}
 
