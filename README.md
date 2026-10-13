@@ -15,7 +15,7 @@ remnix - rclone only reads and writes objects.
 **Linux / macOS:**
 
 ```sh
-curl -sSL https://dont-be-evil-company.github.io/remnix/install.sh | sh
+curl -sSL https://remnix.app/install.sh | sh
 ```
 
 Installs both `remnix` and `remnix-attach` into the same directory (`~/.local/bin` or `/usr/local/bin`).
@@ -23,7 +23,7 @@ Installs both `remnix` and `remnix-attach` into the same directory (`~/.local/bi
 **Windows (PowerShell):**
 
 ```powershell
-iwr https://dont-be-evil-company.github.io/remnix/install.ps1 -useb | iex
+iwr https://remnix.app/install.ps1 -useb | iex
 ```
 
 **Arch Linux (AUR):**
