@@ -26,6 +26,11 @@ $ErrorActionPreference = "Stop"
 $Repo = "dont-be-evil-company/remnix"
 $BinaryName = "remnix.exe"
 
+# Windows PowerShell 5.1 does not always negotiate TLS 1.2, which GitHub requires.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+}
+
 function Write-Status {
     param([string]$Message)
     Write-Host "[INFO] $Message" -ForegroundColor Blue
@@ -55,11 +60,15 @@ function Get-WindowsArchitecture {
 
 function Get-LatestVersion {
     try {
-        $response = Invoke-WebRequest -Uri "https://github.com/$Repo/releases/latest" -MaximumRedirection 0 -ErrorAction SilentlyContinue
-        if ($response.StatusCode -eq 302 -or $response.StatusCode -eq 301) {
-            return ($response.Headers.Location -replace ".*/releases/tag/", "")
+        $headers = @{
+            "User-Agent" = "remnix-install"
+            "Accept"     = "application/vnd.github+json"
         }
-        throw "Unexpected response from GitHub"
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers
+        if (-not $release.tag_name) {
+            throw "GitHub response did not include a release tag"
+        }
+        return $release.tag_name
     } catch {
         Write-ErrorMsg "Failed to get latest version from GitHub: $($_.Exception.Message)"
         exit 1
@@ -79,7 +88,7 @@ function Download-Binary {
     $binaryPath = Join-Path $tempDir.FullName $BinaryName
 
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $binaryPath
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $binaryPath -UseBasicParsing
         Write-Success "Download completed successfully"
         return $binaryPath
     } catch {
