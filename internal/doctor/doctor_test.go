@@ -48,3 +48,29 @@ func TestDoctorReportsFIDO2HID(t *testing.T) {
 		t.Fatalf("expected daemon diagnostics, got:\n%s", out)
 	}
 }
+
+func TestDoctorReportsMissingKittySocket(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("REMNIX_CONFIG_DIR", filepath.Join(root, "cfg"))
+	t.Setenv("REMNIX_DATA_DIR", filepath.Join(root, "data"))
+	t.Setenv("KITTY_WINDOW_ID", "1")
+	t.Setenv("KITTY_LISTEN_ON", "")
+	a, err := app.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if _, err := setup.RunNonInteractive(context.Background(), a, filepath.Join(root, "remote"), "test", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	a.Config.PtyProxy.Enabled = &on
+	var buf bytes.Buffer
+	err = Run(context.Background(), a, &buf)
+	if err == nil {
+		t.Fatal("missing KITTY_LISTEN_ON should fail doctor")
+	}
+	if !strings.Contains(buf.String(), "KITTY_LISTEN_ON is unset") {
+		t.Fatalf("doctor output:\n%s", buf.String())
+	}
+}

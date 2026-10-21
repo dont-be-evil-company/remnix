@@ -55,6 +55,15 @@ func posixPreamble(bin, attach string) string {
     _remnix_need_wrap=1
   fi
   if [[ "$_remnix_need_wrap" == 1 ]]; then
+    # Kitty clones an SSH split only when its foreground cmdline is kitten ssh
+    # and the window has a reported cwd. A direct child stays on Kitty's PTY
+    # (REMNIX_PTY_PROXY_MODE=kitty). The height-limited panel is a Kitty overlay.
+    if [[ -n "${REMNIX_PTY_PROXY_DISABLE:-}" ]]; then
+      unset REMNIX_PTY_PROXY_MODE
+    elif [[ -z "${REMNIX_PTY_PROXY_FORCE:-}" && -n "${KITTY_WINDOW_ID:-}" && -n "${KITTY_PID:-}" && -z "${TMUX:-}" && "${PPID:-}" == "${KITTY_PID}" ]]; then
+      export REMNIX_PTY_PROXY_MODE=kitty
+    else
+    unset REMNIX_PTY_PROXY_MODE
     export REMNIX_PTY_PROXY_ACTIVE=1
     export REMNIX_SESSION_ACTIVE=1
     export REMNIX_PTY_PROXY_TMUX="$_remnix_pty_tmux_current"
@@ -80,6 +89,7 @@ func posixPreamble(bin, attach string) string {
       exec ` + qb + ` pty-proxy --shell "$_remnix_pty_zsh" || true
     else
       exec ` + qb + ` pty-proxy || true
+    fi
     fi
   elif [[ -n "$_remnix_pty_tty" ]]; then
     export REMNIX_PTY_PROXY_TTY="$_remnix_pty_tty"
@@ -117,6 +127,18 @@ func fishPreamble(bin, attach string) string {
     set _remnix_need_wrap 1
   end
   if test "$_remnix_need_wrap" = 1
+    # Direct Kitty child: stay on Kitty's PTY. See the posix preamble.
+    set -l _remnix_ppid (ps -o ppid= -p $fish_pid 2>/dev/null | string trim)
+    set -l _remnix_force ""
+    if set -q REMNIX_PTY_PROXY_FORCE
+      set _remnix_force "$REMNIX_PTY_PROXY_FORCE"
+    end
+    if set -q REMNIX_PTY_PROXY_DISABLE; and test -n "$REMNIX_PTY_PROXY_DISABLE"
+      set -e REMNIX_PTY_PROXY_MODE
+    else if test -z "$_remnix_force"; and set -q KITTY_WINDOW_ID; and set -q KITTY_PID; and not set -q TMUX; and test "$_remnix_ppid" = "$KITTY_PID"
+      set -gx REMNIX_PTY_PROXY_MODE kitty
+    else
+    set -e REMNIX_PTY_PROXY_MODE
     set -gx REMNIX_PTY_PROXY_ACTIVE 1
     set -gx REMNIX_SESSION_ACTIVE 1
     set -gx REMNIX_PTY_PROXY_TMUX "$_remnix_pty_tmux_current"
@@ -125,6 +147,7 @@ func fishPreamble(bin, attach string) string {
       exec ` + qa + ` --shell (status fish-path) --remnix ` + qb + ` </dev/tty; or true
     end
     exec ` + qb + ` pty-proxy --shell (status fish-path) </dev/tty; or true
+    end
   else if test -n "$_remnix_pty_tty"
     set -gx REMNIX_PTY_PROXY_TTY "$_remnix_pty_tty"
   end
@@ -141,6 +164,14 @@ func nuPreamble(bin, attach string) string {
   let tty_current = (try { ^tty } catch { "" } | str trim)
   let tty_previous = ($env.REMNIX_PTY_PROXY_TTY? | default "")
   if (($env.REMNIX_PTY_PROXY_ACTIVE? | default "") | is-empty) or ($tmux_current != $tmux_previous) or ($tty_previous != "" and $tty_current != "" and $tty_current != $tty_previous) {
+    let ppid = (try { ^ps -o ppid= -p $nu.pid | str trim } catch { "" })
+    let kitty_direct = (($env.REMNIX_PTY_PROXY_FORCE? | default "") == "") and (($env.KITTY_WINDOW_ID? | default "") != "") and (($env.KITTY_PID? | default "") != "") and (($env.TMUX? | default "") == "") and ($ppid == ($env.KITTY_PID? | default "no-pid"))
+    if ($env.REMNIX_PTY_PROXY_DISABLE? | default "") != "" {
+      hide-env -i REMNIX_PTY_PROXY_MODE
+    } else if $kitty_direct {
+      $env.REMNIX_PTY_PROXY_MODE = "kitty"
+    } else {
+    hide-env -i REMNIX_PTY_PROXY_MODE
     $env.REMNIX_PTY_PROXY_ACTIVE = "1"
     $env.REMNIX_SESSION_ACTIVE = "1"
     $env.REMNIX_PTY_PROXY_TMUX = $tmux_current
@@ -149,6 +180,7 @@ func nuPreamble(bin, attach string) string {
       try { exec ` + qa + ` --shell $nu.current-exe --remnix ` + qb + ` } catch { }
     }
     try { exec ` + qb + ` pty-proxy --shell $nu.current-exe } catch { }
+    }
   } else if $tty_current != "" {
     $env.REMNIX_PTY_PROXY_TTY = $tty_current
   }

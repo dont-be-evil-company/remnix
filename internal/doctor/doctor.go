@@ -17,6 +17,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/daemon"
 	"github.com/dont-be-evil-company/remnix/internal/db"
 	"github.com/dont-be-evil-company/remnix/internal/device"
+	"github.com/dont-be-evil-company/remnix/internal/kittypanel"
 	"github.com/dont-be-evil-company/remnix/internal/redact"
 	"github.com/dont-be-evil-company/remnix/internal/repository"
 	"github.com/dont-be-evil-company/remnix/internal/setup"
@@ -176,6 +177,10 @@ func Run(ctx context.Context, a *app.App, w io.Writer) error {
 				check(true, fmt.Sprintf("%s gc eligible: %v blocked_by=%v", ep.ID, plan.Eligible, plan.BlockedBy))
 			}
 		}
+	}
+	if a.Config.PtyProxy.IsEnabled() && os.Getenv("KITTY_WINDOW_ID") != "" {
+		ok, msg := kittypanel.Report()
+		check(ok, msg)
 	}
 	f, _ := merge.NewHeadStore(a.DB).Get()
 	check(true, fmt.Sprintf("local frontier: %d devices", len(f)))

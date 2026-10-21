@@ -17,6 +17,7 @@ import (
 	"github.com/dont-be-evil-company/remnix/internal/helpparse"
 	"github.com/dont-be-evil-company/remnix/internal/history"
 	"github.com/dont-be-evil-company/remnix/internal/importers"
+	"github.com/dont-be-evil-company/remnix/internal/kittypanel"
 	"github.com/dont-be-evil-company/remnix/internal/protocol"
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 	"github.com/dont-be-evil-company/remnix/internal/search"
@@ -41,6 +42,8 @@ type searchOptions struct {
 	Interactive bool
 	Explain     bool
 	ResultFile  string
+	KittyPanel  bool
+	KittyParent string
 }
 
 func uiTheme(cfg *config.Config) tui.Theme {
@@ -160,15 +163,26 @@ func runSearchTUI(cmd *cobra.Command, opts searchOptions, entries []history.Entr
 		overlay = a.Config.PtyProxy.HeightPercent()
 		cfg = a.Config
 	}
+	var bg []string
+	cursorRow := -1
+	if opts.KittyPanel {
+		var err error
+		bg, cursorRow, overlay, err = kittyPanelBackground(opts.KittyParent, overlay)
+		if err != nil {
+			return err
+		}
+	}
 	return tui.RunOpts(entries, tui.Options{
-		Query:          opts.Query,
-		Cwd:            cwd,
-		DeviceID:       deviceID,
-		SessionID:      sessionID,
-		Widget:         true,
-		OverlayPercent: overlay,
-		Theme:          uiTheme(cfg),
-		ResultFile:     opts.ResultFile,
+		Query:           opts.Query,
+		Cwd:             cwd,
+		DeviceID:        deviceID,
+		SessionID:       sessionID,
+		Widget:          true,
+		OverlayPercent:  overlay,
+		Theme:           uiTheme(cfg),
+		ResultFile:      opts.ResultFile,
+		KittyBackground: bg,
+		KittyCursorRow:  cursorRow,
 		Delete: func(e history.Entry) error {
 			if err := client.HistoryDelete(e.Command); err == nil {
 				return nil
@@ -279,9 +293,21 @@ func runInspect(advanced bool) error {
 	})
 }
 
-func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, resultFile, itemsFile string) error {
+func kittyPanelBackground(parent string, fallbackPercent int) ([]string, int, int, error) {
+	bg, cursorRow, err := kittypanel.GetText(parent)
+	if err != nil {
+		return nil, -1, 0, err
+	}
+	percent := fallbackPercent
+	if cfg, err := config.Load(); err == nil {
+		percent = cfg.PtyProxy.HeightPercent()
+	}
+	return bg, cursorRow, percent, nil
+}
+
+func runSuggest(cmd *cobra.Command, prefix, cwd string, list, interactive bool, resultFile, itemsFile string, kittyPanel bool, kittyParent string) error {
 	if interactive {
-		return runSuggestInteractive(cmd, prefix, cwd, resultFile, itemsFile)
+		return runSuggestInteractive(cmd, prefix, cwd, resultFile, itemsFile, kittyPanel, kittyParent)
 	}
 	if prefix == "" {
 		return nil
@@ -352,7 +378,7 @@ func loadSuggestList(prefix, cwd string) ([]string, error) {
 	}, a.Config.Suggest.MenuLimit()), nil
 }
 
-func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFile string) error {
+func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFile string, kittyPanel bool, kittyParent string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -408,16 +434,30 @@ func runSuggestInteractive(cmd *cobra.Command, prefix, cwd, resultFile, itemsFil
 		})
 	}()
 	h := cfg.Suggest.MenuLimit() + 3
+	var bg []string
+	cursorRow := -1
+	percent := cfg.PtyProxy.HeightPercent()
+	if kittyPanel {
+		var loadErr error
+		bg, cursorRow, percent, loadErr = kittyPanelBackground(kittyParent, percent)
+		if loadErr != nil {
+			close(uiDone)
+			return loadErr
+		}
+	}
 	err = tui.RunSuggestMenu(tui.SuggestMenuOptions{
-		Prefix:        prefix,
-		TypedIcon:     cfg.Suggest.IconTyped(),
-		HistoryIcon:   cfg.Suggest.IconHistory(),
-		ItemIcon:      itemIco,
-		OverlayHeight: h,
-		Widget:        true,
-		ResultFile:    resultFile,
-		ItemsCh:       ch,
-		Theme:         uiTheme(cfg),
+		Prefix:          prefix,
+		TypedIcon:       cfg.Suggest.IconTyped(),
+		HistoryIcon:     cfg.Suggest.IconHistory(),
+		ItemIcon:        itemIco,
+		OverlayHeight:   h,
+		OverlayPercent:  percent,
+		KittyBackground: bg,
+		KittyCursorRow:  cursorRow,
+		Widget:          true,
+		ResultFile:      resultFile,
+		ItemsCh:         ch,
+		Theme:           uiTheme(cfg),
 	}, cmd.OutOrStdout())
 	close(uiDone)
 	return err

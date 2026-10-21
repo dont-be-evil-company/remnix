@@ -37,12 +37,16 @@ type OverlayState struct {
 	RectY, RectH       int
 	CursorRow          int
 	Out                io.Writer
+	// Background is the parent Kitty window. When set, the panel paints the
+	// whole overlay window: those rows everywhere except the popup rect.
+	Background []string
 }
 
 type overlaySession struct {
 	snap  ptyproxy.Snapshot
 	place ptyproxy.Placement
 	rows  <-chan []string
+	kitty bool
 }
 
 // OverlayRows is the popup height for a terminal of termRows given a 1-100
@@ -323,6 +327,10 @@ func (s *overlaySession) end(w *os.File) {
 	if w == nil {
 		return
 	}
+	if s != nil && s.kitty {
+		_, _ = io.WriteString(w, "\x1b[?25h")
+		return
+	}
 	if s != nil {
 		select {
 		case rows := <-s.rows:
@@ -338,7 +346,7 @@ func (s *overlaySession) state(out io.Writer) OverlayState {
 	if s == nil {
 		return OverlayState{}
 	}
-	return OverlayState{
+	st := OverlayState{
 		TermCols:  s.snap.Cols,
 		TermRows:  s.snap.Rows,
 		RectY:     s.place.Rect.Y,
@@ -346,6 +354,10 @@ func (s *overlaySession) state(out io.Writer) OverlayState {
 		CursorRow: s.snap.CursorRow,
 		Out:       out,
 	}
+	if s.kitty {
+		st.Background = s.snap.RowANSI
+	}
+	return st
 }
 
 // drawFixed paints body at (0, y) for h rows. This is ratatui Viewport::Fixed:
@@ -379,6 +391,77 @@ func drawFixed(w io.Writer, cols, y, h int, body string) {
 	}
 }
 
+// drawComposed paints a full-window Kitty overlay: the saved parent screen
+// everywhere except the popup rect, which gets body.
+func drawComposed(w io.Writer, cols, termRows, y, h int, bg []string, body string) {
+	if w == nil || termRows < 1 {
+		return
+	}
+	if cols < 1 {
+		cols = 1
+	}
+	frame := composeOverlay(termRows, y, h, bg, body)
+	lines := strings.Split(strings.ReplaceAll(frame, "\r\n", "\n"), "\n")
+	_, _ = io.WriteString(w, "\x1b[?25l")
+	for i := 0; i < termRows; i++ {
+		ptyproxy.MoveTo(w, 0, i)
+		_, _ = io.WriteString(w, "\x1b[0m\x1b[K")
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
+		if lipgloss.Width(line) > cols {
+			line = ansi.Truncate(line, cols, "")
+		}
+		_, _ = io.WriteString(w, line)
+	}
+	if f, ok := w.(interface{ Sync() error }); ok {
+		_ = f.Sync()
+	}
+}
+
+func fitScreen(bg []string, rows int) []string {
+	if rows < 1 {
+		return nil
+	}
+	src := bg
+	if len(src) > rows {
+		src = src[:rows]
+	}
+	out := make([]string, rows)
+	copy(out, src)
+	return out
+}
+
+// beginKittyOverlay paints on a Kitty overlay window. The parent screen is
+// already captured; there is no pty-proxy snapshot socket.
+func beginKittyOverlay(w *os.File, rowsFor func(termRows int) int, bg []string, cursorRow int) *overlaySession {
+	if w == nil || bg == nil || !isTerminalFile(w) {
+		return nil
+	}
+	cols, rows, err := term.GetSize(int(w.Fd()))
+	if err != nil || rows < 2 || cols < 1 {
+		return nil
+	}
+	height := rows
+	if rowsFor != nil {
+		height = rowsFor(rows)
+	}
+	if height < 1 || height >= rows {
+		return nil
+	}
+	fitted := fitScreen(bg, rows)
+	snap := ptyproxy.Snapshot{Rows: rows, Cols: cols, CursorRow: cursorRow, RowANSI: fitted}
+	if cursorRow < 0 || cursorRow >= rows {
+		snap.CursorRow = rows - 1
+	}
+	// Same rule as the pty proxy: a cursor sitting on blank cells below the
+	// prompt moves up to the last content row, then Place draws at that row.
+	snap.CursorRow = ptyproxy.ContentCursorRow(snap)
+	place := ptyproxy.Place(snap.CursorRow, rows, cols, height)
+	return &overlaySession{snap: snap, place: place, kitty: true}
+}
+
 // widgetIO prefers /dev/tty for painting so fish bind and nu executehostcommand
 // can overlay even when os.Stdout is a pipe. Input stays on stdin when that
 // is already a TTY (zsh fd-swap).
@@ -397,14 +480,20 @@ func isTerminalFile(f *os.File) bool {
 	return f != nil && term.IsTerminal(int(f.Fd()))
 }
 
-func widgetProgram(m tea.Model, rowsFor func(termRows int) int) (*tea.Program, func(), error) {
+func widgetProgram(m tea.Model, rowsFor func(termRows int) int, bg []string, cursorRow int) (*tea.Program, func(), error) {
 	prepareWidgetTTY()
 	in, outTTY, closeFn, err := widgetIO()
 	if err != nil {
 		return tea.NewProgram(m), func() {}, nil
 	}
 	opts := []tea.ProgramOption{tea.WithInput(in)}
-	sess := beginOverlay(outTTY, rowsFor)
+	var sess *overlaySession
+	if bg != nil {
+		sess = beginKittyOverlay(outTTY, rowsFor, bg, cursorRow)
+	}
+	if sess == nil {
+		sess = beginOverlay(outTTY, rowsFor)
+	}
 	if sess != nil {
 		st := sess.state(outTTY)
 		// Bubble Tea has no Viewport::Fixed. Its inline renderer uses relative

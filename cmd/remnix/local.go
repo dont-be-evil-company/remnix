@@ -18,6 +18,8 @@ func newSearchCmd() *cobra.Command {
 		interactive bool
 		explain     bool
 		resultFile  string
+		kittyPanel  bool
+		kittyParent string
 	)
 	cmd := &cobra.Command{
 		Use:   "search [query]",
@@ -44,6 +46,8 @@ func newSearchCmd() *cobra.Command {
 				Interactive: interactive,
 				Explain:     explain,
 				ResultFile:  resultFile,
+				KittyPanel:  kittyPanel,
+				KittyParent: kittyParent,
 			})
 		},
 	}
@@ -58,6 +62,8 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&explain, "explain", false, "print ranking score breakdown")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open fuzzy search TUI (Ctrl+R widget)")
 	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
+	cmd.Flags().BoolVar(&kittyPanel, "kitty-panel", false, "draw the height-limited panel in a Kitty overlay window")
+	cmd.Flags().StringVar(&kittyParent, "kitty-parent", "", "Kitty window id of the shell under the overlay")
 	return cmd
 }
 
@@ -90,13 +96,13 @@ day/month/year).`,
 }
 
 func newSuggestCmd() *cobra.Command {
-	var prefix, cwd, resultFile, itemsFile string
-	var list, interactive bool
+	var prefix, cwd, resultFile, itemsFile, kittyParent string
+	var list, interactive, kittyPanel bool
 	cmd := &cobra.Command{
 		Use:   "suggest",
 		Short: "Print the best history prefix match for inline shell suggestions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSuggest(cmd, prefix, cwd, list, interactive, resultFile, itemsFile)
+			return runSuggest(cmd, prefix, cwd, list, interactive, resultFile, itemsFile, kittyPanel, kittyParent)
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "typed command prefix")
@@ -105,6 +111,8 @@ func newSuggestCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "open the suggestion overlay TUI")
 	cmd.Flags().StringVar(&resultFile, "result-file", "", "write the selected command to this file (nushell); otherwise widget mode prints it on stderr")
 	cmd.Flags().StringVar(&itemsFile, "items-file", "", "newline-separated completion lines for the overlay (instead of history)")
+	cmd.Flags().BoolVar(&kittyPanel, "kitty-panel", false, "draw the height-limited panel in a Kitty overlay window")
+	cmd.Flags().StringVar(&kittyParent, "kitty-parent", "", "Kitty window id of the shell under the overlay")
 	cmd.AddCommand(newSuggestCacheCmd())
 	return cmd
 }

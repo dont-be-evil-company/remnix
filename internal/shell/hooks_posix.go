@@ -13,11 +13,16 @@ func bash(bin string, opts Options) string {
 	}
 	aq := zshQuote(attach)
 	extra := ""
+	if opts.PtyProxyEnabled {
+		extra += kittyPanelPOSIX()
+	}
 	if opts.SuggestMenu {
 		extra += `
 __remnix_suggest_menu() {
   local selected
-  if ! __remnix_overlay_complete "$READLINE_LINE" 0; then
+  if declare -F __remnix_kitty_panel >/dev/null 2>&1 && __remnix_kitty_panel suggest --interactive --kitty-panel --prefix "$READLINE_LINE" --cwd "$PWD"; then
+    :
+  elif ! __remnix_overlay_complete "$READLINE_LINE" 0; then
     if ! __remnix_overlay suggest-interactive "$READLINE_LINE"; then
       __remnix_widget_run suggest --interactive --prefix "$READLINE_LINE" --cwd "$PWD" || return
     fi
@@ -165,7 +170,9 @@ __remnix_precmd() {
 
 __remnix_search() {
   local selected
-  if ! __remnix_overlay search-interactive "$READLINE_LINE"; then
+  if declare -F __remnix_kitty_panel >/dev/null 2>&1 && __remnix_kitty_panel search --interactive --kitty-panel --query "$READLINE_LINE" --cwd "$PWD"; then
+    :
+  elif ! __remnix_overlay search-interactive "$READLINE_LINE"; then
     __remnix_widget_run search --interactive --query "$READLINE_LINE" --cwd "$PWD" || return
   fi
   selected=$REPLY
@@ -199,8 +206,11 @@ func fish(bin string, opts Options) string {
 		attach = "remnix-attach"
 	}
 	extra := ""
+	if opts.PtyProxyEnabled {
+		extra += fishKittyPanel()
+	}
 	if opts.SuggestMenu {
-		extra = fishSuggestMenu()
+		extra += fishSuggestMenu()
 	}
 	return fmt.Sprintf(`# remnix fish integration
 # Add to ~/.config/fish/config.fish: %s init fish | source
@@ -336,6 +346,12 @@ end
 function remnix-search
     set -l query (commandline --current-buffer)
     commandline --current-buffer --replace -- ''
+    if functions -q __remnix_kitty_panel
+        if __remnix_kitty_panel search --interactive --kitty-panel --query "$query" --cwd "$PWD"
+            __remnix_apply_selected "$query"
+            return
+        end
+    end
     if not __remnix_overlay_rpc search-interactive "$query" "$PWD"
         __remnix_widget_run search --interactive --query "$query" --cwd "$PWD"
         or begin
@@ -403,7 +419,37 @@ def __remnix_proxy_tty_here [] {
   ($env.NVIM? | default "") == ""
 }
 
+def __remnix_kitty_launch [cmd: list<string>] {
+  if ($env.REMNIX_PTY_PROXY_MODE? | default "") != "kitty" {
+    return {ran: false, selected: ""}
+  }
+  if ($env.KITTY_LISTEN_ON? | default "") == "" or ($env.KITTY_WINDOW_ID? | default "") == "" {
+    return {ran: false, selected: ""}
+  }
+  let tmp = (^mktemp | str trim)
+  let parent = $env.KITTY_WINDOW_ID
+  let ran = (do { ^kitty @ --to $env.KITTY_LISTEN_ON launch --type=overlay --wait-for-child-to-exit --allow-remote-control --cwd $env.PWD --env $"REMNIX_KITTY_PARENT=($parent)" --env $"KITTY_LISTEN_ON=($env.KITTY_LISTEN_ON)" $__remnix_bin ...$cmd --result-file $tmp --kitty-parent $parent } | complete)
+  let code = ($ran.stdout | str trim)
+  let selected = (try { open --raw $tmp } catch { "" } | str trim)
+  try { rm $tmp }
+  if $code != "0" {
+    return {ran: false, selected: ""}
+  }
+  {ran: true, selected: $selected}
+}
+
 def __remnix_overlay_or_tui [op: string, query: string] {
+  if ($env.REMNIX_PTY_PROXY_MODE? | default "") == "kitty" {
+    let cmd = if $op == "suggest-interactive" {
+      ["suggest" "--interactive" "--kitty-panel" "--prefix" $query "--cwd" $env.PWD]
+    } else {
+      ["search" "--interactive" "--kitty-panel" "--query" $query "--cwd" $env.PWD]
+    }
+    let kitty = (__remnix_kitty_launch $cmd)
+    if $kitty.ran {
+      return $kitty.selected
+    }
+  }
   if ($env.REMNIX_SESSION_ID? | default "") != "" and (__remnix_proxy_tty_here) {
     let rpc = (do { ^$"($__remnix_attach)" --rpc $op $query $env.PWD $env.REMNIX_SESSION_ID } | complete)
     if $rpc.exit_code == 0 {
@@ -605,29 +651,59 @@ function remnix-suggest-menu
     set -l query (commandline --current-buffer)
     set -l selected ''
     while true
-        set -l started 0
-        if __remnix_overlay_complete_begin "$query"
-            set started 1
-        end
-        __remnix_suggest_completions "$query"
-        if __remnix_suggest_no_completer "$query"
-            set -g __remnix_comp_lines
-            set -g __remnix_comp_descrs
-        end
-        set -l n (count $__remnix_comp_lines)
-        if test $started -eq 1
-            __remnix_overlay_complete_finish $n
-            or break
-        else if test $n -eq 0
-            if not __remnix_overlay_rpc suggest-interactive "$query" "$PWD"
+        if functions -q __remnix_kitty_panel; and test "$REMNIX_PTY_PROXY_MODE" = kitty
+            __remnix_suggest_completions "$query"
+            if __remnix_suggest_no_completer "$query"
+                set -g __remnix_comp_lines
+                set -g __remnix_comp_descrs
+            end
+            set -l n (count $__remnix_comp_lines)
+            if test $n -gt 0
+                set -l tmp (mktemp)
+                or break
+                set -l i 1
+                while test $i -le $n
+                    printf '%s\t%s\n' $__remnix_comp_lines[$i] $__remnix_comp_descrs[$i]
+                    set i (math $i + 1)
+                end >$tmp
+                if not __remnix_kitty_panel suggest --interactive --kitty-panel --prefix "$query" --cwd "$PWD" --items-file $tmp
+                    __remnix_widget_run suggest --interactive --prefix "$query" --cwd "$PWD" --items-file $tmp
+                    or begin
+                        command rm -f -- $tmp
+                        break
+                    end
+                end
+                command rm -f -- $tmp
+            else if not __remnix_kitty_panel suggest --interactive --kitty-panel --prefix "$query" --cwd "$PWD"
                 __remnix_widget_run suggest --interactive --prefix "$query" --cwd "$PWD"
                 or break
             end
+            set selected (string collect -- $__remnix_widget_out | string trim)
         else
-            __remnix_suggest_items_tui "$query"
-            or break
+            set -l started 0
+            if __remnix_overlay_complete_begin "$query"
+                set started 1
+            end
+            __remnix_suggest_completions "$query"
+            if __remnix_suggest_no_completer "$query"
+                set -g __remnix_comp_lines
+                set -g __remnix_comp_descrs
+            end
+            set -l n (count $__remnix_comp_lines)
+            if test $started -eq 1
+                __remnix_overlay_complete_finish $n
+                or break
+            else if test $n -eq 0
+                if not __remnix_overlay_rpc suggest-interactive "$query" "$PWD"
+                    __remnix_widget_run suggest --interactive --prefix "$query" --cwd "$PWD"
+                    or break
+                end
+            else
+                __remnix_suggest_items_tui "$query"
+                or break
+            end
+            set selected (string collect -- $__remnix_widget_out | string trim)
         end
-        set selected (string collect -- $__remnix_widget_out | string trim)
         if string match -q '__remnix_continue__:*' -- $selected
             set query (string replace -r '^__remnix_continue__:' '' -- $selected)
             if not string match -qr '\s$' -- $query
@@ -646,6 +722,29 @@ function remnix-suggest-menu
     __remnix_apply_selected "$query"
 end
 __remnix_bind ctrl-space remnix-suggest-menu
+`
+}
+
+func fishKittyPanel() string {
+	return `
+function __remnix_kitty_panel
+    test "$REMNIX_PTY_PROXY_MODE" = kitty; or return 1
+    set -q KITTY_LISTEN_ON; or return 1
+    set -q KITTY_WINDOW_ID; or return 1
+    set -l result (mktemp)
+    or return 1
+    set -l code (kitty @ --to "$KITTY_LISTEN_ON" launch --type=overlay --wait-for-child-to-exit --allow-remote-control --cwd="$PWD" --env "REMNIX_KITTY_PARENT=$KITTY_WINDOW_ID" --env "KITTY_LISTEN_ON=$KITTY_LISTEN_ON" $__remnix_bin $argv --result-file $result --kitty-parent $KITTY_WINDOW_ID | string trim)
+    if test "$code" != 0
+        command rm -f -- $result
+        return 1
+    end
+    set -g __remnix_widget_out ""
+    if test -f $result
+        set -g __remnix_widget_out (string collect -- < $result | string trim)
+    end
+    command rm -f -- $result
+    return 0
+end
 `
 }
 
@@ -723,6 +822,23 @@ def __remnix_nu_completions [buf: string] {
 
 def __remnix_complete_overlay [query: string, comps: record] {
   let n = ($comps.items | length)
+  if ($env.REMNIX_PTY_PROXY_MODE? | default "") == "kitty" {
+    let itemsf = (^mktemp | str trim)
+    mut lines = []
+    mut i = 0
+    while $i < $n {
+      let item = ($comps.items | get $i)
+      mut descr = (try { $comps.descrs | get $i } catch { "" })
+      $lines = ($lines | append $"($item)\t($descr)")
+      $i = $i + 1
+    }
+    $lines | str join (char nl) | save --force $itemsf
+    let kitty = (__remnix_kitty_launch ["suggest" "--interactive" "--kitty-panel" "--prefix" $query "--cwd" $env.PWD "--items-file" $itemsf])
+    try { rm $itemsf }
+    if $kitty.ran {
+      return $kitty.selected
+    }
+  }
   if ($env.REMNIX_SESSION_ID? | default "") != "" and (__remnix_proxy_tty_here) {
     mut fields = [$query $env.PWD $env.REMNIX_SESSION_ID ($env.PATH | str join (char esep)) ($n | into string)]
     mut i = 0

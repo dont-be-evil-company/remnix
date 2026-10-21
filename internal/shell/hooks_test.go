@@ -570,8 +570,17 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(over, "__remnix_suggest_menu_box") {
-		t.Fatal("proxy-on must not emit POSTDISPLAY menu")
+	if !strings.Contains(over, "__remnix_suggest_menu_box") {
+		t.Fatal("proxy-on must keep the POSTDISPLAY menu for a direct Kitty window")
+	}
+	if !strings.Contains(over, "__remnix_suggest_ghost_only") || !strings.Contains(over, "REMNIX_SESSION_ID") {
+		t.Fatal("a live pty-proxy session must keep ghost text and skip the dropdown")
+	}
+	if !strings.Contains(over, "__remnix_kitty_panel") || !strings.Contains(over, "--kitty-panel") {
+		t.Fatal("proxy-on Ctrl+R and Ctrl+Space must open the Kitty overlay panel")
+	}
+	if !strings.Contains(over, "KITTY_LISTEN_ON") {
+		t.Fatal("the Kitty panel must use the listen socket and fall back when it is missing")
 	}
 	if !strings.Contains(over, `_main_complete`) || !strings.Contains(over, `__remnix_comp_applied_lines`) {
 		t.Fatal("proxy-on overlay must capture compsys completions")
@@ -594,8 +603,8 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	}
 	menu := over[menuAt:]
 	beginAt := strings.Index(menu, "__remnix_overlay_complete_begin")
-	compAt := strings.Index(menu, "__remnix_suggest_completions")
-	if beginAt < 0 || compAt < 0 || beginAt > compAt {
+	compAt := strings.Index(menu[beginAt:], "__remnix_suggest_completions")
+	if beginAt < 0 || compAt < 0 {
 		t.Fatal("spinner overlay must start before compsys capture")
 	}
 	if !strings.Contains(over, "__remnix_rpc_write") || !strings.Contains(over, "__remnix_overlay_complete_finish") {

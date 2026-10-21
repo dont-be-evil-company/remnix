@@ -24,6 +24,12 @@ type Options struct {
 	Widget         bool
 	OverlayPercent int
 	ResultFile     string
+	// KittyBackground is the parent window captured by kitty @ get-text.
+	// A non-nil slice paints that screen behind the popup.
+	KittyBackground []string
+	// KittyCursorRow is the 0-based cursor row in KittyBackground. -1 means
+	// unknown; the panel then sits on the last content row.
+	KittyCursorRow int
 	Delete         func(history.Entry) error
 	Theme          Theme
 }
@@ -49,6 +55,7 @@ type model struct {
 	overlayH         int
 	overlayCursorRow int
 	overlayOut       io.Writer
+	overlayBG        []string
 	delete           func(history.Entry) error
 	status           string
 	theme            Theme
@@ -90,6 +97,7 @@ func (m *model) EnableOverlay(st OverlayState) {
 	m.overlay = true
 	m.overlayOut = st.Out
 	m.overlayCursorRow = st.CursorRow
+	m.overlayBG = st.Background
 	if st.TermCols > 0 {
 		m.width = st.TermCols
 	}
@@ -317,7 +325,11 @@ func (m model) View() tea.View {
 	// Fullscreen (no overlay) uses the alt-screen, like Viewport::Fullscreen.
 	v.AltScreen = !m.overlay
 	if m.overlay {
-		drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+		if m.overlayBG != nil {
+			drawComposed(m.overlayOut, m.width, m.height, m.overlayY, m.overlayH, m.overlayBG, v.Content)
+		} else {
+			drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+		}
 	}
 	return v
 }
@@ -554,7 +566,7 @@ func RunOpts(entries []history.Entry, opts Options, out io.Writer) error {
 	if opts.Widget {
 		p, cleanup, err = widgetProgram(&m, func(termRows int) int {
 			return overlayRows(termRows, opts.OverlayPercent)
-		})
+		}, opts.KittyBackground, opts.KittyCursorRow)
 		if err != nil {
 			return err
 		}

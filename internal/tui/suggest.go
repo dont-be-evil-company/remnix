@@ -39,8 +39,14 @@ type SuggestMenuOptions struct {
 	HistoryIcon   string
 	ItemIcon      string
 	OverlayHeight int
-	Widget        bool
-	ResultFile    string
+	// OverlayPercent is pty_proxy.height. Used when KittyBackground is set.
+	OverlayPercent int
+	// KittyBackground is the parent window from kitty @ get-text.
+	KittyBackground []string
+	// KittyCursorRow is the 0-based cursor in KittyBackground. -1 is unknown.
+	KittyCursorRow int
+	Widget         bool
+	ResultFile     string
 	// ItemsCh, when set, opens the menu in a loading state until a payload
 	// arrives (or Abort). Used so compsys can run while the spinner paints.
 	ItemsCh <-chan SuggestItems
@@ -75,6 +81,8 @@ type suggestModel struct {
 	overlayH         int
 	overlayCursorRow int
 	overlayOut       io.Writer
+	overlayBG        []string
+	overlayPercent   int
 	selected         string
 	print            bool
 	run              bool
@@ -118,16 +126,17 @@ func newSuggestModel(opts SuggestMenuOptions) suggestModel {
 	ti.Focus()
 	applyThemeInput(&ti, th)
 	m := suggestModel{
-		input:    ti,
-		allItems: all,
-		width:    80,
-		height:   10,
-		typedIco: typed,
-		histIco:  item,
-		loading:  opts.ItemsCh != nil,
-		itemsCh:  opts.ItemsCh,
-		cache:    cache,
-		theme:    th,
+		input:          ti,
+		allItems:       all,
+		width:          80,
+		height:         10,
+		typedIco:       typed,
+		histIco:        item,
+		loading:        opts.ItemsCh != nil,
+		itemsCh:        opts.ItemsCh,
+		cache:          cache,
+		theme:          th,
+		overlayPercent: opts.OverlayPercent,
 	}
 	m.syncInputWidth()
 	if m.loading {
@@ -212,6 +221,7 @@ func (m *suggestModel) EnableOverlay(st OverlayState) {
 	m.overlay = true
 	m.overlayOut = st.Out
 	m.overlayCursorRow = st.CursorRow
+	m.overlayBG = st.Background
 	if st.TermCols > 0 {
 		m.width = st.TermCols
 	}
@@ -274,6 +284,9 @@ func (m suggestModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = max(1, msg.Height)
 			if m.overlayH < 1 || m.overlayH > m.height {
 				m.overlayH = min(m.height, max(SearchChromeRows+1, 10))
+			}
+			if m.overlayPercent > 0 {
+				m.overlayH = overlayRows(m.height, m.overlayPercent)
 			}
 			m.overlayY = overlayOriginY(m.overlayCursorRow, m.height, m.width, m.overlayH)
 		}
@@ -471,7 +484,11 @@ func (m suggestModel) View() tea.View {
 	v := tea.NewView(b.String())
 	v.AltScreen = !m.overlay
 	if m.overlay {
-		drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+		if m.overlayBG != nil {
+			drawComposed(m.overlayOut, m.width, m.height, m.overlayY, m.overlayH, m.overlayBG, v.Content)
+		} else {
+			drawFixed(m.overlayOut, m.width, m.overlayY, m.overlayH, v.Content)
+		}
 	}
 	return v
 }
@@ -671,6 +688,9 @@ func RunSuggestMenu(opts SuggestMenuOptions, out io.Writer) error {
 	)
 	if opts.Widget {
 		p, cleanup, err = widgetProgram(&m, func(termRows int) int {
+			if opts.KittyBackground != nil {
+				return overlayRows(termRows, opts.OverlayPercent)
+			}
 			h := opts.OverlayHeight
 			if h <= 0 {
 				h = max(SearchChromeRows+1, min(len(opts.Items)+3, 12))
@@ -679,7 +699,7 @@ func RunSuggestMenu(opts SuggestMenuOptions, out io.Writer) error {
 				return termRows
 			}
 			return h
-		})
+		}, opts.KittyBackground, opts.KittyCursorRow)
 		if err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dont-be-evil-company/remnix/internal/kittypanel"
 	"github.com/dont-be-evil-company/remnix/internal/ptyproxy"
 )
 
@@ -166,5 +167,32 @@ func TestSearchViewOverlayIsInlineNotAltScreen(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "remnix") {
 		t.Fatalf("tui should start at line 0 of the popup, got %q", lines[0])
+	}
+}
+
+func TestKittyFixtureFollowsCursor(t *testing.T) {
+	const rows = 40
+	bg := kittypanel.SplitScreen("top\nprompt\n")
+	cursor := 1
+	// Pad like the overlay window: the prompt stays on its own row.
+	screen := make([]string, rows)
+	copy(screen, bg)
+	h := OverlayRows(rows, 40)
+	y := ptyproxy.Place(cursor, rows, 80, h).Rect.Y
+	if y != cursor {
+		t.Fatalf("panel should start on the cursor row %d, got %d", cursor, y)
+	}
+	panel := strings.TrimSuffix(strings.Repeat("TUI\n", h), "\n")
+	got := strings.Split(composeOverlay(rows, y, h, screen, panel), "\n")
+	if got[0] != "top" || got[y] != "TUI" {
+		t.Fatalf("prompt row lost: y=%d first=%q panel=%q", y, got[0], got[y])
+	}
+	if y+h < rows && got[rows-1] == "TUI" {
+		t.Fatal("panel reached the bottom of a screen whose cursor is near the top")
+	}
+	low := 36
+	lowY := ptyproxy.Place(low, rows, 80, h).Rect.Y
+	if lowY >= low || lowY == rows-h {
+		t.Fatalf("cursor near the bottom should draw the panel above it, y=%d h=%d", lowY, h)
 	}
 }

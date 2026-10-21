@@ -49,8 +49,11 @@ func Integration(shellName, binary string, opts Options) (string, error) {
 
 func zsh(bin string, opts Options) string {
 	suggest := ""
+	if opts.PtyProxyEnabled {
+		suggest = kittyPanelPOSIX()
+	}
 	if opts.SuggestEnabled {
-		suggest = zshSuggest(opts)
+		suggest += zshSuggest(opts)
 	}
 	attach := opts.AttachBin
 	if attach == "" {
@@ -215,7 +218,9 @@ remnix-search() {
     zle redisplay
   fi
   zle -I
-  if ! __remnix_overlay search-interactive "$LBUFFER"; then
+  if (( ${+functions[__remnix_kitty_panel]} )) && __remnix_kitty_panel search --interactive --kitty-panel --query "$LBUFFER" --cwd "$PWD"; then
+    :
+  elif ! __remnix_overlay search-interactive "$LBUFFER"; then
     __remnix_widget_run search --interactive --query "$LBUFFER" --cwd "$PWD" || {
       __remnix_suggest_suppress=0
       return
@@ -475,11 +480,12 @@ else
 fi
 `, strings.Join(quoted, " "))
 	if opts.SuggestMenu {
+		out += zshSuggestMenu(opts)
 		if opts.PtyProxyEnabled {
+			if !opts.SuggestCompletions {
+				out += zshSuggestCompletions(false)
+			}
 			out += zshOverlayMenu()
-			out += zshSuggestCompletions(false)
-		} else {
-			out += zshSuggestMenu(opts)
 		}
 	}
 	return out
@@ -922,6 +928,11 @@ __remnix_suggest_no_completer() {
 	out += `
 remnix-suggest-complete() {
   emulate -L zsh
+  # A live pty-proxy session draws Ctrl+Space itself. Tab stays the normal completer.
+  if [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; then
+    zle expand-or-complete
+    return
+  fi
   if (( __remnix_suggest_idx > 0 )); then
     remnix-suggest-next
     return
@@ -1266,8 +1277,43 @@ __remnix_suggest_rebuild() {
   __remnix_suggest_apply
 }
 
+__remnix_suggest_ghost_only() {
+  emulate -L zsh
+  (( __remnix_suggest_suppress )) && return
+  if [[ -z $BUFFER ]]; then
+    unset POSTDISPLAY
+    __remnix_suggest_last=""
+    __remnix_suggest_highlight
+    return
+  fi
+  if [[ ${__remnix_suggest_last} == "$BUFFER" ]]; then
+    __remnix_suggest_highlight
+    return
+  fi
+  __remnix_suggest_last="$BUFFER"
+  local s=""
+  if __remnix_rpc suggest "$BUFFER" "$PWD"; then
+    s="$REPLY"
+  else
+    s="$("$__remnix_bin" suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
+  fi
+  if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
+    POSTDISPLAY="${s#"$BUFFER"}"
+  else
+    unset POSTDISPLAY
+  fi
+  __remnix_suggest_highlight
+}
+
 __remnix_suggest_update() {
   emulate -L zsh
+  # Nested PTY proxy keeps ghost text only. Kitty (no session) paints the dropdown.
+  if [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; then
+    __remnix_suggest_idx=0
+    __remnix_suggest_items=()
+    __remnix_suggest_ghost_only
+    return
+  fi
   (( __remnix_suggest_suppress )) && return
   [[ -n ${__remnix_in_comp:-} ]] && return
   [[ $WIDGET == __remnix_comp_list ]] && return
@@ -1402,6 +1448,35 @@ func menuColor(v, fallback string) string {
 	return v
 }
 
+// kittyPanelPOSIX launches the height-limited TUI in a Kitty overlay window
+// and leaves the selection in REPLY. It fails closed so the caller can use
+// the fullscreen widget when the listen socket is missing.
+func kittyPanelPOSIX() string {
+	return `
+__remnix_kitty_panel() {
+  [[ ${REMNIX_PTY_PROXY_MODE:-} == kitty ]] || return 1
+  [[ -n ${KITTY_LISTEN_ON:-} && -n ${KITTY_WINDOW_ID:-} ]] || return 1
+  local result code
+  result=$(mktemp "${TMPDIR:-/tmp}/remnix-kitty.XXXXXX") || return 1
+  code=$(kitty @ --to "$KITTY_LISTEN_ON" launch --type=overlay --wait-for-child-to-exit --allow-remote-control --cwd="$PWD" \
+    --env "REMNIX_KITTY_PARENT=${KITTY_WINDOW_ID}" \
+    --env "KITTY_LISTEN_ON=${KITTY_LISTEN_ON}" \
+    "$__remnix_bin" "$@" --result-file "$result" --kitty-parent "$KITTY_WINDOW_ID") || code=1
+  code=${code//$'\n'/}
+  if [[ "$code" != 0 ]]; then
+    rm -f "$result"
+    return 1
+  fi
+  REPLY=""
+  if [[ -f $result ]]; then
+    IFS= read -r REPLY <"$result" || REPLY=""
+  fi
+  rm -f "$result"
+  return 0
+}
+`
+}
+
 func zshQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -1452,6 +1527,35 @@ remnix-suggest-menu() {
     again=0
     items=()
     started=0
+    if [[ ${REMNIX_PTY_PROXY_MODE:-} == kitty ]]; then
+      local -a descrs
+      local -i i
+      tmp=""
+      if (( ${+functions[__remnix_suggest_completions]} )); then
+        __remnix_suggest_completions
+        __remnix_comp_applied_lines "$BUFFER"
+        items=("${__remnix_comp_lines[@]}")
+      fi
+      if (( ${+functions[__remnix_suggest_no_completer]} )) && __remnix_suggest_no_completer; then
+        items=()
+        __remnix_comp_lines=()
+        __remnix_comp_line_descrs=()
+      fi
+      descrs=("${__remnix_comp_line_descrs[@]}")
+      tmp="${TMPDIR:-/tmp}/remnix-suggest-$$-$RANDOM"
+      : >"$tmp" 2>/dev/null || tmp=""
+      if [[ -n $tmp ]]; then
+        for (( i=1; i<=$#items; i++ )); do
+          print -r -- "${items[i]}"$'\t'"${descrs[i]:-}"
+        done >"$tmp"
+        if ! __remnix_kitty_panel suggest --interactive --kitty-panel --prefix "$BUFFER" --cwd "$PWD" --items-file "$tmp"; then
+          __remnix_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" --items-file "$tmp" || { rm -f "$tmp"; break; }
+        fi
+        rm -f "$tmp"
+      elif ! __remnix_kitty_panel suggest --interactive --kitty-panel --prefix "$BUFFER" --cwd "$PWD"; then
+        __remnix_widget_run suggest --interactive --prefix "$BUFFER" --cwd "$PWD" || break
+      fi
+    else
     if __remnix_overlay_complete_begin "$BUFFER"; then
       started=1
     fi
@@ -1501,6 +1605,7 @@ remnix-suggest-menu() {
         }
         rm -f "$tmp"
       fi
+    fi
     fi
     selected="$REPLY"
     if [[ "$selected" == __remnix_continue__:* ]]; then

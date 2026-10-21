@@ -735,6 +735,9 @@ try_start_daemon :: proc(remnix: cstring) -> bool {
 		return false
 	}
 	if pid == 0 {
+		// Leave Kitty's foreground group. A daemon that stays in it makes
+		// Kitty treat remnix as the window's foreground process.
+		_ = posix.setsid()
 		devnull := posix.open("/dev/null", {.RDWR})
 		if devnull >= 0 {
 			posix.dup2(devnull, 0)
