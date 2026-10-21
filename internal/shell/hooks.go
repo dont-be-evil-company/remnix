@@ -1406,16 +1406,23 @@ remnix-suggest-prev() {
 
 remnix-suggest-dismiss() {
   emulate -L zsh
-  if (( ${#__remnix_suggest_items} == 0 )) && [[ -z ${__remnix_suggest_suffix:-} ]]; then
-    return
+  if (( ${#__remnix_suggest_items} > 0 )) || [[ -n ${__remnix_suggest_suffix:-} ]]; then
+    if [[ -n ${__remnix_suggest_typed:-} ]]; then
+      BUFFER="$__remnix_suggest_typed"
+      CURSOR=$#BUFFER
+      __remnix_suggest_last="$BUFFER"
+    fi
+    __remnix_suggest_clear
+    zle redisplay
   fi
-  if [[ -n ${__remnix_suggest_typed:-} ]]; then
-    BUFFER="$__remnix_suggest_typed"
-    CURSOR=$#BUFFER
-    __remnix_suggest_last="$BUFFER"
+  # Escape used to be vi-cmd-mode. Keep that (or whatever the user had) so
+  # Esc then v still opens the line in $EDITOR. Kitty's disambiguated
+  # Escape (CSI 27 u) is bound to this same widget.
+  # At the prompt KEYMAP is "main" (linked to viins). After i it is "viins".
+  local prev=${__remnix_esc_prev[$KEYMAP]:-}
+  if [[ -n $prev ]]; then
+    zle "$prev"
   fi
-  __remnix_suggest_clear
-  zle redisplay
 }
 
 zle -N remnix-suggest-accept
@@ -1423,8 +1430,24 @@ zle -N remnix-suggest-next
 zle -N remnix-suggest-prev
 zle -N remnix-suggest-dismiss
 
+typeset -gA __remnix_esc_prev
 () {
-  local seq
+  local seq km now
+  # Read every map before rebinding. viins and main are the same map after
+  # bindkey -v, and the prompt reports KEYMAP=main.
+  for km in emacs viins main; do
+    if [[ -z ${__remnix_esc_prev[$km]:-} ]]; then
+      now=${${(z)$(builtin bindkey -M $km '\e')}[-1]}
+      if [[ -n $now && $now != undefined-key && $now != remnix-suggest-dismiss ]]; then
+        __remnix_esc_prev[$km]=$now
+      fi
+    fi
+  done
+  for km in emacs viins main; do
+    bindkey -M $km '\e' remnix-suggest-dismiss
+    bindkey -M $km $'\e[27u' remnix-suggest-dismiss
+    bindkey -M $km $'\e[27;1u' remnix-suggest-dismiss
+  done
   for seq in "${terminfo[kcud1]:-}" $'\e[B' $'\eOB'; do
     [[ -n $seq ]] || continue
     bindkey "$seq" remnix-suggest-next
@@ -1435,7 +1458,6 @@ zle -N remnix-suggest-dismiss
   done
   bindkey '^N' remnix-suggest-next
   bindkey '^P' remnix-suggest-prev
-  bindkey '\e' remnix-suggest-dismiss
 }
 `
 }
