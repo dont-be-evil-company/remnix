@@ -54,7 +54,6 @@ type shortWriter struct {
 	limit   int
 	fail    error
 	blocked int
-	waits   int
 }
 
 func (w *shortWriter) Write(p []byte) (int, error) {

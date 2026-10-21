@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CodeBlock from '$lib/CodeBlock.svelte';
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let { flavorId: _flavorId }: { flavorId: string } = $props();
 </script>
 

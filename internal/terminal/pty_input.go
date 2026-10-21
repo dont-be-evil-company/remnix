@@ -101,12 +101,3 @@ func (q *ptyInputQueue) stop() {
 	q.cond.Broadcast()
 	q.mu.Unlock()
 }
-
-func (q *ptyInputQueue) depth() int {
-	if q == nil {
-		return 0
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.bytes
-}

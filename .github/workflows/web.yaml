@@ -31,7 +31,9 @@ jobs:
         run: |
           set -euo pipefail
           CURRENT="${GITHUB_REF_NAME}"
-          PREV="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -vxF "${CURRENT}" | head -n1 || true)"
+          PREV="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' \
+                --sort=-v:refname | \
+                grep -vxF "${CURRENT}" | head -n1 || true)"
           echo "previous=${PREV}" >> "${GITHUB_OUTPUT}"
           echo "Current tag: ${CURRENT}"
           echo "Previous tag: ${PREV:-<none>}"
@@ -60,7 +62,6 @@ jobs:
             echo "Deploying website"
           else
             echo "deploy=false" >> "${GITHUB_OUTPUT}"
-            echo "Skipping deploy (no web/schema changes since ${{ steps.prev_tag.outputs.previous }})"
           fi
 
       - if: steps.should_deploy.outputs.deploy == 'true'
