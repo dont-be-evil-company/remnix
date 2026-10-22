@@ -56,6 +56,20 @@ func TestChildEnvDropsInheritedProxyTTY(t *testing.T) {
 	}
 }
 
+func TestChildEnvDropsKittyMode(t *testing.T) {
+	env := childEnv([]string{
+		"PATH=/bin",
+		"REMNIX_PTY_PROXY_MODE=kitty",
+		"KITTY_WINDOW_ID=1",
+	}, "/bin/zsh", "sess-inner", -1)
+	if got := envValue(env, "REMNIX_PTY_PROXY_MODE"); got != "" {
+		t.Fatalf("wrapped shell must not inherit kitty mode %q", got)
+	}
+	if envValue(env, "KITTY_WINDOW_ID") != "1" {
+		t.Fatal("unrelated kitty env must be kept")
+	}
+}
+
 func TestSessionFishTtyAndCurses(t *testing.T) {
 	fish, err := exec.LookPath("fish")
 	if err != nil {

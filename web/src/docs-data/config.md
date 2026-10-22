@@ -53,25 +53,25 @@ only on success.
 Defaults follow XDG. Override the directories with environment variables;
 filenames inside them are fixed.
 
-| Path                                            | Purpose                                                                |
-| ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `$XDG_CONFIG_HOME/remnix/config.yaml`           | Portable settings (no secrets). Default `~/.config/remnix/config.yaml` |
-| `$XDG_CONFIG_HOME/remnix/ignore-commands.txt`   | Exact commands that must not be recorded                               |
-| `$XDG_CONFIG_HOME/remnix/ignore-commands.regex` | Regex patterns for commands that must not be recorded                  |
-| `$XDG_DATA_HOME/remnix/local.yaml`              | This machine’s `device_id` and `device_name`                           |
-| `$XDG_DATA_HOME/remnix/rclone.conf`             | rclone credentials (mode 0600)                                         |
-| `$XDG_DATA_HOME/remnix/history.db`              | Local history and key metadata                                         |
+| Path                                            | Purpose                                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
+| `$XDG_CONFIG_HOME/remnix/config.yaml`           | Portable settings (no secrets). Default `~/.config/remnix/config.yaml`      |
+| `$XDG_CONFIG_HOME/remnix/ignore-commands.txt`   | Exact commands that must not be recorded                                    |
+| `$XDG_CONFIG_HOME/remnix/ignore-commands.regex` | Regex patterns for commands that must not be recorded                       |
+| `$XDG_DATA_HOME/remnix/local.yaml`              | This machine’s `device_id` and `device_name`                                |
+| `$XDG_DATA_HOME/remnix/rclone.conf`             | rclone credentials (mode 0600)                                              |
+| `$XDG_DATA_HOME/remnix/history.db`              | Local history and key metadata                                              |
 | `$XDG_DATA_HOME/remnix/suggest-cache.db`        | Persistent CLI `--help` cache for overlay suggestion names and descriptions |
-| `$XDG_DATA_HOME/remnix/daemon-status.json`      | Last daemon sync result                                                |
-| `$XDG_DATA_HOME/remnix/setup-state.json`        | Crash-safe setup marker                                                |
-| `$XDG_RUNTIME_DIR/remnix/control.sock`          | Daemon RPC (suggest, history, overlays)                                |
-| `$XDG_RUNTIME_DIR/remnix/terminal.sock`         | Daemon terminal attach socket                                          |
+| `$XDG_DATA_HOME/remnix/daemon-status.json`      | Last daemon sync result                                                     |
+| `$XDG_DATA_HOME/remnix/setup-state.json`        | Crash-safe setup marker                                                     |
+| `$XDG_RUNTIME_DIR/remnix/control.sock`          | Daemon RPC (suggest, history, overlays)                                     |
+| `$XDG_RUNTIME_DIR/remnix/terminal.sock`         | Daemon terminal attach socket                                               |
 
-| Variable             | Overrides                                                          |
-| -------------------- | ------------------------------------------------------------------ |
-| `REMNIX_CONFIG_DIR`  | Directory that holds `config.yaml` and the ignore files            |
+| Variable             | Overrides                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `REMNIX_CONFIG_DIR`  | Directory that holds `config.yaml` and the ignore files                                |
 | `REMNIX_DATA_DIR`    | Directory that holds `local.yaml`, `rclone.conf`, `history.db`, and `suggest-cache.db` |
-| `REMNIX_RUNTIME_DIR` | Directory that holds the control and terminal sockets              |
+| `REMNIX_RUNTIME_DIR` | Directory that holds the control and terminal sockets                                  |
 
 A leftover `rclone.conf` under the config directory is moved into the data
 directory on startup. Do not copy `local.yaml` to another machine; that
@@ -186,12 +186,12 @@ Ghost text still previews the best history match. History is not listed in
 the dropdown; completions sit under the typed row. Capture stops at 512
 matches so a huge path completion cannot freeze the prompt.
 
-| Shell | Ghost text        | Ctrl+R | Suggest overlay (Ctrl+Space)                                    |
-| ----- | ----------------- | ------ | --------------------------------------------------------------- |
+| Shell | Ghost text        | Ctrl+R | Suggest overlay (Ctrl+Space)                                                                       |
+| ----- | ----------------- | ------ | -------------------------------------------------------------------------------------------------- |
 | zsh   | `POSTDISPLAY`     | yes    | compsys overlay when `pty_proxy` is on; else `POSTDISPLAY` menu. No completer uses parsed `--help` |
-| bash  | ble.sh, if loaded | yes    | `--help` then history overlay when `suggest.menu` is on                 |
-| fish  | not supported     | yes    | `complete -C` overlay when `suggest.menu` is on; no completer uses parsed `--help` |
-| nu    | not supported     | yes    | `--ide-complete` overlay when `suggest.menu` is on; empty results use parsed `--help` |
+| bash  | ble.sh, if loaded | yes    | `--help` then history overlay when `suggest.menu` is on                                            |
+| fish  | not supported     | yes    | `complete -C` overlay when `suggest.menu` is on; no completer uses parsed `--help`                 |
+| nu    | not supported     | yes    | `--ide-complete` overlay when `suggest.menu` is on; empty results use parsed `--help`              |
 
 When a CLI has no dedicated completer, overlay **names** (subcommands and flags)
 and descriptions come from parsed `--help` via `suggest-cache.db`. A new session
@@ -226,18 +226,18 @@ palettes are on [themes](/themes).
 
 ### `ui.colors`
 
-| Key        | Default   | Use                      |
-| ---------- | --------- | ------------------------ |
-| `accent`   | `#F5C2E7` | Highlights               |
-| `title`    | `#CBA6F7` | Titles                   |
-| `muted`    | `#585B70` | Secondary text           |
-| `rule`     | `#313244` | Rules / borders          |
-| `select`   | `#313244` | Selected row background  |
-| `badge`    | `#89B4FA` | Badges                   |
-| `duration` | `#A6E3A1` | Durations                |
-| `failed`   | `#F38BA8` | Failed commands          |
-| `time`     | `#7F849C` | Timestamps               |
-| `text`     | `#CDD6F4` | Body text                |
+| Key        | Default   | Use                     |
+| ---------- | --------- | ----------------------- |
+| `accent`   | `#F5C2E7` | Highlights              |
+| `title`    | `#CBA6F7` | Titles                  |
+| `muted`    | `#585B70` | Secondary text          |
+| `rule`     | `#313244` | Rules / borders         |
+| `select`   | `#313244` | Selected row background |
+| `badge`    | `#89B4FA` | Badges                  |
+| `duration` | `#A6E3A1` | Durations               |
+| `failed`   | `#F38BA8` | Failed commands         |
+| `time`     | `#7F849C` | Timestamps              |
+| `text`     | `#CDD6F4` | Body text               |
 
 ### `ui.colors.syntax`
 

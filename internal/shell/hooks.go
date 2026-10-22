@@ -281,8 +281,12 @@ typeset -gA __remnix_suggest_fallback
 typeset -g __remnix_suggest_last=""
 typeset -gi __remnix_suggest_suppress=0
 typeset -gi __remnix_suggest_clearing=0
-# zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes
+# zsh 5.9 ignores "faint"; 238 is a muted gray that actually recedes.
+# Neovim's libvterm paints CSI 38 (fg=238 and #rrggbb) as teal. fg=8 is CSI 90.
 typeset -g __remnix_suggest_hl=fg=238
+if [[ -n ${NVIM:-}${VIM:-} ]]; then
+  __remnix_suggest_hl=fg=8
+fi
 zle_highlight=(${zle_highlight:#suffix:*})
 zle_highlight+=(suffix:${__remnix_suggest_hl})
 
@@ -928,8 +932,10 @@ __remnix_suggest_no_completer() {
 	out += `
 remnix-suggest-complete() {
   emulate -L zsh
-  # A live pty-proxy session draws Ctrl+Space itself. Tab stays the normal completer.
-  if [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; then
+  # A live pty-proxy session, and Neovim/Vim terminals, draw no POSTDISPLAY
+  # menu. Tab stays the normal completer. libvterm turns the menu's truecolor
+  # border into a teal box and Right cannot accept it.
+  if [[ -n ${NVIM:-}${VIM:-} ]] || { [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; }; then
     zle expand-or-complete
     return
   fi
@@ -1279,9 +1285,14 @@ __remnix_suggest_rebuild() {
 
 __remnix_suggest_ghost_only() {
   emulate -L zsh
+  # Drop menu geometry first so a stale inner width cannot paint the box.
+  __remnix_suggest_idx=0
+  __remnix_suggest_items=()
+  __remnix_suggest_inner=0
+  __remnix_suggest_view=0
   (( __remnix_suggest_suppress )) && return
   if [[ -z $BUFFER ]]; then
-    unset POSTDISPLAY
+    unset POSTDISPLAY __remnix_suggest_suffix __remnix_suggest_ghost
     __remnix_suggest_last=""
     __remnix_suggest_highlight
     return
@@ -1298,19 +1309,22 @@ __remnix_suggest_ghost_only() {
     s="$("$__remnix_bin" suggest --prefix "$BUFFER" --cwd "$PWD" 2>/dev/null)" || s=""
   fi
   if [[ -n $s && $s == "$BUFFER"* && $s != "$BUFFER" ]]; then
-    POSTDISPLAY="${s#"$BUFFER"}"
+    __remnix_suggest_ghost="$s"
+    __remnix_suggest_suffix="${s#"$BUFFER"}"
+    POSTDISPLAY="${__remnix_suggest_suffix}"
   else
     unset POSTDISPLAY
+    __remnix_suggest_suffix=""
+    __remnix_suggest_ghost=""
   fi
   __remnix_suggest_highlight
 }
 
 __remnix_suggest_update() {
   emulate -L zsh
-  # Nested PTY proxy keeps ghost text only. Kitty (no session) paints the dropdown.
-  if [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; then
-    __remnix_suggest_idx=0
-    __remnix_suggest_items=()
+  # Nested PTY and editor terminals keep a single-line ghost. A direct Kitty
+  # window (no session, no NVIM) paints the dropdown.
+  if [[ -n ${NVIM:-}${VIM:-} ]] || { [[ -n ${REMNIX_SESSION_ID:-} ]] && __remnix_proxy_tty_here; }; then
     __remnix_suggest_ghost_only
     return
   fi
@@ -1354,12 +1368,18 @@ __remnix_suggest_commit_selection() {
 remnix-suggest-accept() {
   emulate -L zsh
   local fb="${__remnix_suggest_fallback[$KEYS]:-forward-char}"
-  if [[ -n ${__remnix_suggest_suffix:-} ]]; then
+  local suf="${__remnix_suggest_suffix:-}"
+  # Ghost-only used to leave the text in POSTDISPLAY alone. A multiline
+  # POSTDISPLAY is the menu box; never paste that into the buffer.
+  if [[ -z $suf && -n ${POSTDISPLAY:-} && ${POSTDISPLAY} != *$'\n'* ]]; then
+    suf="$POSTDISPLAY"
+  fi
+  if [[ -n $suf ]]; then
     if [[ $fb == forward-char && $CURSOR -ne $#BUFFER ]]; then
       zle "$fb"
       return
     fi
-    BUFFER="$BUFFER$__remnix_suggest_suffix"
+    BUFFER="$BUFFER$suf"
     unset POSTDISPLAY __remnix_suggest_suffix
     __remnix_suggest_items=()
     CURSOR=$#BUFFER

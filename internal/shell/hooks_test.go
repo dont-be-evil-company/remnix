@@ -578,6 +578,18 @@ func TestZshOverlayMenuWhenProxy(t *testing.T) {
 	if !strings.Contains(over, "__remnix_suggest_ghost_only") || !strings.Contains(over, "REMNIX_SESSION_ID") {
 		t.Fatal("a live pty-proxy session must keep ghost text and skip the dropdown")
 	}
+	if !strings.Contains(over, `__remnix_suggest_suffix="${s#"$BUFFER"}"`) {
+		t.Fatal("ghost-only must record the suffix so Right can accept it")
+	}
+	if !strings.Contains(over, `${NVIM:-}${VIM:-}`) {
+		t.Fatal("neovim and vim terminals must stay on ghost text")
+	}
+	if !strings.Contains(over, "fg=8") || !strings.Contains(over, "fg=238") {
+		t.Fatal("neovim ghost text must use ANSI bright black; kitty keeps fg=238")
+	}
+	if !strings.Contains(over, `${POSTDISPLAY} != *$'\n'*`) {
+		t.Fatal("accept must merge a single-line POSTDISPLAY and not the menu box")
+	}
 	if !strings.Contains(over, "__remnix_kitty_panel") || !strings.Contains(over, "--kitty-panel") {
 		t.Fatal("proxy-on Ctrl+R and Ctrl+Space must open the Kitty overlay panel")
 	}

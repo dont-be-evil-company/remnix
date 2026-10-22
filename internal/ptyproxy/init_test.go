@@ -27,6 +27,9 @@ func TestPreambleExecAndGuards(t *testing.T) {
 			t.Fatalf("zsh preamble missing %q\n%s", want, zsh)
 		}
 	}
+	if !strings.Contains(zsh, "Already attached") {
+		t.Fatal("already-active proxy shell must drop inherited kitty mode")
+	}
 	fish := Preamble("/opt/remnix", "fish")
 	for _, want := range []string{
 		"exec '/opt/remnix-attach' --shell (status fish-path) --remnix '/opt/remnix' </dev/tty; or true",
@@ -45,6 +48,9 @@ func TestPreambleExecAndGuards(t *testing.T) {
 			t.Fatalf("fish preamble missing %q\n%s", want, fish)
 		}
 	}
+	if !strings.Contains(fish, "Already attached") {
+		t.Fatal("already-active fish proxy shell must drop inherited kitty mode")
+	}
 	if strings.Contains(fish, "test -t 0") {
 		t.Fatal("fish preamble must not require a TTY stdin; `| source` makes stdin a pipe")
 	}
@@ -61,6 +67,9 @@ func TestPreambleExecAndGuards(t *testing.T) {
 		if !strings.Contains(nu, want) {
 			t.Fatalf("nu preamble missing %q\n%s", want, nu)
 		}
+	}
+	if !strings.Contains(nu, "Already attached") {
+		t.Fatal("already-active nu proxy shell must drop inherited kitty mode")
 	}
 	if strings.Contains(nu, "is-terminal") {
 		t.Fatal("nu preamble must not require is-terminal; config.nu load makes it false")

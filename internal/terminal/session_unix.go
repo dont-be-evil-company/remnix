@@ -446,7 +446,8 @@ func childEnv(env []string, shellPath, sessionID string, controlFD int) []string
 			strings.HasPrefix(e, ptyproxy.EnvActive+"=") ||
 			strings.HasPrefix(e, EnvActive+"=") ||
 			strings.HasPrefix(e, ptyproxy.EnvTmux+"=") ||
-			strings.HasPrefix(e, ptyproxy.EnvTTY+"=") {
+			strings.HasPrefix(e, ptyproxy.EnvTTY+"=") ||
+			strings.HasPrefix(e, "REMNIX_PTY_PROXY_MODE=") {
 			continue
 		}
 		filtered = append(filtered, e)

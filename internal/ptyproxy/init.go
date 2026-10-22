@@ -91,8 +91,13 @@ func posixPreamble(bin, attach string) string {
       exec ` + qb + ` pty-proxy || true
     fi
     fi
-  elif [[ -n "$_remnix_pty_tty" ]]; then
-    export REMNIX_PTY_PROXY_TTY="$_remnix_pty_tty"
+  else
+    # Already attached. A Kitty mode inherited from the outer window would
+    # send Ctrl+Space to a Kitty overlay on nvim's window.
+    unset REMNIX_PTY_PROXY_MODE
+    if [[ -n "$_remnix_pty_tty" ]]; then
+      export REMNIX_PTY_PROXY_TTY="$_remnix_pty_tty"
+    fi
   fi
   unset _remnix_need_wrap _remnix_pty_tmux_current _remnix_pty_tmux_previous _remnix_pty_tty _remnix_pty_tty_previous _remnix_pty_zsh
 fi
@@ -148,8 +153,12 @@ func fishPreamble(bin, attach string) string {
     end
     exec ` + qb + ` pty-proxy --shell (status fish-path) </dev/tty; or true
     end
-  else if test -n "$_remnix_pty_tty"
-    set -gx REMNIX_PTY_PROXY_TTY "$_remnix_pty_tty"
+  else
+    # Already attached. Drop a Kitty mode inherited from the outer window.
+    set -e REMNIX_PTY_PROXY_MODE
+    if test -n "$_remnix_pty_tty"
+      set -gx REMNIX_PTY_PROXY_TTY "$_remnix_pty_tty"
+    end
   end
 end
 `
@@ -181,8 +190,12 @@ func nuPreamble(bin, attach string) string {
     }
     try { exec ` + qb + ` pty-proxy --shell $nu.current-exe } catch { }
     }
-  } else if $tty_current != "" {
-    $env.REMNIX_PTY_PROXY_TTY = $tty_current
+  } else {
+    # Already attached. Drop a Kitty mode inherited from the outer window.
+    hide-env -i REMNIX_PTY_PROXY_MODE
+    if $tty_current != "" {
+      $env.REMNIX_PTY_PROXY_TTY = $tty_current
+    }
   }
 }
 `
